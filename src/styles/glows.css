@@ -1,0 +1,19 @@
+.glow-pink {
+  box-shadow: 0 0 10px 2px #ec4899;
+}
+
+.glow-blue {
+  box-shadow: 0 0 10px 2px #3b82f6;
+}
+
+.glow-yellow {
+  box-shadow: 0 0 10px 2px #facc15;
+}
+
+.glow-green {
+  box-shadow: 0 0 10px 2px #22c55e;
+}
+
+.glow-purple {
+  box-shadow: 0 0 10px 2px #a855f7;
+}
