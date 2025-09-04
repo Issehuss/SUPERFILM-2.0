@@ -1,7 +1,7 @@
 
-function Home() {
-    return <h2>Welcome to SuperFilm 🎬</h2>;
+  
+  export default function HomePage() {
+    return <div>Welcome to Superfilm!</div>;
   }
   
-  export default Home;
   

@@ -14,7 +14,8 @@
 }
 
 .App-header {
-  background-color: #282c34;
+  /* ⬇️ Make the hero container transparent so no boxed rectangle shows */
+  background-color: transparent; /* was #282c34 */
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -29,26 +30,41 @@
 }
 
 @keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
 }
 
+.perspective { perspective: 1000px; }
+.transform-style { transform-style: preserve-3d; }
+.backface-hidden { backface-visibility: hidden; }
 
-.perspective {
-  perspective: 1000px;
+/* ---------- Site background + edge color (used by the hero fade) ---------- */
+
+:root{
+  /* Set this to the EXACT color your layout resolves to at the far left/right. */
+  --site-bg-edge: #0b0b0f; /* tweak if your edge is slightly different */
 }
 
-.transform-style {
-  transform-style: preserve-3d;
+/* Subtle ambient background so hero edges blend seamlessly */
+html, body, #root {
+  min-height: 100%;
+  /* Fallback solid color first */
+  background-color: var(--site-bg-edge);
+  /* Ambient lifts (very gentle) on top of the base */
+  background:
+    radial-gradient(1200px 600px at 50% 0%, rgba(255,255,255,0.03), transparent 65%),
+    radial-gradient(900px 400px at 0% 50%, rgba(255,255,255,0.02), transparent 60%),
+    radial-gradient(900px 400px at 100% 50%, rgba(255,255,255,0.02), transparent 60%),
+    var(--site-bg-edge);
+  color-scheme: dark;
 }
 
-.backface-hidden {
-  backface-visibility: hidden;
+/* Optional utility if you ever need a matching fade elsewhere */
+.hero-edge-fade-mask {
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, black 12%, black 88%, transparent 100%);
+          mask-image: linear-gradient(to right, transparent 0%, black 12%, black 88%, transparent 100%);
 }
+<<<<<<< HEAD
 
 .swiper {
   overflow: visible !important;
@@ -72,3 +88,5 @@
   overflow: visible !important;
 }
 
+=======
+>>>>>>> 678cfbc (WIP:saving my local edits)

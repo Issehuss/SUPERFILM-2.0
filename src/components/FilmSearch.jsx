@@ -20,9 +20,14 @@ const FilmSearch = ({ onSelect }) => {
     }
   };
 
+  const handleFilmSelect = (film) => {
+    onSelect(film);
+    setQuery('');
+    setResults([]); // ✅ Clear search results on select
+  };
+
   return (
     <div className="bg-gray-900 p-4 rounded-md text-white">
-      {/* 🔍 Expandable Search Input */}
       <div className="relative flex items-center focus-within:outline-none focus-within:ring-0">
         <input
           type="text"
@@ -38,33 +43,29 @@ const FilmSearch = ({ onSelect }) => {
         </span>
       </div>
 
-      {/* 🎞️ Search Results Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 mt-6">
-        {results.map((film) => (
-          <div
-            key={film.id}
-            className="cursor-pointer hover:bg-gray-800 p-2 rounded"
-            onClick={() => {
-              onSelect(film);
-              setQuery('');
-              setResults([]);
-            }}
-          >
-            <img
-              src={
-                film.poster_path
-                  ? `${TMDB_IMAGE_BASE}${film.poster_path}`
-                  : 'https://via.placeholder.com/185x278?text=No+Image'
-              }
-              alt={film.title}
-              className="w-full h-[278px] object-cover rounded"
-            />
-            <p className="mt-2 text-sm text-center truncate">{film.title}</p>
-          </div>
-        ))}
-      </div>
+      {results.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 mt-6">
+          {results.map((film) => (
+            <div
+              key={film.id}
+              className="cursor-pointer hover:bg-gray-800 p-2 rounded"
+              onClick={() => handleFilmSelect(film)}
+            >
+              <img
+                src={
+                  film.poster_path
+                    ? `${TMDB_IMAGE_BASE}${film.poster_path}`
+                    : 'https://via.placeholder.com/185x278?text=No+Image'
+                }
+                alt={film.title}
+                className="w-full h-[278px] object-cover rounded"
+              />
+              <p className="mt-2 text-sm text-center truncate">{film.title}</p>
+            </div>
+          ))}
+        </div>
+      )}
 
-      {/* 🔧 Global CSS fix for Safari & iOS native styles */}
       <style jsx global>{`
         input {
           -webkit-appearance: none;
@@ -83,9 +84,3 @@ const FilmSearch = ({ onSelect }) => {
 };
 
 export default FilmSearch;
-
-
-
-
-
-

@@ -1,9 +1,18 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Check } from 'lucide-react';
+import { nominateMovie } from '../lib/nominations'; // <-- helper from step 2
+import { useUser } from '@supabase/auth-helpers-react';
 
 function MovieDetails() {
-  const { id } = useParams();
+  // If your route is /clubs/:clubId/movies/:id, both are available.
+  // If your route is /movies/:id, clubId will be undefined and we'll fallback to localStorage.
+  const params = useParams();
+  const id = params.id;
+  const clubId = params.clubId;
+
+  const user = useUser(); // used to attach created-by user id
+
   const [movie, setMovie] = useState(null);
   const [cast, setCast] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -39,7 +48,7 @@ function MovieDetails() {
         const providerData = await providerRes.json();
 
         setMovie(movieData);
-        setCast(creditsData.cast.slice(0, 5));
+        setCast((creditsData.cast || []).slice(0, 5));
         const regionData = providerData.results?.GB || providerData.results?.US || {};
         setWatchProviders(regionData.flatrate || []);
       } catch (error) {
@@ -56,7 +65,7 @@ function MovieDetails() {
   // Check if this movie is in the user's watchlist
   useEffect(() => {
     const saved = JSON.parse(localStorage.getItem('watchlist')) || [];
-    const isInWatchlist = saved.some(item => item.id === parseInt(id));
+    const isInWatchlist = saved.some(item => item.id === parseInt(id, 10));
     setWatchlisted(isInWatchlist);
   }, [id]);
 
@@ -76,6 +85,26 @@ function MovieDetails() {
     localStorage.setItem('watchlist', JSON.stringify(updated));
   };
 
+  // Nominate this film for the club's next screening (DB or local fallback)
+  async function handleNominate() {
+    if (!movie) return;
+    setConfirmed(true); // optimistic UI
+
+    const res = await nominateMovie({
+      clubId,                       // if undefined, helper saves to localStorage
+      userId: user?.id || null,     // may be null if not signed in
+      movie: { id: movie.id, title: movie.title, poster_path: movie.poster_path }
+    });
+
+    if (!res.ok) {
+      console.error('[Nominate] error:', res.error);
+      alert('Could not nominate this film. Please try again.');
+      setConfirmed(false);
+    } else if (res.fallback) {
+      console.log('Nomination saved locally (no club/auth).');
+    }
+  }
+
   if (loading) return <p className="text-center text-zinc-400">Loading movie details...</p>;
   if (!movie) return <p className="text-center text-zinc-400">Movie not found.</p>;
 
@@ -85,7 +114,7 @@ function MovieDetails() {
         <img
           src={`https://image.tmdb.org/t/p/w500${movie.poster_path}`}
           alt={movie.title}
-          className="w-full md:w-64 rounded-lg shadow-lg"
+          className="w-full md:w-64 rounded-2xl shadow-lg"
         />
 
         <div>
@@ -94,11 +123,15 @@ function MovieDetails() {
           <p className="text-zinc-200 mb-6">{movie.overview}</p>
           <p className="text-sm text-zinc-400">Runtime: {movie.runtime} minutes</p>
           <p className="text-sm text-zinc-400 mt-2">Rating: {movie.vote_average}/10</p>
+
+          {/* Cast (simple text list kept) */}
           <div className="mt-6">
             <h3 className="text-xl font-semibold text-yellow-400 mb-2">Cast</h3>
             <ul className="list-disc list-inside text-zinc-300">
               {cast.map((actor) => (
-                <li key={actor.cast_id}>{actor.name} as {actor.character}</li>
+                <li key={actor.cast_id || actor.credit_id || actor.id}>
+                  {actor.name} {actor.character ? <>as {actor.character}</> : null}
+                </li>
               ))}
             </ul>
           </div>
@@ -107,12 +140,14 @@ function MovieDetails() {
 
       {/* Yellow Action Cards */}
       <div className="mt-16 grid grid-cols-1 sm:grid-cols-3 gap-8 w-full">
-        {/* Next Screening */}
+        {/* Next Screening (Nominate) */}
         <div className="bg-yellow-400 text-black px-10 py-20 rounded-2xl shadow-lg text-center min-h-[400px] flex flex-col items-center transform transition-transform duration-300 hover:scale-105">
           <h3 className="text-3xl font-bold mb-6">Next Screening?</h3>
-          <p className="text-lg leading-relaxed max-w-xs mb-6">Would you like to make this your film club's next event?</p>
+          <p className="text-lg leading-relaxed max-w-xs mb-6">
+            Would you like to nominate this film for your club&apos;s next event?
+          </p>
           <button
-            onClick={() => setConfirmed(!confirmed)}
+            onClick={handleNominate}
             className={`transition-all duration-300 flex items-center justify-center ${
               confirmed ? 'w-12 h-12 rounded-full bg-black' : 'px-6 py-2 rounded-full bg-black'
             }`}
@@ -123,6 +158,11 @@ function MovieDetails() {
               <span className="text-yellow-400 font-semibold">Yes</span>
             )}
           </button>
+          {confirmed && (
+            <p className="mt-3 text-xs text-black/80">
+              Nominated! It will appear on your club page under Nominations.
+            </p>
+          )}
         </div>
 
         {/* Where to Watch */}
@@ -148,7 +188,7 @@ function MovieDetails() {
             </div>
           )}
           <button
-            onClick={() => window.open(`https://www.google.com/search?q=${movie.title} showtimes near me`, '_blank')}
+            onClick={() => setShowingInfo(true) || window.open(`https://www.google.com/search?q=${movie.title} showtimes near me`, '_blank')}
             className={`transition-all duration-300 flex items-center justify-center ${
               showingInfo ? 'w-12 h-12 rounded-full bg-black' : 'px-6 py-2 rounded-full bg-black'
             }`}
@@ -184,5 +224,6 @@ function MovieDetails() {
 }
 
 export default MovieDetails;
+
 
 

@@ -1,3 +1,4 @@
+// AvatarCropper.jsx (updated and working version)
 import React, { useState, useCallback } from 'react';
 import Cropper from 'react-easy-crop';
 import getCroppedImg from '../utils/cropImage';
@@ -6,11 +7,20 @@ import Slider from '@mui/material/Slider';
 const AvatarCropper = ({ imageSrc, onCancel, onCropComplete }) => {
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
 
-  const handleCropComplete = useCallback(async (_, croppedAreaPixels) => {
-    const croppedImage = await getCroppedImg(imageSrc, croppedAreaPixels);
-    onCropComplete(croppedImage);
-  }, [imageSrc, onCropComplete]);
+  const onCropAreaComplete = useCallback((_, croppedPixels) => {
+    setCroppedAreaPixels(croppedPixels);
+  }, []);
+
+  const handleCropAndSave = async () => {
+    try {
+      const croppedImage = await getCroppedImg(imageSrc, croppedAreaPixels);
+      onCropComplete(croppedImage);
+    } catch (e) {
+      console.error('Cropping failed:', e);
+    }
+  };
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-80 z-50 flex items-center justify-center">
@@ -20,12 +30,12 @@ const AvatarCropper = ({ imageSrc, onCancel, onCropComplete }) => {
             image={imageSrc}
             crop={crop}
             zoom={zoom}
-            aspect={1}
+            aspect={1} // square crop for avatar
             cropShape="round"
             showGrid={false}
             onCropChange={setCrop}
             onZoomChange={setZoom}
-            onCropComplete={handleCropComplete}
+            onCropComplete={onCropAreaComplete}
           />
         </div>
 
@@ -37,9 +47,7 @@ const AvatarCropper = ({ imageSrc, onCancel, onCropComplete }) => {
             max={3}
             step={0.1}
             onChange={(e, z) => setZoom(z)}
-            sx={{
-              color: '#facc15', // Tailwind yellow-400
-            }}
+            sx={{ color: '#facc15' }}
           />
         </div>
 
@@ -51,7 +59,7 @@ const AvatarCropper = ({ imageSrc, onCancel, onCropComplete }) => {
             Cancel
           </button>
           <button
-            onClick={() => handleCropComplete()}
+            onClick={handleCropAndSave}
             className="px-4 py-2 bg-yellow-400 text-black font-semibold rounded hover:bg-yellow-300"
           >
             Crop & Save

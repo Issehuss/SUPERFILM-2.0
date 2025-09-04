@@ -57,4 +57,10 @@
   .transform-style-preserve-3d {
     transform-style: preserve-3d;
   }
+
+  :root{
+    /* 👇 set this to the exact color your page has at the sides */
+    --site-bg-edge: #0a0a0a; /* replace with your real edge shade */
+  }
+  
   

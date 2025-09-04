@@ -23,3 +23,5 @@ const ClubsPage = () => {
     </div>
   );
 };
+
+export default ClubCard;
