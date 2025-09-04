@@ -14,6 +14,7 @@ import UserProfile from './pages/UserProfile';
 import CreateClubWizard from './pages/CreateClubWizard';
 import ClubEventDetails from './pages/ClubEventDetails';
 import ClubPreview from './pages/ClubPreview'; 
+import Clubs2 from './pages/Clubs2';
 
 import { UserProvider, useUser } from './context/UserContext';
 import './styles/glows.css';
@@ -67,6 +68,7 @@ function App() {
         <nav className="flex gap-12 mx-auto text-white">
           <Link className="hover:text-yellow-400 transition" to="/">Home</Link>
           <Link className="hover:text-yellow-400 transition" to="/clubs">Clubs</Link>
+           <Link className="hover:text-yellow-400 transition" to="/clubs-2">Clubs 2</Link>
           <Link className="hover:text-yellow-400 transition" to="/myclub">My Club</Link>
           <Link className="hover:text-yellow-400 transition" to="/movies">Movies</Link>
         </nav>
@@ -122,6 +124,7 @@ function App() {
           <Route path="/movies" element={<Movies searchQuery={searchQuery} />} />
           <Route path="/club/:id" element={<ClubProfile />} />
           <Route path="/club/:id/members" element={<MembersPage />} />
+          <Route path="/clubs-2" element={<Clubs2 />} />
           <Route path="/profile" element={<UserProfile />} />
           <Route path="/movie/:id" element={<MovieDetails />} />
           <Route path="/search" element={<SearchResults />} />
