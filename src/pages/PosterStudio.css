@@ -1,0 +1,64 @@
+/* src/pages/PosterStudio.css */
+
+.poster-studio {
+  /* Fill below your app header (≈88px high). Adjust if needed. */
+  height: calc(100vh - 88px);
+  display: flex;
+  flex-direction: column;
+  background: #0b0c0f;
+  color: #fff;
+}
+
+/* top bar */
+.studio-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid #2a2b31;
+  background: #0b0c0f;
+}
+.studio-topbar .brand {
+  font-weight: 700;
+  color: #e5e7eb;
+}
+.top-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.top-actions .divider {
+  width: 1px; height: 22px; background: #2f3038; margin: 0 4px;
+}
+.top-actions button {
+  background: #111215;
+  color: #e5e5e5;
+  border: 1px solid #3f3f46;
+  border-radius: 10px;
+  padding: 6px 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.top-actions button:hover { border-color: #555660; }
+.top-actions button:disabled { opacity: .4; cursor: default; }
+.top-actions .primary {
+  background: rgb(241 183 7);
+  color: #111;
+  border-color: rgb(241 183 7);
+}
+
+/* editor area */
+.studio-container {
+  flex: 1;
+  min-height: 0; /* let Polotno fill the remaining space */
+}
+
+/* Optional: make Polotno’s side panel a bit sleeker */
+.polotno-side-panel {
+  border-right: 1px solid #2a2b31;
+}
+
+/* Optional: darker canvas bg */
+.polotno-stage-container {
+  background: #090a0e;
+}

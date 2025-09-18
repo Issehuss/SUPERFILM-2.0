@@ -2,11 +2,33 @@
 import { BrowserRouter as Router, Routes, Route, Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useState, useMemo, useEffect, Suspense, lazy } from 'react';
 import debounce from 'lodash.debounce';
+<<<<<<< HEAD
 import { Toaster } from 'react-hot-toast';
+=======
+import PosterStudio from './pages/PosterStudio';
+
+import MovieDetails from './pages/MovieDetails';
+import SearchResults from './pages/SearchResults';
+import Clubs from './pages/Clubs';
+import Movies from './pages/Movies';
+import ClubProfile from './pages/ClubProfile';
+import MembersPage from './pages/MembersPage';
+import UserProfile from './pages/UserProfile.jsx';
+import CreateClubWizard from './pages/CreateClubWizard';
+import ClubEventDetails from './pages/ClubEventDetails';
+import ClubPreview from './pages/ClubPreview'; 
+import EventAttendance from './pages/EventAttendance';
+import SupabasePing from "./dev/SupabasePing";
+import AuthPage from './pages/AuthPage';
+import MyClub from './pages/MyClub';
+import LandingPage from './pages/LandingPage';
+import HomePage from './pages/Home';
+>>>>>>> 9c224e1 (Events page added)
 
 import { UserProvider, useUser } from './context/UserContext';
 import './styles/glows.css';
 
+<<<<<<< HEAD
 // ✅ membership hook for /myclub redirect
 import useMyClubs from './hooks/useMyClubs';
 
@@ -35,6 +57,12 @@ const AuthPage         = lazy(() => import('./pages/AuthPage'));
 const LandingPage      = lazy(() => import('./pages/LandingPage'));
 const HomeSignedIn     = lazy(() => import('./pages/HomeSignedIn'));
 
+=======
+// in App.jsx (or wherever your routes live)
+import Events from "./pages/Events.jsx";
+
+
+>>>>>>> 9c224e1 (Events page added)
 /* --- Redirect helpers --- */
 function ClubSingularRedirect() {
   const { id } = useParams();
@@ -197,13 +225,22 @@ function App() {
             <Route path="/clubs/:clubParam/chat" element={<ClubChat />} />
             <Route path="/club/:clubId/chat" element={<ClubChat />} />
 
+<<<<<<< HEAD
             {/* “/club/:id” legacy → redirect to /clubs/:id */}
             <Route path="/club/:id" element={<ClubSingularRedirect />} />
+=======
+          <Route path="/poster-studio" element={<PosterStudio />} />
+
+          {/* NEW: parallel “clubs/…” routes for nested pages (keep old ones too) */}
+          <Route path="/clubs/:clubParam/events/next" element={<EventAttendance />} />
+          <Route path="/clubs/:clubParam/members" element={<MembersPage />} />
+>>>>>>> 9c224e1 (Events page added)
 
             {/* Keep legacy variants for existing links */}
             <Route path="/club/:id/members" element={<MembersPage />} />
             <Route path="/club/:id/event/:eventSlug" element={<ClubEventDetails />} />
 
+<<<<<<< HEAD
             {/* Nested event/members (slug or uuid) */}
             <Route path="/clubs/:clubParam/events/next" element={<EventAttendance />} />
             <Route path="/clubs/:clubParam/members" element={<MembersPage />} />
@@ -235,6 +272,19 @@ function App() {
             <Route path="/home" element={<HomeSignedIn />} />
           </Routes>
         </Suspense>
+=======
+          <Route path="/profile" element={<UserProfile key={window.location.search} />} />
+          <Route path="/movie/:id" element={<MovieDetails />} />
+          <Route path="/search" element={<SearchResults />} />
+          <Route path="/create-club" element={<CreateClubWizard />} />
+          <Route path="/club-preview" element={<ClubPreview />} />
+          <Route path="/auth" element={<AuthPage />} />
+          <Route path="/dev/ping" element={<SupabasePing />} />
+          <Route path="/myclub" element={<MyClub />} />
+           <Route path="/events" element={<Events />} />
+           <Route path="/studio" element={<PosterStudio />} />
+        </Routes>
+>>>>>>> 9c224e1 (Events page added)
       </main>
 
       <Toaster position="top-center" />
@@ -249,6 +299,7 @@ function App() {
 
 export default AppWrapper;
 
+<<<<<<< HEAD
 
 
 
@@ -256,3 +307,5 @@ export default AppWrapper;
 
 
 
+=======
+>>>>>>> 9c224e1 (Events page added)
