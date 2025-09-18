@@ -1,171 +1,183 @@
 // src/context/UserContext.jsx
-import { createContext, useContext, useState, useEffect, useMemo } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
 import supabase from "../supabaseClient.js";
 
+/**
+ * Exposed:
+ * - user: Supabase auth user (null if signed out)
+ * - profile: row from public.profiles (banner_url, banner_gradient, favorite_films, etc.)
+ * - loading: boolean while bootstrapping / switching sessions
+ * - avatar, setAvatar: UI-level avatar (synced with profile.avatar_url)
+ * - saveProfilePatch(patch): updates public.profiles for the signed-in user and syncs context
+ * - refreshProfile(): re-fetches the profile from DB
+ */
 const UserContext = createContext(null);
+export const useUser = () => useContext(UserContext);
+
+// Only select columns we actually use in the app.
+// (Removed "roles" and "joined_clubs" which were causing 400s if absent.)
+const PROFILE_COLUMNS = [
+  "id",
+  "slug",
+  "display_name",
+  "avatar_url",
+  "banner_url",
+  "banner_gradient",
+  "favorite_films",
+  "bio",
+  "taste_cards",
+  "glow_preset",
+  "club_tag",
+].join(",");
 
 export const UserProvider = ({ children }) => {
-  // UI state
   const [loading, setLoading] = useState(true);
 
-  // Avatar (persist to localStorage as a manual override/fallback)
+  // Local avatar fallback for snappy UI
   const [avatar, setAvatar] = useState(() => {
     return localStorage.getItem("userAvatar") || "/avatars/default.jpg";
   });
 
-  // App-level user object (merged from auth + profile)
-  const [user, setUser] = useState(null); // ✅ changed from dev fallback to null
+  // Auth + Profile
+  const [user, setUser] = useState(null);      // null when signed out
+  const [profile, setProfile] = useState(null); // null until loaded
 
   useEffect(() => {
     localStorage.setItem("userAvatar", avatar);
   }, [avatar]);
 
-  // Fetch profile from DB
-  const fetchProfile = async (userId) => {
+  // ------- DB helpers -------
+  const fetchProfile = useCallback(async (userId) => {
     const { data, error } = await supabase
       .from("profiles")
-      .select("display_name, avatar_url, roles, joined_clubs")
+      .select(PROFILE_COLUMNS)
       .eq("id", userId)
       .single();
 
     if (error) {
-      console.warn("fetchProfile error:", error.message);
-      return null;
+      // Better console visibility than "[object Object]"
+      try {
+        // eslint-disable-next-line no-console
+        console.error("fetchProfile error:", error, JSON.stringify(error));
+      } catch {
+        // eslint-disable-next-line no-console
+        console.error("fetchProfile error:", error);
+      }
+      throw error;
     }
     return data;
-  };
+  }, []);
 
-  // Initial auth + profile load
+  const refreshProfile = useCallback(async () => {
+    if (!user) return null;
+    const p = await fetchProfile(user.id);
+    setProfile(p);
+    if (p?.avatar_url) setAvatar(p.avatar_url);
+    return p;
+  }, [user, fetchProfile]);
+
+  const saveProfilePatch = useCallback(async (patch) => {
+    if (!user) throw new Error("Not signed in");
+    const { data, error } = await supabase
+      .from("profiles")
+      .update(patch)
+      .eq("id", user.id)
+      .select(PROFILE_COLUMNS)
+      .single();
+
+    if (error) {
+      try {
+        // eslint-disable-next-line no-console
+        console.error("saveProfilePatch error:", error, JSON.stringify(error), "patch:", patch);
+      } catch {
+        // eslint-disable-next-line no-console
+        console.error("saveProfilePatch error:", error);
+      }
+      throw error;
+    }
+
+    // Keep context canonical with server
+    setProfile((prev) => ({ ...(prev || {}), ...data }));
+
+    // Sync UI avatar if changed
+    if (data?.avatar_url) setAvatar(data.avatar_url);
+
+    return data;
+  }, [user]);
+
+  // ------- Bootstrap on load -------
   useEffect(() => {
     let isMounted = true;
 
-    const load = async () => {
-      setLoading(true);
+    (async () => {
       try {
-        const { data: authData, error: authErr } = await supabase.auth.getUser();
-        if (authErr) throw authErr;
+        setLoading(true);
+        const { data: { session } } = await supabase.auth.getSession();
+        const authUser = session?.user || null;
 
-        const authedUser = authData?.user;
-        if (!authedUser) {
+        if (!authUser) {
           if (isMounted) {
-            setUser(null); // ✅ now truly null when no user
+            setUser(null);
+            setProfile(null);
           }
           return;
         }
 
-        // ✅ fast path: auth user baseline
-        if (isMounted) {
-          setUser({
-            id: authedUser.id,
-            email: authedUser.email,
-            name: "Current User",
-            roles: ["member"],
-            joinedClubs: [],
-          });
-        }
+        const p = await fetchProfile(authUser.id);
 
-        // background fetch and merge
-        fetchProfile(authedUser.id)
-          .then((profile) => {
-            if (!isMounted || !profile) return;
-            const dbAvatar = profile?.avatar_url;
-            if (dbAvatar && !localStorage.getItem("userAvatar")) setAvatar(dbAvatar);
-
-            setUser((prev) => ({
-              ...prev,
-              name: profile?.display_name || prev.name,
-              roles: Array.isArray(profile?.roles) ? profile.roles : profile?.roles ?? prev.roles,
-              joinedClubs: Array.isArray(profile?.joined_clubs)
-                ? profile.joined_clubs
-                : profile?.joined_clubs ?? prev.joinedClubs,
-            }));
-          })
-          .catch(() => {});
-      } catch (e) {
-        console.warn("Auth/profile load error:", e.message);
         if (isMounted) {
-          setUser(null); // ✅ again, null on error
+          setUser(authUser);
+          setProfile(p);
+          if (p?.avatar_url) setAvatar(p.avatar_url);
         }
       } finally {
         if (isMounted) setLoading(false);
       }
-    };
+    })();
 
-    load();
-
-    // Supabase auth subscription
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (!isMounted) return;
-
-      if (!session?.user) {
-        setUser(null); // ✅ signed out = null
+    // Listen for sign-in/sign-out and token refresh events
+    const { data: sub } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === "SIGNED_OUT" || !session?.user) {
+        setUser(null);
+        setProfile(null);
+        setLoading(false);
         return;
       }
 
-      setUser({
-        id: session.user.id,
-        email: session.user.email,
-        name: "Current User",
-        roles: ["member"],
-        joinedClubs: [],
-      });
-      setLoading(false);
-
-      // Background enrich
-      fetchProfile(session.user.id)
-        .then((profile) => {
-          if (!profile) return;
-          const dbAvatar = profile?.avatar_url;
-          if (dbAvatar && !localStorage.getItem("userAvatar")) setAvatar(dbAvatar);
-
-          setUser((prev) => ({
-            ...prev,
-            name: profile?.display_name || prev.name,
-            roles: Array.isArray(profile?.roles) ? profile.roles : profile?.roles ?? prev.roles,
-            joinedClubs: Array.isArray(profile?.joined_clubs)
-              ? profile.joined_clubs
-              : profile?.joined_clubs ?? prev.joinedClubs,
-          }));
-        })
-        .catch(() => {});
+      if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "USER_UPDATED") {
+        setLoading(true);
+        try {
+          const authUser = session.user;
+          const p = await fetchProfile(authUser.id);
+          setUser(authUser);
+          setProfile(p);
+          if (p?.avatar_url) setAvatar(p.avatar_url);
+        } finally {
+          setLoading(false);
+        }
+      }
     });
 
     return () => {
       isMounted = false;
       sub?.subscription?.unsubscribe?.();
     };
-  }, []);
-
-  // Optional helpers
-  const signInWithEmail = async (email, password) => {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
-    return data;
-  };
-
-  const signOut = async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) throw error;
-  };
+  }, [fetchProfile]);
 
   const value = useMemo(
     () => ({
+      user,
+      profile,
       loading,
       avatar,
       setAvatar,
-      user,
-      setUser,
-      signInWithEmail,
-      signOut,
+      saveProfilePatch,
+      refreshProfile,
     }),
-    [loading, avatar, user]
+    [user, profile, loading, avatar, saveProfilePatch, refreshProfile]
   );
 
   return <UserContext.Provider value={value}>{children}</UserContext.Provider>;
 };
 
-export const useUser = () => useContext(UserContext);
-
-
-
-
+export default UserContext;

@@ -63,4 +63,79 @@
     --site-bg-edge: #0a0a0a; /* replace with your real edge shade */
   }
   
-  
+ /* Chat teaser "F1 car around the track" effect */
+.chat-race-track {
+  position: relative;
+  border-radius: 22px;
+  isolation: isolate;
+}
+
+.chat-race-track::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 2px solid transparent;
+  background:
+    linear-gradient(90deg, transparent 40%, #fde047 50%, transparent 60%)
+    border-box;
+  -webkit-mask:
+    linear-gradient(#000 0 0) padding-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  animation: chat-car-loop 4s linear infinite;
+}
+
+@keyframes chat-car-loop {
+  0%   { background-position: 0% 0%; }
+  25%  { background-position: 100% 0%; }
+  50%  { background-position: 100% 100%; }
+  75%  { background-position: 0% 100%; }
+  100% { background-position: 0% 0%; }
+}
+
+/* Chat teaser – moving arc around the edge */
+.chat-teaser {
+  --arc-deg: 22deg;        /* size of the arc */
+  --speed: 4s;             /* lap time */
+  --start: 0deg;           /* animated by keyframes */
+  position: relative;
+}
+
+/* the arc itself */
+.chat-teaser::before {
+  content: "";
+  position: absolute;
+  inset: -1px;                    /* lets the arc sit on the edge */
+  padding: 1px;
+  border-radius: 1.5rem;          /* must match rounded-3xl */
+  background:
+    conic-gradient(from var(--start),
+      rgba(250, 204, 21, 1) 0 var(--arc-deg),      /* yellow segment */
+      transparent var(--arc-deg) 360deg);
+  /* hollow center so only the border shows */
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: chatArcSpin var(--speed) linear infinite;
+}
+
+/* soft glow following the arc */
+.chat-teaser .glow-mask {
+  border-radius: 1.5rem;
+  background:
+    conic-gradient(from var(--start),
+      rgba(250, 204, 21, .35) 0 var(--arc-deg),
+      transparent var(--arc-deg) 360deg);
+  filter: blur(10px);
+  animation: chatArcSpin var(--speed) linear infinite;
+  opacity: .75;
+}
+
+/* spins the arc around the track */
+@keyframes chatArcSpin {
+  to { --start: 360deg; }
+}

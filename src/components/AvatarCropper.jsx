@@ -1,12 +1,67 @@
-// AvatarCropper.jsx (updated and working version)
-import React, { useState, useCallback } from 'react';
-import Cropper from 'react-easy-crop';
-import getCroppedImg from '../utils/cropImage';
-import Slider from '@mui/material/Slider';
+// src/components/AvatarCropper.jsx
+import React, { useState, useCallback, useMemo } from "react";
+import Cropper from "react-easy-crop";
+import getCroppedImg from "../utils/cropImage";
+import Slider from "@mui/material/Slider";
 
-const AvatarCropper = ({ imageSrc, onCancel, onCropComplete }) => {
+/**
+ * A configurable cropper for both avatars (round, 1:1) and banners (rect, 16:9).
+ *
+ * Props:
+ *  - imageSrc: string (required)
+ *  - onCancel: () => void (required)
+ *  - onCropComplete: (dataUrl: string) => void (required)
+ *  - variant?: "avatar" | "banner"   // presets; default "avatar"
+ *  - aspect?: number                  // override aspect (e.g., 21/9)
+ *  - cropShape?: "rect" | "round"     // override crop shape
+ *  - initialZoom?: number             // default depends on variant
+ *  - minZoom?: number                 // default depends on variant
+ *  - maxZoom?: number                 // default depends on variant
+ */
+const AvatarCropper = ({
+  imageSrc,
+  onCancel,
+  onCropComplete,
+  variant = "avatar",
+  aspect,
+  cropShape,
+  initialZoom,
+  minZoom,
+  maxZoom,
+}) => {
+  // Sensible defaults by variant
+  const defaults = useMemo(() => {
+    if (variant === "banner") {
+      return {
+        aspect: 16 / 9,
+        cropShape: "rect",
+        initialZoom: 1,
+        minZoom: 1,
+        maxZoom: 4,
+        panelHeightClass: "h-[48vh]", // taller space to feel cinematic
+        title: "Crop banner",
+      };
+    }
+    // avatar
+    return {
+      aspect: 1,
+      cropShape: "round",
+      initialZoom: 1.2,
+      minZoom: 1,
+      maxZoom: 3,
+      panelHeightClass: "h-64",
+      title: "Crop profile picture",
+    };
+  }, [variant]);
+
+  const effAspect = aspect ?? defaults.aspect;
+  const effCropShape = cropShape ?? defaults.cropShape;
+  const effInitialZoom = initialZoom ?? defaults.initialZoom;
+  const effMinZoom = minZoom ?? defaults.minZoom;
+  const effMaxZoom = maxZoom ?? defaults.maxZoom;
+
   const [crop, setCrop] = useState({ x: 0, y: 0 });
-  const [zoom, setZoom] = useState(1);
+  const [zoom, setZoom] = useState(effInitialZoom);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
 
   const onCropAreaComplete = useCallback((_, croppedPixels) => {
@@ -18,52 +73,75 @@ const AvatarCropper = ({ imageSrc, onCancel, onCropComplete }) => {
       const croppedImage = await getCroppedImg(imageSrc, croppedAreaPixels);
       onCropComplete(croppedImage);
     } catch (e) {
-      console.error('Cropping failed:', e);
+      console.error("Cropping failed:", e);
     }
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-80 z-50 flex items-center justify-center">
-      <div className="bg-zinc-900 p-6 rounded-md shadow-xl text-white max-w-md w-full">
-        <div className="relative h-64 bg-black">
+    <div className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center">
+      <div className="bg-zinc-900 w-[min(92vw,720px)] rounded-2xl shadow-xl text-white">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
+          <h3 className="font-semibold text-base">{defaults.title}</h3>
+          <button
+            onClick={onCancel}
+            className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm"
+          >
+            Cancel
+          </button>
+        </div>
+
+        {/* Crop area */}
+        <div className={`relative ${defaults.panelHeightClass} bg-black`}>
           <Cropper
             image={imageSrc}
             crop={crop}
             zoom={zoom}
-            aspect={1} // square crop for avatar
-            cropShape="round"
+            aspect={effAspect}
+            cropShape={effCropShape}
             showGrid={false}
+            restrictPosition={true}
+            zoomWithScroll={true}
             onCropChange={setCrop}
             onZoomChange={setZoom}
             onCropComplete={onCropAreaComplete}
           />
         </div>
 
-        <div className="mt-4">
-          <label className="text-sm">Zoom</label>
+        {/* Controls */}
+        <div className="px-5 pb-5 pt-4">
+          <label className="text-sm block mb-2">Zoom</label>
           <Slider
             value={zoom}
-            min={1}
-            max={3}
-            step={0.1}
-            onChange={(e, z) => setZoom(z)}
-            sx={{ color: '#facc15' }}
+            min={effMinZoom}
+            max={effMaxZoom}
+            step={0.05}
+            onChange={(_, z) => setZoom(Number(z))}
+            sx={{ color: "#facc15" }}
           />
-        </div>
 
-        <div className="flex justify-between mt-6">
-          <button
-            onClick={onCancel}
-            className="px-4 py-2 bg-zinc-700 hover:bg-zinc-600 rounded"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handleCropAndSave}
-            className="px-4 py-2 bg-yellow-400 text-black font-semibold rounded hover:bg-yellow-300"
-          >
-            Crop & Save
-          </button>
+          <div className="flex justify-end gap-3 mt-4">
+            <button
+              onClick={onCancel}
+              className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleCropAndSave}
+              className="px-4 py-2 bg-yellow-400 text-black font-semibold rounded-lg hover:bg-yellow-400"
+            >
+              Crop & Save
+            </button>
+          </div>
+
+          {/* Helpful hint */}
+          {variant === "banner" && (
+            <p className="text-[11px] text-zinc-400 mt-3">
+              Tip: Use pinch/scroll to zoom and drag to frame your banner. We
+              keep a wide 16:9 aspect for a cinematic look.
+            </p>
+          )}
         </div>
       </div>
     </div>

@@ -2,16 +2,16 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Check } from 'lucide-react';
 import { nominateMovie } from '../lib/nominations'; // <-- helper from step 2
-import { useUser } from '@supabase/auth-helpers-react';
+import { useUser } from '../context/UserContext';
+import useWatchlist from "../hooks/useWatchlist";
+
 
 function MovieDetails() {
-  // If your route is /clubs/:clubId/movies/:id, both are available.
-  // If your route is /movies/:id, clubId will be undefined and we'll fallback to localStorage.
   const params = useParams();
   const id = params.id;
   const clubId = params.clubId;
 
-  const user = useUser(); // used to attach created-by user id
+  const { user } = useUser(); // same user object the hook relies on
 
   const [movie, setMovie] = useState(null);
   const [cast, setCast] = useState([]);
@@ -20,6 +20,7 @@ function MovieDetails() {
   const [watchlisted, setWatchlisted] = useState(false);
   const [showingInfo, setShowingInfo] = useState(false);
   const [watchProviders, setWatchProviders] = useState([]);
+
 
   const API_KEY = process.env.REACT_APP_TMDB_KEY;
 
@@ -32,6 +33,8 @@ function MovieDetails() {
     "Paramount Plus": "https://www.paramountplus.com",
     "Peacock": "https://www.peacocktv.com"
   };
+
+  const { items, add, remove } = useWatchlist(); // signed-in user
 
   useEffect(() => {
     const fetchMovieDetails = async () => {
@@ -62,37 +65,48 @@ function MovieDetails() {
     fetchMovieDetails();
   }, [id, API_KEY]);
 
-  // Check if this movie is in the user's watchlist
-  useEffect(() => {
-    const saved = JSON.parse(localStorage.getItem('watchlist')) || [];
-    const isInWatchlist = saved.some(item => item.id === parseInt(id, 10));
-    setWatchlisted(isInWatchlist);
-  }, [id]);
+  // Keep watchlist state in sync with DB
 
-  const toggleWatchlist = () => {
-    const saved = JSON.parse(localStorage.getItem('watchlist')) || [];
-    const isInWatchlist = saved.some(item => item.id === movie.id);
-    let updated;
 
-    if (isInWatchlist) {
-      updated = saved.filter(item => item.id !== movie.id);
-      setWatchlisted(false);
-    } else {
-      updated = [{ id: movie.id, title: movie.title, posterPath: movie.poster_path }, ...saved];
-      setWatchlisted(true);
-    }
 
-    localStorage.setItem('watchlist', JSON.stringify(updated));
-  };
+// Keep state in sync with DB
+useEffect(() => {
+  if (!movie) return;
+  const isInWatchlist = items.some((m) => m.id === movie.id);
+  setWatchlisted(isInWatchlist);
+}, [items, movie]);
 
-  // Nominate this film for the club's next screening (DB or local fallback)
+const toggleWatchlist = async () => {
+  if (!movie) return;
+
+  if (watchlisted) {
+     const res = await remove(movie.id);
+   if (res?.error) {
+    console.warn("[watchlist] remove failed:", res.error);
+     return;
+  }
+  } else {
+      const res = await add({
+      id: movie.id,
+      title: movie.title,
+      poster_path: movie.poster_path,
+    });
+       if (res?.error) {
+          console.warn("[watchlist] add failed:", res.error);
+          return;
+        }
+  }
+};
+
+
+  // Nominate this film for the club's next screening
   async function handleNominate() {
     if (!movie) return;
     setConfirmed(true); // optimistic UI
 
     const res = await nominateMovie({
-      clubId,                       // if undefined, helper saves to localStorage
-      userId: user?.id || null,     // may be null if not signed in
+      clubId,
+      userId: user?.id || null,
       movie: { id: movie.id, title: movie.title, poster_path: movie.poster_path }
     });
 
@@ -124,7 +138,7 @@ function MovieDetails() {
           <p className="text-sm text-zinc-400">Runtime: {movie.runtime} minutes</p>
           <p className="text-sm text-zinc-400 mt-2">Rating: {movie.vote_average}/10</p>
 
-          {/* Cast (simple text list kept) */}
+          {/* Cast */}
           <div className="mt-6">
             <h3 className="text-xl font-semibold text-yellow-400 mb-2">Cast</h3>
             <ul className="list-disc list-inside text-zinc-300">
@@ -224,6 +238,3 @@ function MovieDetails() {
 }
 
 export default MovieDetails;
-
-
-

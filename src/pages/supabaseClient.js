@@ -1,30 +1,22 @@
-// src/supabaseClient.js
 import { createClient } from "@supabase/supabase-js";
+import { getEnv } from "./utils/env";
 
-const url = process.env.REACT_APP_SUPABASE_URL;
-const anonKey = process.env.REACT_APP_SUPABASE_ANON_KEY;
+const SUPABASE_URL = getEnv("SUPABASE_URL");
+const SUPABASE_ANON_KEY = getEnv("SUPABASE_ANON_KEY");
 
-// After: const anonKey = process.env.REACT_APP_SUPABASE_ANON_KEY;
-try {
-    const payload = JSON.parse(atob((anonKey || '').split('.')[1] || ''));
-    console.log('[supabaseClient] anonKey.ref =', payload?.ref);
-  } catch (e) {
-    console.warn('[supabaseClient] Could not decode anon key payload:', e?.message);
-  }
-  
-
-if (!url || !anonKey) {
-  console.warn("[supabaseClient] Missing REACT_APP_SUPABASE_URL / REACT_APP_SUPABASE_ANON_KEY.");
+if (!SUPABASE_URL) {
+  throw new Error(
+    "Missing Supabase URL. Set REACT_APP_SUPABASE_URL (CRA) or VITE_SUPABASE_URL (Vite)."
+  );
+}
+if (!SUPABASE_ANON_KEY) {
+  throw new Error(
+    "Missing Supabase anon key. Set REACT_APP_SUPABASE_ANON_KEY (CRA) or VITE_SUPABASE_ANON_KEY (Vite)."
+  );
 }
 
-
-const supabase = createClient(url, anonKey);
-
-// Optional: expose for DevTools testing (window.supabase.auth.getUser())
-if (typeof window !== "undefined") {
-  window.supabase = supabase;
-}
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: { persistSession: true, autoRefreshToken: true },
+});
 
 export default supabase;
-
-

@@ -35,7 +35,7 @@ export default function AuthForm() {
         className="p-2 rounded bg-zinc-800 text-white"
       />
 
-      <button onClick={handleSignup} className="bg-yellow-500 text-black p-2 rounded">
+      <button onClick={handleSignup} className="bg-yellow-400 text-black p-2 rounded">
         Sign Up
       </button>
       <button onClick={handleLogin} className="bg-green-500 text-black p-2 rounded">

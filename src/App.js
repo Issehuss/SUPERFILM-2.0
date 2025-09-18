@@ -1,31 +1,39 @@
 // src/App.jsx
 import { BrowserRouter as Router, Routes, Route, Link, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, Suspense, lazy } from 'react';
 import debounce from 'lodash.debounce';
-
-import MovieDetails from './pages/MovieDetails';
-import SearchResults from './pages/SearchResults';
-import Clubs from './pages/Clubs';
-import Movies from './pages/Movies';
-import ClubProfile from './pages/ClubProfile';
-import MembersPage from './pages/MembersPage';
-import UserProfile from './pages/UserProfile.jsx';
-import CreateClubWizard from './pages/CreateClubWizard';
-import ClubEventDetails from './pages/ClubEventDetails';
-import ClubPreview from './pages/ClubPreview'; 
-<<<<<<< HEAD
-import Clubs2 from './pages/Clubs2';
-=======
-import EventAttendance from './pages/EventAttendance';
-import SupabasePing from "./dev/SupabasePing";
-import AuthPage from './pages/AuthPage';
-import MyClub from './pages/MyClub';
-import LandingPage from './pages/LandingPage';
-import HomePage from './pages/Home';
->>>>>>> 678cfbc (WIP:saving my local edits)
+import { Toaster } from 'react-hot-toast';
 
 import { UserProvider, useUser } from './context/UserContext';
 import './styles/glows.css';
+
+// ✅ membership hook for /myclub redirect
+import useMyClubs from './hooks/useMyClubs';
+
+// Chat page (non-lazy is fine since it's lightweight)
+import ClubChat from "./pages/ClubChat";
+
+// ✅ splash fallback (logo + "Please wait…")
+import Splash from './components/Splash';
+
+
+
+/* ========= lazy-loaded pages ========= */
+const MovieDetails     = lazy(() => import('./pages/MovieDetails'));
+const SearchResults    = lazy(() => import('./pages/SearchResults'));
+const Clubs            = lazy(() => import('./pages/Clubs'));
+const Movies           = lazy(() => import('./pages/Movies'));
+const ClubProfile      = lazy(() => import('./pages/ClubProfile'));
+const MembersPage      = lazy(() => import('./pages/MembersPage'));
+const UserProfile      = lazy(() => import('./pages/UserProfile.jsx'));
+const CreateClubWizard = lazy(() => import('./pages/CreateClubWizard'));
+const ClubEventDetails = lazy(() => import('./pages/ClubEventDetails'));
+const ClubPreview      = lazy(() => import('./pages/ClubPreview'));
+const EventAttendance  = lazy(() => import('./pages/EventAttendance'));
+const SupabasePing     = lazy(() => import('./dev/SupabasePing'));
+const AuthPage         = lazy(() => import('./pages/AuthPage'));
+const LandingPage      = lazy(() => import('./pages/LandingPage'));
+const HomeSignedIn     = lazy(() => import('./pages/HomeSignedIn'));
 
 /* --- Redirect helpers --- */
 function ClubSingularRedirect() {
@@ -37,14 +45,32 @@ function ClubSingularRedirect() {
   return null;
 }
 
-function MyClubRedirect() {
+// ✅ Smart "My Club" redirect
+// - not signed in → /clubs (list)
+// - signed in + has club(s) → /clubs/:slugOrId (first club)
+function MyClubSmartRedirect() {
+  const { user } = useUser();
+  const { myClubs, loadingMyClubs } = useMyClubs();
   const navigate = useNavigate();
+
   useEffect(() => {
-    const stored = localStorage.getItem("myClubId");
-    const fallback = "1"; // dev fallback
-    navigate(`/clubs/${stored || fallback}`, { replace: true });
-  }, [navigate]);
-  return null;
+    if (loadingMyClubs) return;
+
+    if (!user) {
+      navigate('/clubs', { replace: true });
+      return;
+    }
+
+    if (myClubs && myClubs.length > 0) {
+      const c = myClubs[0];
+      navigate(`/clubs/${c.slug || c.id}`, { replace: true });
+    } else {
+      navigate('/clubs', { replace: true });
+    }
+  }, [user, myClubs, loadingMyClubs, navigate]);
+
+  // Show splash while deciding
+  return <Splash message="Finding your club…" />;
 }
 
 function AppWrapper() {
@@ -96,6 +122,15 @@ function App() {
     }
   };
 
+  // ✅ Build a smart href for the "My Club" tab (instant jump when cached)
+  const myClubHref = user
+    ? (localStorage.getItem("activeClubSlug")
+        ? `/clubs/${localStorage.getItem("activeClubSlug")}`
+        : (localStorage.getItem("activeClubId")
+            ? `/clubs/${localStorage.getItem("activeClubId")}`
+            : "/myclub")) // fall back to server-side redirect
+    : "/clubs";
+
   return (
     <div className="flex flex-col min-h-screen bg-gradient-to-b from-black via-zinc-900 to-black text-white font-sans">
       <header className="flex items-center justify-between p-6 bg-zinc-950 shadow-md">
@@ -105,10 +140,11 @@ function App() {
         </div>
 
         <nav className="flex gap-12 mx-auto text-white">
+          {/* Home always points to "/" — the route itself switches by auth */}
           <Link className="hover:text-yellow-400 transition" to="/">Home</Link>
           <Link className="hover:text-yellow-400 transition" to="/clubs">Clubs</Link>
-           <Link className="hover:text-yellow-400 transition" to="/clubs-2">Clubs 2</Link>
-          <Link className="hover:text-yellow-400 transition" to="/myclub">My Club</Link>
+          {/* ✅ smart target here */}
+          <Link className="hover:text-yellow-400 transition" to={myClubHref}>My Club</Link>
           <Link className="hover:text-yellow-400 transition" to="/movies">Movies</Link>
         </nav>
 
@@ -148,41 +184,61 @@ function App() {
       </header>
 
       <main className="flex-1 p-6 max-w-6xl mx-auto w-full">
-        <Routes>
-          <Route path="/" element={user === null ? <LandingPage /> : <HomePage />} />
-          <Route path="/clubs" element={<Clubs />} />
-          <Route path="/movies" element={<Movies searchQuery={searchQuery} />} />
+        <Suspense fallback={<Splash />}>
+          <Routes>
+            {/* 👇 KEY CHANGE: Home switches by auth */}
+            <Route path="/" element={user ? <HomeSignedIn /> : <LandingPage />} />
 
-          {/* UPDATED: allow slug or UUID */}
-          <Route path="/clubs/:clubParam" element={<ClubProfile />} />
+            {/* Clubs list + details */}
+            <Route path="/clubs" element={<Clubs />} />
+            <Route path="/clubs/:clubParam" element={<ClubProfile />} />
 
-          {/* Keep existing singular redirect */}
-          <Route path="/club/:id" element={<ClubSingularRedirect />} />
-          <Route path="/club/:id/members" element={<MembersPage />} />
-<<<<<<< HEAD
-          <Route path="/clubs-2" element={<Clubs2 />} />
-          <Route path="/profile" element={<UserProfile />} />
-=======
-          <Route path="/club/:id/event/:eventSlug" element={<ClubEventDetails />} />
+            {/* Chat routes — support both slug-or-id and legacy id */}
+            <Route path="/clubs/:clubParam/chat" element={<ClubChat />} />
+            <Route path="/club/:clubId/chat" element={<ClubChat />} />
 
-          {/* NEW: parallel “clubs/…” routes for nested pages (keep old ones too) */}
-          <Route path="/clubs/:clubParam/events/next" element={<EventAttendance />} />
-          <Route path="/clubs/:clubParam/members" element={<MembersPage />} />
+            {/* “/club/:id” legacy → redirect to /clubs/:id */}
+            <Route path="/club/:id" element={<ClubSingularRedirect />} />
 
-          {/* Keep your existing “clubs/:id/events/next” so old links keep working */}
-          <Route path="/clubs/:id/events/next" element={<EventAttendance />} />
+            {/* Keep legacy variants for existing links */}
+            <Route path="/club/:id/members" element={<MembersPage />} />
+            <Route path="/club/:id/event/:eventSlug" element={<ClubEventDetails />} />
 
-          <Route path="/profile" element={<UserProfile key={window.location.search} />} />
->>>>>>> 678cfbc (WIP:saving my local edits)
-          <Route path="/movie/:id" element={<MovieDetails />} />
-          <Route path="/search" element={<SearchResults />} />
-          <Route path="/create-club" element={<CreateClubWizard />} />
-          <Route path="/club-preview" element={<ClubPreview />} />
-          <Route path="/auth" element={<AuthPage />} />
-          <Route path="/dev/ping" element={<SupabasePing />} />
-          <Route path="/myclub" element={<MyClub />} />
-        </Routes>
+            {/* Nested event/members (slug or uuid) */}
+            <Route path="/clubs/:clubParam/events/next" element={<EventAttendance />} />
+            <Route path="/clubs/:clubParam/members" element={<MembersPage />} />
+
+            {/* Old links support */}
+            <Route path="/clubs/:id/events/next" element={<EventAttendance />} />
+
+            {/* Other pages */}
+            <Route path="/movies" element={<Movies searchQuery={searchQuery} />} />
+            <Route path="/profile" element={<UserProfile key={window.location.search} />} />
+            <Route path="/movie/:id" element={<MovieDetails />} />
+            <Route path="/search" element={<SearchResults />} />
+            <Route path="/create-club" element={<CreateClubWizard />} />
+            <Route path="/club-preview" element={<ClubPreview />} />
+            <Route path="/auth" element={<AuthPage />} />
+            <Route path="/dev/ping" element={<SupabasePing />} />
+            <Route path="/clubs/:clubParam/chat" element={<ClubChat />} />
+            <Route path="/club/:clubId/chat" element={<ClubChat />} />   {/* legacy */}
+            // src/App.js (routes)
+            <Route path="/u/:slug" element={<UserProfile />} />
+            <Route path="/profile/:id" element={<UserProfile />} />  
+    
+
+
+            {/* ✅ single authoritative route for My Club */}
+            <Route path="/myclub" element={<MyClubSmartRedirect />} />
+
+            {/* Optional alias */}
+            <Route path="/home" element={<HomeSignedIn />} />
+          </Routes>
+        </Suspense>
       </main>
+
+      <Toaster position="top-center" />
+
 
       <footer className="text-center text-sm text-zinc-500 p-4 border-t border-zinc-800 mt-8">
         © {new Date().getFullYear()} SuperFilm. All rights reserved.
@@ -192,8 +248,6 @@ function App() {
 }
 
 export default AppWrapper;
-
-
 
 
 
