@@ -1,6 +1,6 @@
 // src/pages/ClubProfile.jsx — avatar upload + 90‑day rename (presidents only)
 import { useParams, useNavigate } from 'react-router-dom';
-import { useEffect, useState, useMemo, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import {
   MapPin,
   Film,
@@ -230,6 +230,7 @@ const [membersLoading, setMembersLoading] = useState(true);
 const [selectedResultId, setSelectedResultId] = useState(null);
 const [membersErr, setMembersErr] = useState("");
 
+
 // re-fetch members (used after role changes)
 const loadMembers = useCallback(async () => {
   if (!club?.id) return;
@@ -302,6 +303,13 @@ const transferPresidency = async (userId) => {
   toast?.success ? toast.success("Presidency transferred") : console.log("Presidency transferred");
   await loadMembers();
 };
+
+useEffect(() => {
+  if (club?.id) loadMembers();
+}, [club?.id, loadMembers]);
+
+
+
 
 
 
@@ -1115,85 +1123,64 @@ limit 5;`}
             {countdown.days}d {countdown.hours}h {countdown.minutes}m until screening
           </div>
         )}
-    
-        {/* Members */}
-        <div className="mt-2 pl-5 md:pl-6">
-          <h3 className="text-sm font-semibold text-yellow-400 mb-2">Members</h3>
-    
-          {/* Members area (null-safe + supports both shapes) */}
-          {membersLoading ? (
-            <div className="flex gap-2">
-              {Array.from({ length: 8 }).map((_, i) => (
-                <div
-                  key={i}
-                  className="h-10 w-10 rounded-full bg-white/10 animate-pulse"
-                />
-              ))}
-            </div>
-          ) : !members?.length ? (
-            <div className="text-sm text-zinc-500">No members yet.</div>
-          ) : (
-            <div className="flex flex-wrap gap-3">
-              {members.map((m) => {
-                // Support both shapes:
-                // - joined: m.profiles = { id, slug, display_name, avatar_url }, m.role
-                // - flat:   m = { user_id, slug?, display_name?, avatar_url?, member_role? }
-                const p = m?.profiles || {};
-                const name = p?.display_name || m?.display_name || "Member";
-                const slug = p?.slug || m?.slug || null;
-                const uid = p?.id || m?.user_id || null;
-                const role = m?.role ?? m?.member_role ?? null;
-    
-                const href = slug ? `/u/${slug}` : uid ? `/profile/${uid}` : "#";
-                const avatar =
-                  (typeof p?.avatar_url === "string" && p.avatar_url) ||
-                  (typeof m?.avatar_url === "string" && m.avatar_url) ||
-                  "/avatar_placeholder.png";
-    
-                const roleLabel =
-                  role === "president"
-                    ? "P"
-                    : role === "vice_president"
-                    ? "VP"
-                    : role === "editor_in_chief"
-                    ? "EIC"
-                    : null;
-    
-                const title = role
-                  ? `${name} • ${String(role).replaceAll("_", " ")}`
-                  : name;
-    
-                return (
-                  <Link
-                    key={uid || slug || `member-${Math.random()}`}
-                    to={href}
-                    title={title}
-                    aria-label={title}
-                    className="relative block h-12 w-12 rounded-full overflow-hidden ring-1 ring-white/10 hover:ring-yellow-400/60 focus:outline-none focus:ring-2 focus:ring-yellow-400/70 transition"
-                  >
-                    <img
-                      src={avatar}
-                      alt={name}
-                      className="h-full w-full object-cover"
-                      loading="lazy"
-                      decoding="async"
-                      onError={(e) => {
-                        e.currentTarget.onerror = null;
-                        e.currentTarget.src = "/avatar_placeholder.png";
-                      }}
-                    />
-                    {roleLabel && (
-                      <span className="absolute -bottom-1 -right-1 text-[10px] px-1.5 py-0.5 rounded-full bg-black/70 border border-yellow-400/40">
-                        {roleLabel}
-                      </span>
-                    )}
-                  </Link>
-                );
-              })}
-            </div>
-          )}
-        </div>
-    
+    {/* Members */}
+<div className="mt-2 pl-5 md:pl-6">
+  <h3 className="text-sm font-semibold text-yellow-400 mb-2">Members</h3>
+
+  {membersLoading ? (
+    <div className="flex gap-2">
+      {Array.from({ length: 8 }).map((_, i) => (
+        <div key={i} className="h-10 w-10 rounded-full bg-white/10 animate-pulse" />
+      ))}
+    </div>
+  ) : !members?.length ? (
+    <div className="text-sm text-zinc-500">No members yet.</div>
+  ) : (
+    <div className="flex flex-wrap gap-4">
+      {members.map((m) => {
+        const p = m?.profiles || {};
+        const slug = p?.slug || m?.slug || null;
+        const uid = p?.id || m?.user_id || null;
+        const role = m?.role ?? m?.member_role ?? null;
+
+        const href = slug ? `/u/${slug}` : uid ? `/profile/${uid}` : "#";
+        const avatar =
+          p?.avatar_url || m?.avatar_url || "/avatar_placeholder.png";
+
+        let roleLabel = null;
+        if (role === "president") roleLabel = "President";
+        if (role === "vice_president") roleLabel = "Vice President";
+        if (role === "editor_in_chief") roleLabel = "Editor-in-Chief";
+
+        return (
+          <div
+            key={uid || slug || `member-${Math.random()}`}
+            className="flex flex-col items-center w-16"
+          >
+            <Link
+              to={href}
+              aria-label={roleLabel || "Member"}
+              className="block h-12 w-12 rounded-full overflow-hidden ring-1 ring-white/10 hover:ring-yellow-400/60 transition"
+            >
+              <img
+                src={avatar}
+                alt={roleLabel || "Member"}
+                className="h-full w-full object-cover"
+                onError={(e) => { e.currentTarget.src = "/avatar_placeholder.png"; }}
+              />
+            </Link>
+            {roleLabel && (
+              <span className="mt-1 text-[10px] text-yellow-400 text-center">
+                {roleLabel}
+              </span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  )}
+</div>
+
         {/* =========================
             Two-column grid (Poster • Details)
         ========================= */}
@@ -1590,116 +1577,150 @@ limit 5;`}
           </ul>
         </div>
     
-        {/* Full Members Dialog */}
-        {showMembersDialog && (
-          <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-            <div className="bg-neutral-950 border border-neutral-800 rounded-xl max-w-3xl w-full p-6 relative">
-              <button
-                className="absolute top-3 right-3 text-neutral-400 hover:text-white"
-                onClick={() => setShowMembersDialog(false)}
-                aria-label="Close"
+       {/* Full Members Dialog */}
+{showMembersDialog && (
+  <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+    <div className="bg-neutral-950 border border-neutral-800 rounded-xl max-w-3xl w-full p-6 relative">
+      <button
+        className="absolute top-3 right-3 text-neutral-400 hover:text-white"
+        onClick={() => setShowMembersDialog(false)}
+        aria-label="Close"
+      >
+        ✕
+      </button>
+
+      <h2 className="text-xl font-bold mb-4 text-white">
+        Members • {members.length}
+      </h2>
+
+      <input
+        value={memberSearch}
+        onChange={(e) => setMemberSearch(e.target.value)}
+        placeholder="Search members…"
+        className="w-full rounded-xl bg-neutral-900 px-3 py-2 text-sm text-neutral-100 outline-none ring-1 ring-neutral-800 focus:ring-yellow-500 mb-4"
+        aria-label="Search members"
+      />
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+        {members
+          .filter((m) =>
+            !memberSearch ||
+            (m.profiles?.display_name || "")
+              .toLowerCase()
+              .includes(memberSearch.toLowerCase())
+          )
+          .map((m) => {
+            const p = m.profiles || {};
+            const name = p.display_name || "Member";
+            const avatar = p.avatar_url || "/avatar_placeholder.png";
+            const role = m.role;
+
+            return (
+              <div
+                key={p.id || m.user_id}
+                className="flex items-center gap-3 rounded-xl bg-neutral-900/60 p-2 ring-1 ring-neutral-800"
               >
-                ✕
-              </button>
-    
-              <h2 className="text-xl font-bold mb-4 text-white">
-                Members • {club?.members || club?.membersList?.length || 0}
-              </h2>
-    
-              <input
-                value={memberSearch}
-                onChange={(e) => setMemberSearch(e.target.value)}
-                placeholder="Search members…"
-                className="w-full rounded-xl bg-neutral-900 px-3 py-2 text-sm text-neutral-100 outline-none ring-1 ring-neutral-800 focus:ring-yellow-500 mb-4"
-                aria-label="Search members"
-              />
-    
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-                {(club?.membersList || [])
-                  .filter(
-                    (m) =>
-                      !memberSearch ||
-                      (m.name || "")
-                        .toLowerCase()
-                        .includes(memberSearch.toLowerCase())
-                  )
-                  .map((m) => (
-                    <div
-                      key={m.id}
-                      className="flex items-center gap-3 rounded-xl bg-neutral-900/60 p-2 ring-1 ring-neutral-800"
-                    >
-                      <img
-                        src={m.avatar}
-                        alt={m.name}
-                        className="h-10 w-10 rounded-full"
+                <img
+                  src={avatar}
+                  alt={name}
+                  className="h-10 w-10 rounded-full"
+                  onError={(e) => {
+                    e.currentTarget.onerror = null;
+                    e.currentTarget.src = "/avatar_placeholder.png";
+                  }}
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm text-neutral-100 flex items-center gap-2">
+                    {name}
+                    {role === "president" && (
+                      <span
+                        className="w-3 h-3 rounded-full bg-yellow-500 inline-block"
+                        title="President"
                       />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm text-neutral-100 flex items-center gap-2">
-                          {m.name}
-                          {m.role === ROLE.PRESIDENT && (
-                            <span
-                              className="w-3 h-3 rounded-full bg-yellow-500 inline-block"
-                              title="President"
-                            />
-                          )}
-                          {m.role === ROLE.VICE && (
-                            <span
-                              className="w-3 h-3 rounded-full bg-gray-400 inline-block"
-                              title="Vice President"
-                            />
-                          )}
-                        </p>
-                      </div>
-    
-                      {(isPresident || hasRole("president")) &&
-                        m.id !== user?.id && (
-                          <div className="ml-auto flex items-center gap-2">
-                            {m.role === ROLE.VICE ? (
-                              <button
-                                onClick={() => setMemberRole(m.id, ROLE.NONE)}
-                                className="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700"
-                              >
-                                Remove VP
-                              </button>
-                            ) : (
-                              <button
-                                onClick={() => setMemberRole(m.id, ROLE.VICE)}
-                                className="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700"
-                              >
-                                Make VP
-                              </button>
-                            )}
-                            {m.role !== ROLE.PRESIDENT && (
-                              <button
-                                onClick={() => transferPresidency(m.id)}
-                                className="text-[11px] px-2 py-1 rounded bg-yellow-500 text-black hover:bg-yellow-400"
-                              >
-                                Make President
-                              </button>
-                            )}
-                          </div>
-                        )}
-                    </div>
-                  ))}
-    
-                {((club?.membersList || []).filter(
-                  (m) =>
-                    !memberSearch ||
-                    (m.name || "")
-                      .toLowerCase()
-                      .includes(memberSearch.toLowerCase())
-                )).length === 0 && (
-                  <p className="col-span-full text-sm text-neutral-400">
-                    No members match “{memberSearch}”.
+                    )}
+                    {role === "vice_president" && (
+                      <span
+                        className="w-3 h-3 rounded-full bg-gray-400 inline-block"
+                        title="Vice President"
+                      />
+                    )}
+                    {role === "editor_in_chief" && (
+                      <span
+                        className="w-3 h-3 rounded-full bg-blue-400 inline-block"
+                        title="Editor in Chief"
+                      />
+                    )}
                   </p>
+                </div>
+
+                {(isPresident || hasRole("president")) && (p.id !== user?.id) && (
+                  <div className="ml-auto flex items-center gap-2">
+                    {/* VP toggle */}
+                    {role === "vice_president" ? (
+                      <button
+                        onClick={() => setMemberRole(p.id, "member")}
+                        className="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700"
+                      >
+                        Remove VP
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => setMemberRole(p.id, "vice_president")}
+                        className="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700"
+                      >
+                        Make VP
+                      </button>
+                    )}
+
+                    {/* EIC toggle */}
+                    {role === "editor_in_chief" ? (
+                      <button
+                        onClick={() => setMemberRole(p.id, "member")}
+                        className="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700"
+                      >
+                        Remove EIC
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => setMemberRole(p.id, "editor_in_chief")}
+                        className="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700"
+                      >
+                        Make EIC
+                      </button>
+                    )}
+
+                    {/* Transfer presidency */}
+                    {role !== "president" && (
+                      <button
+                        onClick={() => transferPresidency(p.id)}
+                        className="text-[11px] px-2 py-1 rounded bg-yellow-500 text-black hover:bg-yellow-400"
+                      >
+                        Make President
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
-            </div>
-          </div>
+            );
+          })}
+
+        {members.filter((m) =>
+          !memberSearch ||
+          (m.profiles?.display_name || "")
+            .toLowerCase()
+            .includes(memberSearch.toLowerCase())
+        ).length === 0 && (
+          <p className="col-span-full text-sm text-neutral-400">
+            No members match “{memberSearch}”.
+          </p>
         )}
       </div>
-    );
-    } // end function ClubProfile
-    
-   
-    
+    </div>
+  </div>
+)}{/* end Full Members Dialog */}
+
+</div> 
+);   
+}   
+
+
