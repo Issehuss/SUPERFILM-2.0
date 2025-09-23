@@ -1,8 +1,10 @@
 // src/components/NominationsPanel.jsx
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import supabase from "../supabaseClient.js";
 import { Trash2 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+
 
 const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -13,7 +15,7 @@ const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * - posterHoverClass?: string
  * - onPosterClick?: (movie: { id, title, poster_path }) => void
  * - movieRoute?: string = "/movies"
- * - canRemove?: boolean = false        // NEW
+ * - canRemove?: boolean = false
  */
 export default function NominationsPanel({
   clubId: propClubId,
@@ -21,9 +23,10 @@ export default function NominationsPanel({
   posterHoverClass = "transition transform hover:scale-[1.03] hover:ring-2 hover:ring-yellow-500/80 hover:shadow-xl",
   onPosterClick,
   movieRoute = "/movies",
-  canRemove = false,                    // NEW
+  canRemove = false,
 }) {
   const { clubParam, id: legacyId } = useParams();
+  const navigate = useNavigate();
   const routeParam = (clubParam || legacyId || "").trim();
 
   const [resolvedClubId, setResolvedClubId] = useState(propClubId || null);
@@ -72,14 +75,19 @@ export default function NominationsPanel({
     }
 
     resolveClubId();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [propClubId, routeParam]);
 
   async function load(resolvedId) {
     setLoading(true);
     setError("");
     try {
-      if (!resolvedId) { setItems([]); return; }
+      if (!resolvedId) {
+        setItems([]);
+        return;
+      }
       const { data, error } = await supabase
         .from("nominations_by_film")
         .select("movie_id, movie_title, poster_path, upvotes, last_nomination_at")
@@ -112,19 +120,25 @@ export default function NominationsPanel({
         () => load(resolvedClubId)
       )
       .subscribe();
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [resolvedClubId]);
 
   function handlePosterClick(movie) {
     if (!movie?.id) return;
-    if (typeof onPosterClick === "function") onPosterClick(movie);
-    else window.location.assign(`${movieRoute}/${movie.id}`);
+    if (typeof onPosterClick === "function") {
+      onPosterClick(movie);   // uses the parent navigate from ClubProfile
+    } else {
+      navigate(`/movies/${movie.id}`); // fallback
+    }
   }
+  
 
-  // NEW: remove all nominations for a movie in this club (admin action)
+  // Remove all nominations for a movie in this club (admin action)
   async function handleRemove(movieId) {
     if (!resolvedClubId || !movieId) return;
-    // optimistic
+    // optimistic update
     setItems((prev) => prev.filter((x) => x.movie_id !== movieId));
     const { error } = await supabase
       .from("nominations")
@@ -216,7 +230,10 @@ export default function NominationsPanel({
                 {canRemove && (
                   <button
                     type="button"
-                    onClick={(e) => { e.stopPropagation(); handleRemove(n.movie_id); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleRemove(n.movie_id);
+                    }}
                     className="absolute top-2 left-2 inline-flex items-center justify-center w-8 h-8 rounded-full bg-black/70 hover:bg-black/90 ring-1 ring-white/10 opacity-0 group-hover:opacity-100 transition"
                     title="Remove nomination"
                     aria-label="Remove nomination"
@@ -236,5 +253,3 @@ export default function NominationsPanel({
     </section>
   );
 }
-
-

@@ -26,6 +26,7 @@ import { Link } from "react-router-dom";
 import { Check } from "lucide-react";
 import RoleBadge from "../components/RoleBadge.jsx";
 import { toast } from "react-hot-toast";
+import AssignRoleMenu from "../components/AssignRoleMenu.jsx";
 
 
 
@@ -39,6 +40,7 @@ import { toast } from "react-hot-toast";
 
 // UUID detector
 const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 
 
 /* -----------------------------
@@ -182,11 +184,155 @@ function mapClubRowToUI(row) {
   };
 }
 
+function MembersDialog({
+  onClose,
+  members,
+  memberSearch,
+  setMemberSearch,
+  isPresident,
+  hasRole,
+  user,
+  setMemberRole,
+  transferPresidency,
+}) {
+  return (
+    <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+      <div className="bg-neutral-950 border border-neutral-800 rounded-xl max-w-3xl w-full p-6 relative">
+        <button
+          className="absolute top-3 right-3 text-neutral-400 hover:text-white"
+          onClick={onClose}
+          aria-label="Close"
+        >
+          ✕
+        </button>
+
+        <h2 className="text-xl font-bold mb-4 text-white">
+          Members • {members.length}
+        </h2>
+
+        <input
+          value={memberSearch}
+          onChange={(e) => setMemberSearch(e.target.value)}
+          placeholder="Search members…"
+          className="w-full rounded-xl bg-neutral-900 px-3 py-2 text-sm text-neutral-100 outline-none ring-1 ring-neutral-800 focus:ring-yellow-500 mb-4"
+          aria-label="Search members"
+        />
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+          {members
+            .filter(
+              (m) =>
+                !memberSearch ||
+                (m.profiles?.display_name || "")
+                  .toLowerCase()
+                  .includes(memberSearch.toLowerCase())
+            )
+            .map((m) => {
+              const p = m.profiles || {};
+              const name = p.display_name || "Member";
+              const avatar = p.avatar_url || "/avatar_placeholder.png";
+              const role = m.role;
+
+              return (
+                <div
+                  key={p.id || m.user_id}
+                  className="flex items-center gap-3 rounded-xl bg-neutral-900/60 p-2 ring-1 ring-neutral-800"
+                >
+                  <img
+                    src={avatar}
+                    alt={name}
+                    className="h-10 w-10 rounded-full"
+                    onError={(e) => {
+                      e.currentTarget.onerror = null;
+                      e.currentTarget.src = "/avatar_placeholder.png";
+                    }}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm text-neutral-100 flex items-center gap-2">
+                      {name}
+                      {role === "president" && (
+                        <span className="w-3 h-3 rounded-full bg-yellow-500 inline-block" title="President" />
+                      )}
+                      {role === "vice_president" && (
+                        <span className="w-3 h-3 rounded-full bg-gray-400 inline-block" title="Vice President" />
+                      )}
+                      {role === "editor_in_chief" && (
+                        <span className="w-3 h-3 rounded-full bg-blue-400 inline-block" title="Editor in Chief" />
+                      )}
+                    </p>
+                  </div>
+
+                  {(isPresident || hasRole("president")) && p.id !== user?.id && (
+                    <div className="ml-auto flex items-center gap-2">
+                      {role === "vice_president" ? (
+                        <button
+                          onClick={() => setMemberRole(p.id, "member")}
+                          className="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700"
+                        >
+                          Remove VP
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => setMemberRole(p.id, "vice_president")}
+                          className="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700"
+                        >
+                          Make VP
+                        </button>
+                      )}
+
+                      {role === "editor_in_chief" ? (
+                        <button
+                          onClick={() => setMemberRole(p.id, "member")}
+                          className="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700"
+                        >
+                          Remove EIC
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => setMemberRole(p.id, "editor_in_chief")}
+                          className="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700"
+                        >
+                          Make EIC
+                        </button>
+                      )}
+
+                      {role !== "president" && (
+                        <button
+                          onClick={() => transferPresidency(p.id)}
+                          className="text-[11px] px-2 py-1 rounded bg-yellow-500 text-black hover:bg-yellow-400"
+                        >
+                          Make President
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+          {members.filter(
+            (m) =>
+              !memberSearch ||
+              (m.profiles?.display_name || "")
+                .toLowerCase()
+                .includes(memberSearch.toLowerCase())
+          ).length === 0 && (
+            <p className="col-span-full text-sm text-neutral-400">
+              No members match “{memberSearch}”.
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 
 /* -----------------------------
    Component
 ------------------------------*/
-export default function ClubProfile() {
+
   const { id: routeId, clubParam } = useParams();
   const idParam = (clubParam || routeId || '').trim();
   const navigate = useNavigate();
@@ -229,6 +375,10 @@ const [members, setMembers] = useState([]);
 const [membersLoading, setMembersLoading] = useState(true);
 const [selectedResultId, setSelectedResultId] = useState(null);
 const [membersErr, setMembersErr] = useState("");
+const myMembership = members?.find(m => m.user_id === user?.id);
+
+
+
 
 
 // re-fetch members (used after role changes)
@@ -934,793 +1084,652 @@ const saveNextScreening = async () => {
 };
 
 
-  /* -----------------------------
+ /* -----------------------------
      Render
   ------------------------------*/
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-black text-white p-6">
-        <p className="text-zinc-300">Loading club…</p>
-      </div>
-    );
-  }
+if (loading) {
+  return (
+    <div className="min-h-screen bg-black text-white p-6">
+      <p className="text-zinc-300">Loading club…</p>
+    </div>
+  );
+}
 
-  if (notFound || !club) {
-    return (
-      <div className="min-h-screen bg-black text-white p-6 space-y-3">
-        <p className="text-red-400">Club not found.</p>
-        <p className="text-zinc-400 text-sm">
-          Tip: ensure your route uses <code>/clubs/:clubParam</code> (or legacy <code>/club/:id</code>) and that you’re navigating with <code>{`/clubs/${'{club.slug || club.id}'}`}</code>.
-        </p>
+if (notFound || !club) {
+  return (
+    <div className="min-h-screen bg-black text-white p-6 space-y-3">
+      <p className="text-red-400">Club not found.</p>
+      <p className="text-zinc-400 text-sm">
+        Tip: ensure your route uses <code>/clubs/:clubParam</code> (or legacy <code>/club/:id</code>) and that you’re navigating with <code>{`/clubs/${'{club.slug || club.id}'}`}</code>.
+      </p>
 
-        {/* Debug panel */}
-        <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3 text-xs text-zinc-300">
-          <div><span className="text-zinc-500">Route param:</span> <code>{debugParam || '(empty)'}</code></div>
-          <div><span className="text-zinc-500">Lookup order tried:</span> <code>{lastTried || '(none)'}</code></div>
-          {lastError && (
-            <div className="mt-1">
-              <span className="text-zinc-500">Supabase error:</span>{' '}
-              <code>{(lastError.code ? `${lastError.code} - ` : '') + (lastError.message || JSON.stringify(lastError))}</code>
-            </div>
-          )}
-          <div className="mt-2 text-zinc-400">
-            Quick DB check (Supabase SQL):
-            <pre className="mt-1 whitespace-pre-wrap">
+      {/* Debug panel */}
+      <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-900/60 p-3 text-xs text-zinc-300">
+        <div><span className="text-zinc-500">Route param:</span> <code>{debugParam || '(empty)'}</code></div>
+        <div><span className="text-zinc-500">Lookup order tried:</span> <code>{lastTried || '(none)'}</code></div>
+        {lastError && (
+          <div className="mt-1">
+            <span className="text-zinc-500">Supabase error:</span>{' '}
+            <code>{(lastError.code ? `${lastError.code} - ` : '') + (lastError.message || JSON.stringify(lastError))}</code>
+          </div>
+        )}
+        <div className="mt-2 text-zinc-400">
+          Quick DB check (Supabase SQL):
+          <pre className="mt-1 whitespace-pre-wrap">
 {`select id, slug, name from public.clubs
 where slug = '${debugParam.replace(/'/g, "''")}'
    or id::text = '${debugParam.replace(/'/g, "''")}'
 limit 5;`}
-            </pre>
-          </div>
+          </pre>
         </div>
       </div>
-    );
-  }
+    </div>
+  );
+}
 
-  // Countdown
-  const countdown = club?.nextEvent?.date ? getCountdown(club.nextEvent.date) : null;
+// Countdown
+const countdown = club?.nextEvent?.date ? getCountdown(club.nextEvent.date) : null;
 
-  // Compute next allowed rename date (client hint only)
-  const nextRenameDate = club?.nameLastChangedAt
-    ? new Date(new Date(club.nameLastChangedAt).getTime() + 90 * 24 * 60 * 60 * 1000)
-    : null;
+// Compute next allowed rename date (client hint only)
+const nextRenameDate = club?.nameLastChangedAt
+  ? new Date(new Date(club.nameLastChangedAt).getTime() + 90 * 24 * 60 * 60 * 1000)
+  : null;
 
-    return (
-      <div className="min-h-screen bg-black text-white">
-        {/* Banner */}
-        <div
-          className="h-[276px] bg-cover bg-center flex items-end px-6 py-4 relative rounded-2xl border-8 border-zinc-900 overflow-hidden"
-          style={{ backgroundImage: `url(${club.banner})` }}
-          aria-label={`${club.name} banner`}
-        >
-          {/* LEFT: avatar + name */}
-          <div className="flex items-end gap-4">
-            <div className="relative h-20 w-20 rounded-full overflow-hidden border-2 border-zinc-800 bg-zinc-900">
-              <img
-                src={club.profileImageUrl || fallbackAvatar}
-                alt={`${club.name} avatar`}
-                className="h-full w-full object-cover"
-              />
-              {isEditing && isPresident && (
-                <label className="absolute bottom-0 right-0 mb-1 mr-1 inline-flex items-center justify-center rounded-full bg-black/70 hover:bg-black/90 w-8 h-8 cursor-pointer ring-1 ring-zinc-700">
-                  <ImagePlus className="w-4 h-4" />
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) handleAvatarUpload(f);
-                      e.currentTarget.value = "";
-                    }}
-                  />
-                </label>
-              )}
-            </div>
-    
-            <div className="pb-1">
-              {isEditing && isPresident ? (
-                <div className="flex flex-col">
-                  <input
-                    className="bg-transparent border-b border-neutral-600 focus:outline-none text-3xl font-bold"
-                    value={newName}
-                    onChange={(e) => setNewName(e.target.value)}
-                    maxLength={80}
-                    placeholder="Club name"
-                  />
-                  <div className="flex items-center gap-2 mt-2">
-                    <button
-                      onClick={handleRenameClub}
-                      className="px-3 py-1 rounded bg-yellow-500 text-black text-sm hover:bg-yellow-400"
-                      disabled={uploadingAvatar}
-                    >
-                      Save name
-                    </button>
-                    <span className="inline-flex items-center gap-1 text-xs opacity-70">
-                      <Shield size={14} /> Presidents only
-                    </span>
-                  </div>
-                  {!!renameError && (
-                    <span className="text-red-400 text-xs mt-1">{renameError}</span>
-                  )}
-                  {!!renameOk && (
-                    <span className="text-green-400 text-xs mt-1">{renameOk}</span>
-                  )}
-                  {nextRenameDate && (
-                    <div className="text-xs opacity-70 mt-1">
-                      Next rename after: {nextRenameDate.toLocaleDateString()}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <h1 className="text-3xl font-bold">{club.name}</h1>
-              )}
-            </div>
-          </div>
-    
-          {/* RIGHT: banner editing controls */}
-          {canEdit && isEditing && (
-            <label
-              className="absolute top-3 right-12 bg-black bg-opacity-60 rounded-full p-2 cursor-pointer hover:bg-opacity-80"
-              aria-label="Upload new banner image"
-            >
-              <ImagePlus size={18} />
+return (
+  <div className="min-h-screen bg-black text-white">
+    {/* Banner */}
+    <div
+      className="h-[276px] bg-cover bg-center flex items-end px-6 py-4 relative rounded-2xl border-8 border-zinc-900 overflow-hidden"
+      style={{ backgroundImage: `url(${club.banner})` }}
+      aria-label={`${club.name} banner`}
+    >
+      {/* LEFT: avatar + name */}
+      <div className="flex items-end gap-4">
+        <div className="relative h-20 w-20 rounded-full overflow-hidden border-2 border-zinc-800 bg-zinc-900">
+          <img
+            src={club.profileImageUrl || fallbackAvatar}
+            alt={`${club.name} avatar`}
+            className="h-full w-full object-cover"
+          />
+          {isEditing && isPresident && (
+            <label className="absolute bottom-0 right-0 mb-1 mr-1 inline-flex items-center justify-center rounded-full bg-black/70 hover:bg-black/90 w-8 h-8 cursor-pointer ring-1 ring-zinc-700">
+              <ImagePlus className="w-4 h-4" />
               <input
                 type="file"
                 accept="image/*"
-                onChange={(e) => handleImageUpload(e, "banner")}
                 className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleAvatarUpload(f);
+                  e.currentTarget.value = "";
+                }}
               />
             </label>
           )}
-    
-          {canEdit && isEditing && (
-            <button
-              onClick={openReCrop}
-              title="Re-crop banner"
-              className="absolute top-3 right-28 bg-black bg-opacity-60 rounded-full p-2 hover:bg-opacity-80"
-              aria-label="Re-crop banner"
-            >
-              <CropIcon size={18} />
-            </button>
-          )}
-    
-          {canEdit && (
-            <button
-              onClick={() => setIsEditing(!isEditing)}
-              className="ml-auto bg-zinc-800 px-3 py-1 rounded text-sm hover:bg-zinc-700"
-            >
-              {isEditing ? "Finish Editing" : "Edit"}
-            </button>
-          )}
         </div>
-    
-        {/* Notice Board — now global, under the banner */}
-        <div className="mt-6">
-          <ClubNoticeBoard clubId={club.id} />
-        </div>
-    
-        {/* Banner cropper modal */}
-        {showBannerCropper && rawBannerImage && (
-          <BannerCropper
-            imageSrc={rawBannerImage}
-            aspect={16 / 9}
-            onCancel={() => {
-              setShowBannerCropper(false);
-              setRawBannerImage(null);
-            }}
-            onCropComplete={handleBannerCropComplete}
-          />
-        )}
-    
-        {countdown && (
-          <div
-            className={`${
-              countdown.isUrgent ? "bg-red-600" : "bg-yellow-500"
-            } mt-4 mx-6 px-4 py-2 rounded-lg w-fit font-mono text-sm text-black`}
-            aria-live="polite"
-          >
-            {countdown.days}d {countdown.hours}h {countdown.minutes}m until screening
-          </div>
-        )}
-    {/* Members */}
-<div className="mt-2 pl-5 md:pl-6">
-  <h3 className="text-sm font-semibold text-yellow-400 mb-2">Members</h3>
 
-  {membersLoading ? (
-    <div className="flex gap-2">
-      {Array.from({ length: 8 }).map((_, i) => (
-        <div key={i} className="h-10 w-10 rounded-full bg-white/10 animate-pulse" />
-      ))}
-    </div>
-  ) : !members?.length ? (
-    <div className="text-sm text-zinc-500">No members yet.</div>
-  ) : (
-    <div className="flex flex-wrap gap-4">
-      {members.map((m) => {
-        const p = m?.profiles || {};
-        const slug = p?.slug || m?.slug || null;
-        const uid = p?.id || m?.user_id || null;
-        const role = m?.role ?? m?.member_role ?? null;
-
-        const href = slug ? `/u/${slug}` : uid ? `/profile/${uid}` : "#";
-        const avatar =
-          p?.avatar_url || m?.avatar_url || "/avatar_placeholder.png";
-
-        let roleLabel = null;
-        if (role === "president") roleLabel = "President";
-        if (role === "vice_president") roleLabel = "Vice President";
-        if (role === "editor_in_chief") roleLabel = "Editor-in-Chief";
-
-        return (
-          <div
-            key={uid || slug || `member-${Math.random()}`}
-            className="flex flex-col items-center w-16"
-          >
-            <Link
-              to={href}
-              aria-label={roleLabel || "Member"}
-              className="block h-12 w-12 rounded-full overflow-hidden ring-1 ring-white/10 hover:ring-yellow-400/60 transition"
-            >
-              <img
-                src={avatar}
-                alt={roleLabel || "Member"}
-                className="h-full w-full object-cover"
-                onError={(e) => { e.currentTarget.src = "/avatar_placeholder.png"; }}
+        <div className="pb-1">
+          {isEditing && isPresident ? (
+            <div className="flex flex-col">
+              <input
+                className="bg-transparent border-b border-neutral-600 focus:outline-none text-3xl font-bold"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                maxLength={80}
+                placeholder="Club name"
               />
-            </Link>
-            {roleLabel && (
-              <span className="mt-1 text-[10px] text-yellow-400 text-center">
-                {roleLabel}
-              </span>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  )}
-</div>
-
-        {/* =========================
-            Two-column grid (Poster • Details)
-        ========================= */}
-        <div className="p-6 grid md:grid-cols-2 gap-6">
-          {/* Next Screening - Poster */}
-          <div>
-            <h2 className="text-lg font-bold text-yellow-400 flex items-center mb-2">
-              <Film className="w-5 h-5 mr-2" /> Next Screening
-            </h2>
-    
-            <img
-              ref={posterRef}
-              src={club.nextEvent.poster}
-              alt="Next screening poster"
-              className="rounded-lg w-full max-w-sm"
-            />
-    
-            {canEdit && isEditing && (
-              <div className="mt-2">
-                <input
-                  value={nextSearch}
-                  onChange={(e) => setNextSearch(e.target.value)}
-                  className="bg-zinc-800 p-1 rounded w-full"
-                  placeholder="Search film title..."
-                  aria-label="Search film title"
-                />
+              <div className="flex items-center gap-2 mt-2">
                 <button
-                  onClick={handleNextEventSearch}
-                  className="bg-yellow-500 text-black px-2 py-1 mt-1 rounded"
+                  onClick={handleRenameClub}
+                  className="px-3 py-1 rounded bg-yellow-500 text-black text-sm hover:bg-yellow-400"
+                  disabled={uploadingAvatar}
                 >
-                  Search
+                  Save name
                 </button>
-                <div className="grid grid-cols-2 gap-2 mt-2">
-                  {nextSearchResults.map((movie) => (
-                    <img
-                      key={movie.id}
-                      src={`https://image.tmdb.org/t/p/w500${movie.poster_path}`}
-                      alt={`${movie.title || "Film"} poster`}
-                      className="cursor-pointer hover:opacity-80"
-                      onClick={() => {
-                        updateField(
-                          "nextEvent",
-                          "poster",
-                          `https://image.tmdb.org/t/p/w500${movie.poster_path}`
-                        );
-                        setNextSearchResults([]);
-                      }}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-    
-          {/* Next Screening - Details / Ticket + Chat Teaser */}
-          <div className="h-full flex flex-col">
-            {isEditing && canEdit ? (
-              <div className="space-y-3">
-                {/* Title */}
-                <label className="block text-xs uppercase tracking-wide text-zinc-400">
-                  Title
-                </label>
-                <input
-                  value={club.nextEvent.title}
-                  onChange={(e) =>
-                    updateField("nextEvent", "title", e.target.value)
-                  }
-                  className="w-full bg-zinc-800 p-2 rounded"
-                  placeholder="Film title"
-                  aria-label="Event title"
-                />
-    
-                {/* Location */}
-                <label className="block text-xs uppercase tracking-wide text-zinc-400">
-                  Location
-                </label>
-                <div className="relative">
-                  <MapPin className="w-4 h-4 text-yellow-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <input
-                    value={club.nextEvent.location}
-                    onChange={(e) =>
-                      updateField("nextEvent", "location", e.target.value)
-                    }
-                    className="w-full bg-zinc-800 p-2 pl-9 rounded"
-                    placeholder="Venue, area (e.g., Electric Cinema, Notting Hill)"
-                    aria-label="Event location"
-                  />
-                </div>
-    
-                {/* Tagline */}
-                <label className="block text-xs uppercase tracking-wide text-zinc-400">
-                  Tagline
-                </label>
-                <textarea
-                  value={club.nextEvent.caption}
-                  onChange={(e) =>
-                    updateField("nextEvent", "caption", e.target.value)
-                  }
-                  className="w-full bg-zinc-800 p-2 rounded"
-                  placeholder="Optional note for the ticket"
-                  aria-label="Event caption"
-                />
-    
-                {/* Date & time */}
-                <label className="block text-xs uppercase tracking-wide text-zinc-400">
-                  Date &amp; time
-                </label>
-                <DatePicker
-                  selected={new Date(club.nextEvent.date)}
-                  onChange={(date) =>
-                    updateField("nextEvent", "date", date.toISOString())
-                  }
-                  showTimeSelect
-                  dateFormat="Pp"
-                  className="bg-zinc-800 text-white p-2 rounded w-full"
-                />
-    
-                {/* Save */}
-                <div className="pt-2">
-                  <button
-                    type="button"
-                    onClick={saveNextScreening}
-                    className="inline-flex items-center gap-2 rounded bg-yellow-500 px-3 py-1.5 text-black text-sm font-semibold hover:bg-yellow-400"
-                  >
-                    Save Next Screening
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <TicketCard
-                title={club.nextEvent.title}
-                tagline={club.nextEvent.caption}
-                location={club.nextEvent.location}
-                datetime={new Date(club.nextEvent.date).toLocaleString([], {
-                  dateStyle: "medium",
-                  timeStyle: "short",
-                })}
-                onClick={() => {
-                  navigate(`/clubs/${club.slug || club.id}/events/next`, {
-                    state: {
-                      clubName: club.name,
-                      event: club.nextEvent,
-                      clubId: club.id,
-                    },
-                  });
-                }}
-              />
-            )}
-    
-            {/* Chat teaser */}
-            <div ref={teaserWrapRef} className="mt-6 hidden md:block">
-              <div
-                className="rounded-2xl border border-zinc-800 bg-black/50 overflow-hidden"
-                style={teaserHeight ? { height: teaserHeight } : undefined}
-              >
-                <ClubChatTeaserCard clubId={club.id} slug={club.slug} />
-              </div>
-            </div>
-          </div>
-        </div>
-    
-        {/* Club Intro: About + Featured Films (merged) */}
-        <div className="px-6 pt-8">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* About (left) */}
-            <div>
-              <h2 className="text-lg font-bold text-yellow-400 mb-2">About</h2>
-              {isEditing && canEdit ? (
-                <textarea
-                  value={club.about}
-                  onChange={(e) =>
-                    setClub((prev) => ({ ...prev, about: e.target.value }))
-                  }
-                  className="w-full bg-zinc-800 p-3 rounded text-sm"
-                  rows={6}
-                  aria-label="About the club"
-                />
-              ) : (
-                <p className="text-sm text-zinc-300 leading-relaxed">
-                  {club.about || "—"}
-                </p>
-              )}
-            </div>
-    
-            {/* Featured Films (right, spans 2 columns) */}
-            <section className="lg:col-span-2">
-              <h2 className="text-lg font-bold text-yellow-400 flex items-center mb-2">
-                <Star className="w-5 h-5 mr-2" /> Featured Films
-              </h2>
-    
-              {/* Search results (edit mode only) */}
-              {isEditing && canEdit && featuredResults.length > 0 && (
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 mb-4">
-                  {featuredResults.map((m) => {
-                    const poster = m.poster_path
-                      ? `https://image.tmdb.org/t/p/w500${m.poster_path}`
-                      : "";
-                    const isSelected = selectedResultId === m.id;
-    
-                    async function handlePick() {
-                      if (!poster) return;
-                      setSelectedResultId(m.id);
-                      await addFeaturedFilm(poster, {
-                        id: m.id,
-                        title: m.title || m.name,
-                      });
-                      setTimeout(() => {
-                        setFeaturedResults((prev) =>
-                          prev.filter((x) => x.id !== m.id)
-                        );
-                        setSelectedResultId(null);
-                      }, 700);
-                    }
-    
-                    return (
-                      <button
-                        key={m.id}
-                        type="button"
-                        onClick={handlePick}
-                        disabled={isSelected}
-                        className={[
-                          "group relative overflow-hidden rounded-lg ring-1 ring-white/10 bg-white/5",
-                          "transition transform duration-150",
-                          isSelected
-                            ? "ring-yellow-500 scale-[1.02]"
-                            : "hover:scale-[1.02]",
-                        ].join(" ")}
-                        title={m.title || m.name}
-                      >
-                        {/* hover pop */}
-                        {!isSelected && (
-                          <div className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition bg-yellow-500/10 ring-2 ring-yellow-500/70" />
-                        )}
-    
-                        {/* selected overlay + check */}
-                        {isSelected && (
-                          <>
-                            <div className="pointer-events-none absolute inset-0 bg-yellow-500/20 ring-2 ring-yellow-500" />
-                            <div className="pointer-events-none absolute top-2 right-2 rounded-full bg-black/70 p-1.5">
-                              <Check className="w-4 h-4 text-yellow-400" />
-                            </div>
-                            <div className="pointer-events-none absolute bottom-0 left-0 right-0 bg-black/70 text-[11px] text-yellow-300 px-2 py-1 text-center">
-                              Added!
-                            </div>
-                          </>
-                        )}
-    
-                        <div className="aspect-[2/3] w-full overflow-hidden">
-                          {poster ? (
-                            <img
-                              src={poster}
-                              alt={m.title || m.name}
-                              className="h-full w-full object-cover"
-                              loading="lazy"
-                            />
-                          ) : (
-                            <div className="h-full w-full grid place-items-center text-xs text-zinc-400">
-                              No poster
-                            </div>
-                          )}
-                        </div>
-    
-                        {!isSelected && (
-                          <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-[11px] text-white px-2 py-1 text-center">
-                            {m.title || m.name}
-                          </div>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-    
-              {/* Current featured films grid */}
-              <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
-                {(club.featuredFilms || []).map((url, idx) => {
-                  const meta = club.featuredMap?.[url];
-    
-                  const PosterInner = (
-                    <>
-                      <div className="aspect-[2/3] w-full overflow-hidden rounded-lg">
-                        <img
-                          src={url}
-                          alt={
-                            meta?.title ? `${meta.title} poster` : "Featured film poster"
-                          }
-                          className="h-full w-full object-cover"
-                          loading="lazy"
-                        />
-                      </div>
-    
-                      {isEditing && canEdit && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            removeFeaturedFilm(idx);
-                          }}
-                          className="absolute top-2 right-2 inline-flex items-center justify-center rounded-full bg-black/70 hover:bg-black/90 focus:outline-none focus:ring-2 focus:ring-yellow-500 w-7 h-7 opacity-0 group-hover:opacity-100 transition"
-                          title="Remove from Featured"
-                          aria-label="Remove from Featured"
-                        >
-                          <Trash2 className="w-4 h-4 text-white" />
-                        </button>
-                      )}
-                    </>
-                  );
-    
-                  if (meta?.id) {
-                    return (
-                      <Link
-                        key={`${url}-${idx}`}
-                        to={`/movies/${meta.id}`}
-                        className="relative group rounded-lg overflow-hidden ring-0 transition transform hover:scale-[1.02] hover:ring-2 hover:ring-yellow-500/70 hover:shadow-xl"
-                        aria-label={meta?.title || "Open movie"}
-                      >
-                        {PosterInner}
-                      </Link>
-                    );
-                  }
-    
-                  return (
-                    <div
-                      key={`${url}-${idx}`}
-                      className="relative group rounded-lg overflow-hidden ring-0 bg-zinc-800"
-                      title={isEditing ? "Not linked to a movie" : undefined}
-                    >
-                      {PosterInner}
-                      {isEditing && (
-                        <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-[11px] text-yellow-300 px-2 py-1 text-center">
-                          Not linked — use search above to fix
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-    
-              {isEditing && canEdit && showFeaturedTip && (
-                <div className="mt-3 rounded-xl border border-yellow-500/40 bg-yellow-500/10 px-3 py-2 text-sm text-yellow-300">
-                  Showcase your taste to attract new members — pick a few films you love.
-                  <button
-                    className="ml-2 underline"
-                    onClick={() => setShowFeaturedTip(false)}
-                  >
-                    Got it
-                  </button>
-                </div>
-              )}
-            </section>
-          </div>
-        </div>
-    
-        {/* Nominations */}
-        <NominationsPanel
-          clubId={club.id}
-          canNominate={isMember}
-          isLeader={
-            isPresident ||
-            hasRole("president") ||
-            isVice ||
-            hasRole("vice_president")
-          }
-          canRemove={
-            isEditing &&
-            (isPresident ||
-              hasRole("president") ||
-              isVice ||
-              hasRole("vice_president") ||
-              hasRole("editor_in_chief"))
-          }
-          posterHoverClass="transition transform hover:scale-[1.02] hover:ring-2 hover:ring-yellow-500/70 hover:shadow-xl"
-          onPosterClick={(movie) => movie?.id && navigate(`/movies/${movie.id}`)}
-        />
-    
-        {/* Recent Activity */}
-        <div className="px-6 pt-8">
-          <h2 className="text-lg font-bold text-yellow-400 mb-3">Recent Activity</h2>
-          <ul className="space-y-2">
-            {(club.activityFeed || []).slice(0, 6).map((item) => (
-              <li key={item.id} className="text-sm text-zinc-300">
-                <span className="text-zinc-400 mr-2">
-                  {new Date(item.ts).toLocaleDateString([], {
-                    month: "short",
-                    day: "numeric",
-                  })}
+                <span className="inline-flex items-center gap-1 text-xs opacity-70">
+                  <Shield size={14} /> Presidents only
                 </span>
-                {item.text}
-              </li>
-            ))}
-            {(!club.activityFeed || club.activityFeed.length === 0) && (
-              <li className="text-sm text-zinc-500">No activity yet.</li>
-            )}
-          </ul>
+              </div>
+              {!!renameError && (
+                <span className="text-red-400 text-xs mt-1">{renameError}</span>
+              )}
+              {!!renameOk && (
+                <span className="text-green-400 text-xs mt-1">{renameOk}</span>
+              )}
+              {nextRenameDate && (
+                <div className="text-xs opacity-70 mt-1">
+                  Next rename after: {nextRenameDate.toLocaleDateString()}
+                </div>
+              )}
+            </div>
+          ) : (
+            <h1 className="text-3xl font-bold">{club.name}</h1>
+          )}
         </div>
-    
-       {/* Full Members Dialog */}
-{showMembersDialog && (
-  <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-    <div className="bg-neutral-950 border border-neutral-800 rounded-xl max-w-3xl w-full p-6 relative">
-      <button
-        className="absolute top-3 right-3 text-neutral-400 hover:text-white"
-        onClick={() => setShowMembersDialog(false)}
-        aria-label="Close"
-      >
-        ✕
-      </button>
+      </div>
 
-      <h2 className="text-xl font-bold mb-4 text-white">
-        Members • {members.length}
-      </h2>
+      {/* RIGHT: banner editing controls */}
+      {canEdit && isEditing && (
+        <label
+          className="absolute top-3 right-12 bg-black bg-opacity-60 rounded-full p-2 cursor-pointer hover:bg-opacity-80"
+          aria-label="Upload new banner image"
+        >
+          <ImagePlus size={18} />
+          <input
+            type="file"
+            accept="image/*"
+            onChange={(e) => handleImageUpload(e, "banner")}
+            className="hidden"
+          />
+        </label>
+      )}
 
-      <input
-        value={memberSearch}
-        onChange={(e) => setMemberSearch(e.target.value)}
-        placeholder="Search members…"
-        className="w-full rounded-xl bg-neutral-900 px-3 py-2 text-sm text-neutral-100 outline-none ring-1 ring-neutral-800 focus:ring-yellow-500 mb-4"
-        aria-label="Search members"
+      {canEdit && isEditing && (
+        <button
+          onClick={openReCrop}
+          title="Re-crop banner"
+          className="absolute top-3 right-28 bg-black bg-opacity-60 rounded-full p-2 hover:bg-opacity-80"
+          aria-label="Re-crop banner"
+        >
+          <CropIcon size={18} />
+        </button>
+      )}
+
+      {canEdit && (
+        <button
+          onClick={() => setIsEditing(!isEditing)}
+          className="ml-auto bg-zinc-800 px-3 py-1 rounded text-sm hover:bg-zinc-700"
+        >
+          {isEditing ? "Finish Editing" : "Edit"}
+        </button>
+      )}
+    </div>
+
+    {/* Notice Board — now global, under the banner */}
+    <div className="mt-6">
+      <ClubNoticeBoard clubId={club.id} />
+    </div>
+
+    {/* Banner cropper modal */}
+    {showBannerCropper && rawBannerImage && (
+      <BannerCropper
+        imageSrc={rawBannerImage}
+        aspect={16 / 9}
+        onCancel={() => {
+          setShowBannerCropper(false);
+          setRawBannerImage(null);
+        }}
+        onCropComplete={handleBannerCropComplete}
       />
+    )}
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-        {members
-          .filter((m) =>
-            !memberSearch ||
-            (m.profiles?.display_name || "")
-              .toLowerCase()
-              .includes(memberSearch.toLowerCase())
-          )
-          .map((m) => {
-            const p = m.profiles || {};
-            const name = p.display_name || "Member";
-            const avatar = p.avatar_url || "/avatar_placeholder.png";
-            const role = m.role;
+    {countdown && (
+      <div
+        className={`${
+          countdown.isUrgent ? "bg-red-600" : "bg-yellow-500"
+        } mt-4 mx-6 px-4 py-2 rounded-lg w-fit font-mono text-sm text-black`}
+        aria-live="polite"
+      >
+        {countdown.days}d {countdown.hours}h {countdown.minutes}m until screening
+      </div>
+    )}
+
+    {/* Members */}
+    <div className="mt-2 pl-5 md:pl-6">
+      <h3 className="text-sm font-semibold text-yellow-400 mb-2">Members</h3>
+
+      {membersLoading ? (
+        <div className="flex gap-2">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="h-10 w-10 rounded-full bg-white/10 animate-pulse" />
+          ))}
+        </div>
+      ) : !members?.length ? (
+        <div className="text-sm text-zinc-500">No members yet.</div>
+      ) : (
+        <div className="flex flex-wrap gap-4">
+          {members.map((m) => {
+            const p = m?.profiles || {};
+            const slug = p?.slug || m?.slug || null;
+            const uid = p?.id || m?.user_id || null;
+            const role = m?.role ?? m?.member_role ?? null;
+
+            const href = slug ? `/u/${slug}` : uid ? `/profile/${uid}` : "#";
+            const avatar =
+              p?.avatar_url || m?.avatar_url || "/avatar_placeholder.png";
+
+            let roleLabel = null;
+            if (role === "president") roleLabel = "President";
+            if (role === "vice_president") roleLabel = "Vice President";
+            if (role === "editor_in_chief") roleLabel = "Editor-in-Chief";
 
             return (
               <div
-                key={p.id || m.user_id}
-                className="flex items-center gap-3 rounded-xl bg-neutral-900/60 p-2 ring-1 ring-neutral-800"
+                key={uid || slug || `member-${Math.random()}`}
+                className="flex flex-col items-center w-16"
               >
-                <img
-                  src={avatar}
-                  alt={name}
-                  className="h-10 w-10 rounded-full"
-                  onError={(e) => {
-                    e.currentTarget.onerror = null;
-                    e.currentTarget.src = "/avatar_placeholder.png";
-                  }}
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm text-neutral-100 flex items-center gap-2">
-                    {name}
-                    {role === "president" && (
-                      <span
-                        className="w-3 h-3 rounded-full bg-yellow-500 inline-block"
-                        title="President"
-                      />
-                    )}
-                    {role === "vice_president" && (
-                      <span
-                        className="w-3 h-3 rounded-full bg-gray-400 inline-block"
-                        title="Vice President"
-                      />
-                    )}
-                    {role === "editor_in_chief" && (
-                      <span
-                        className="w-3 h-3 rounded-full bg-blue-400 inline-block"
-                        title="Editor in Chief"
-                      />
-                    )}
-                  </p>
-                </div>
-
-                {(isPresident || hasRole("president")) && (p.id !== user?.id) && (
-                  <div className="ml-auto flex items-center gap-2">
-                    {/* VP toggle */}
-                    {role === "vice_president" ? (
-                      <button
-                        onClick={() => setMemberRole(p.id, "member")}
-                        className="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700"
-                      >
-                        Remove VP
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => setMemberRole(p.id, "vice_president")}
-                        className="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700"
-                      >
-                        Make VP
-                      </button>
-                    )}
-
-                    {/* EIC toggle */}
-                    {role === "editor_in_chief" ? (
-                      <button
-                        onClick={() => setMemberRole(p.id, "member")}
-                        className="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700"
-                      >
-                        Remove EIC
-                      </button>
-                    ) : (
-                      <button
-                        onClick={() => setMemberRole(p.id, "editor_in_chief")}
-                        className="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700"
-                      >
-                        Make EIC
-                      </button>
-                    )}
-
-                    {/* Transfer presidency */}
-                    {role !== "president" && (
-                      <button
-                        onClick={() => transferPresidency(p.id)}
-                        className="text-[11px] px-2 py-1 rounded bg-yellow-500 text-black hover:bg-yellow-400"
-                      >
-                        Make President
-                      </button>
-                    )}
-                  </div>
+                <Link
+                  to={href}
+                  aria-label={roleLabel || "Member"}
+                  className="block h-12 w-12 rounded-full overflow-hidden ring-1 ring-white/10 hover:ring-yellow-400/60 transition"
+                >
+                  <img
+                    src={avatar}
+                    alt={roleLabel || "Member"}
+                    className="h-full w-full object-cover"
+                    onError={(e) => { e.currentTarget.src = "/avatar_placeholder.png"; }}
+                  />
+                </Link>
+                {roleLabel && (
+                  <span className="mt-1 text-[10px] text-yellow-400 text-center">
+                    {roleLabel}
+                  </span>
                 )}
               </div>
             );
           })}
+        </div>
+      )}
+    </div>
 
-        {members.filter((m) =>
-          !memberSearch ||
-          (m.profiles?.display_name || "")
-            .toLowerCase()
-            .includes(memberSearch.toLowerCase())
-        ).length === 0 && (
-          <p className="col-span-full text-sm text-neutral-400">
-            No members match “{memberSearch}”.
-          </p>
+    {/* =========================
+        Two-column grid (Poster • Details)
+    ========================= */}
+    <div className="p-6 grid md:grid-cols-2 gap-6">
+      {/* Next Screening - Poster */}
+      <div>
+        <h2 className="text-lg font-bold text-yellow-400 flex items-center mb-2">
+          <Film className="w-5 h-5 mr-2" /> Next Screening
+        </h2>
+
+        {club.nextEvent?.poster && (
+          <Link
+            to={club.nextEvent?.movieId ? `/movies/${club.nextEvent.movieId}` : "#"}
+            onClick={(e) => {
+              if (!club.nextEvent?.movieId) e.preventDefault();
+            }}
+            className="block rounded-lg overflow-hidden ring-0 transition-transform duration-150 hover:scale-[1.03] hover:ring-2 hover:ring-yellow-500/70 hover:shadow-xl"
+            title={club.nextEvent?.movieTitle || "Open movie details"}
+          >
+            <img
+              ref={posterRef}
+              src={club.nextEvent.poster}
+              alt={club.nextEvent?.movieTitle || "Next screening poster"}
+              className="w-full max-w-sm h-auto object-cover"
+              loading="lazy"
+            />
+          </Link>
+        )}
+
+        {canEdit && isEditing && (
+          <div className="mt-2">
+            <input
+              value={nextSearch}
+              onChange={(e) => setNextSearch(e.target.value)}
+              className="bg-zinc-800 p-1 rounded w-full"
+              placeholder="Search film title..."
+              aria-label="Search film title"
+            />
+            <button
+              onClick={handleNextEventSearch}
+              className="bg-yellow-500 text-black px-2 py-1 mt-1 rounded"
+            >
+              Search
+            </button>
+            <div className="grid grid-cols-2 gap-2 mt-2">
+              {nextSearchResults.map((movie) => (
+                <img
+                  key={movie.id}
+                  src={`https://image.tmdb.org/t/p/w500${movie.poster_path}`}
+                  alt={`${movie.title || "Film"} poster`}
+                  className="cursor-pointer hover:opacity-80"
+                  onClick={() => {
+                    updateField("nextEvent", "poster", `https://image.tmdb.org/t/p/w500${movie.poster_path}`);
+                    updateField("nextEvent", "movieId", movie.id);
+                    updateField("nextEvent", "movieTitle", movie.title || movie.name);
+                    setNextSearchResults([]);
+                  }}
+                />
+              ))}
+            </div>
+          </div>
         )}
       </div>
-    </div>
-  </div>
-)}{/* end Full Members Dialog */}
 
-</div> 
-);   
-}   
+      {/* Next Screening - Details / Ticket + Chat Teaser */}
+      <div className="h-full flex flex-col">
+        {isEditing && canEdit ? (
+          <div className="space-y-3">
+            {/* Title */}
+            <label className="block text-xs uppercase tracking-wide text-zinc-400">
+              Title
+            </label>
+            <input
+              value={club.nextEvent.title}
+              onChange={(e) =>
+                updateField("nextEvent", "title", e.target.value)
+              }
+              className="w-full bg-zinc-800 p-2 rounded"
+              placeholder="Film title"
+              aria-label="Event title"
+            />
+
+            {/* Location */}
+            <label className="block text-xs uppercase tracking-wide text-zinc-400">
+              Location
+            </label>
+            <div className="relative">
+              <MapPin className="w-4 h-4 text-yellow-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                value={club.nextEvent.location}
+                onChange={(e) =>
+                  updateField("nextEvent", "location", e.target.value)
+                }
+                className="w-full bg-zinc-800 p-2 pl-9 rounded"
+                placeholder="Venue, area (e.g., Electric Cinema, Notting Hill)"
+                aria-label="Event location"
+              />
+            </div>
+
+            {/* Tagline */}
+            <label className="block text-xs uppercase tracking-wide text-zinc-400">
+              Tagline
+            </label>
+            <textarea
+              value={club.nextEvent.caption}
+              onChange={(e) =>
+                updateField("nextEvent", "caption", e.target.value)
+              }
+              className="w-full bg-zinc-800 p-2 rounded"
+              placeholder="Optional note for the ticket"
+              aria-label="Event caption"
+            />
+
+            {/* Date & time */}
+            <label className="block text-xs uppercase tracking-wide text-zinc-400">
+              Date &amp; time
+            </label>
+            <DatePicker
+              selected={new Date(club.nextEvent.date)}
+              onChange={(date) =>
+                updateField("nextEvent", "date", date.toISOString())
+              }
+              showTimeSelect
+              dateFormat="Pp"
+              className="bg-zinc-800 text-white p-2 rounded w-full"
+            />
+
+            {/* Save */}
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={saveNextScreening}
+                className="inline-flex items-center gap-2 rounded bg-yellow-500 px-3 py-1.5 text-black text-sm font-semibold hover:bg-yellow-400"
+              >
+                Save Next Screening
+              </button>
+            </div>
+          </div>
+        ) : (
+          <TicketCard
+            title={club.nextEvent.title}
+            tagline={club.nextEvent.caption}
+            location={club.nextEvent.location}
+            datetime={new Date(club.nextEvent.date).toLocaleString([], {
+              dateStyle: "medium",
+              timeStyle: "short",
+            })}
+            onClick={() => {
+              navigate(`/clubs/${club.slug || club.id}/events/next`, {
+                state: {
+                  clubName: club.name,
+                  event: club.nextEvent,
+                  clubId: club.id,
+                },
+              });
+            }}
+          />
+        )}
+
+        {/* Chat teaser */}
+        <div ref={teaserWrapRef} className="mt-6 hidden md:block">
+          <div
+            className="rounded-2xl border border-zinc-800 bg-black/50 overflow-hidden"
+            style={teaserHeight ? { height: teaserHeight } : undefined}
+          >
+            <ClubChatTeaserCard clubId={club.id} slug={club.slug} />
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {/* Club Intro: About + Featured Films (merged) */}
+    <div className="px-6 pt-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* About (left) */}
+        <div>
+          <h2 className="text-lg font-bold text-yellow-400 mb-2">About</h2>
+          {isEditing && canEdit ? (
+            <textarea
+              value={club.about}
+              onChange={(e) => setClub((prev) => ({ ...prev, about: e.target.value }))}
+              className="w-full bg-zinc-800 p-3 rounded text-sm"
+              rows={6}
+              aria-label="About the club"
+            />
+          ) : (
+            <p className="text-sm text-zinc-300 leading-relaxed">
+              {club.about || "—"}
+            </p>
+          )}
+        </div>
+
+        {/* Featured Films (right, spans 2 columns) */}
+        <section className="lg:col-span-2">
+          <h2 className="text-lg font-bold text-yellow-400 flex items-center mb-2">
+            <Star className="w-5 h-5 mr-2" /> Featured Films
+          </h2>
+
+          {/* Search results (edit mode only) */}
+          {isEditing && canEdit && featuredResults.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 mb-4">
+              {featuredResults.map((m) => {
+                const poster = m.poster_path ? `https://image.tmdb.org/t/p/w500${m.poster_path}` : "";
+                const isSelected = selectedResultId === m.id;
+
+                async function handlePick() {
+                  if (!poster) return;
+                  setSelectedResultId(m.id);
+                  await addFeaturedFilm(poster, {
+                    id: m.id,
+                    title: m.title || m.name,
+                  });
+                  setTimeout(() => {
+                    setFeaturedResults((prev) => prev.filter((x) => x.id !== m.id));
+                    setSelectedResultId(null);
+                  }, 700);
+                }
+
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={handlePick}
+                    disabled={isSelected}
+                    className={[
+                      "group relative overflow-hidden rounded-lg ring-1 ring-white/10 bg-white/5",
+                      "transition transform duration-150",
+                      isSelected ? "ring-yellow-500 scale-[1.02]" : "hover:scale-[1.02]",
+                    ].join(" ")}
+                    title={m.title || m.name}
+                  >
+                    {!isSelected && (
+                      <div className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition bg-yellow-500/10 ring-2 ring-yellow-500/70" />
+                    )}
+                    {isSelected && (
+                      <>
+                        <div className="pointer-events-none absolute inset-0 bg-yellow-500/20 ring-2 ring-yellow-500" />
+                        <div className="pointer-events-none absolute top-2 right-2 rounded-full bg-black/70 p-1.5">
+                          <Check className="w-4 h-4 text-yellow-400" />
+                        </div>
+                        <div className="pointer-events-none absolute bottom-0 left-0 right-0 bg-black/70 text-[11px] text-yellow-300 px-2 py-1 text-center">
+                          Added!
+                        </div>
+                      </>
+                    )}
+                    <div className="aspect-[2/3] w-full overflow-hidden">
+                      {poster ? (
+                        <img
+                          src={poster}
+                          alt={m.title || m.name}
+                          className="h-full w-full object-cover"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="h-full w-full grid place-items-center text-xs text-zinc-400">
+                          No poster
+                        </div>
+                      )}
+                    </div>
+                    {!isSelected && (
+                      <div className="absolute bottom-0 left-0 right-0 bg-black/70 text-[11px] text-white px-2 py-1 text-center">
+                        {m.title || m.name}
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Current featured films grid */}
+          <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
+            {(club.featuredFilms || []).map((url, idx) => {
+              const meta = club.featuredMap?.[url];
+
+              const PosterInner = (
+                <>
+                  <div className="aspect-[2/3] w-full overflow-hidden rounded-lg">
+                    <img
+                      src={url}
+                      alt={meta?.title ? `${meta.title} poster` : "Featured film poster"}
+                      className="h-full w-full object-cover"
+                      loading="lazy"
+                    />
+                  </div>
+
+                  {isEditing && canEdit && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeFeaturedFilm(idx);
+                      }}
+                      className="absolute top-2 right-2 inline-flex items-center justify-center rounded-full bg-black/70 hover:bg-black/90 focus:outline-none focus:ring-2 focus:ring-yellow-500 w-7 h-7 opacity-0 group-hover:opacity-100 transition"
+                      title="Remove from Featured"
+                      aria-label="Remove from Featured"
+                    >
+                      <Trash2 className="w-4 h-4 text-white" />
+                    </button>
+                  )}
+                </>
+              );
+
+              if (meta?.id) {
+                return (
+                  <Link
+                    key={`${url}-${idx}`}
+                    to={`/movies/${meta.id}`}
+                    className="relative group rounded-lg overflow-hidden ring-0 transition transform hover:scale-[1.02] hover:ring-2 hover:ring-yellow-500/70 hover:shadow-xl"
+                    aria-label={meta?.title || "Open movie"}
+                  >
+                    {PosterInner}
+                  </Link>
+                );
+              }
+
+              return (
+                <div
+                  key={`${url}-${idx}`}
+                  className="relative group rounded-lg overflow-hidden ring-0 bg-zinc-800 transition transform hover:scale-[1.02] hover:ring-2 hover:ring-yellow-500/70 hover:shadow-xl"
+                  title={isEditing ? "Not linked to a movie" : undefined}
+                >
+                  {PosterInner}
+                  {isEditing && (
+                    <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-[11px] text-yellow-300 px-2 py-1 text-center">
+                      Not linked — use search above to fix
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      </div>
+    </div>
+
+    {/* Nominations */}
+    <NominationsPanel
+      clubId={club.id}
+      canNominate={isMember}
+      isLeader={
+        isPresident ||
+        hasRole("president") ||
+        isVice ||
+        hasRole("vice_president")
+      }
+      canRemove={
+        isEditing &&
+        (isPresident ||
+          hasRole("president") ||
+          isVice ||
+          hasRole("vice_president") ||
+          hasRole("editor_in_chief"))
+      }
+      posterHoverClass="transition transform hover:scale-[1.02] hover:ring-2 hover:ring-yellow-500/70 hover:shadow-xl"
+      onPosterClick={(movie) => movie?.id && navigate(`/movies/${movie.id}`)}
+    />
+
+    {/* Recent Activity */}
+    <div className="px-6 pt-8">
+      <h2 className="text-lg font-bold text-yellow-400 mb-3">Recent Activity</h2>
+      <ul className="space-y-2">
+        {(club.activityFeed || []).slice(0, 6).map((item) => (
+          <li key={item.id} className="text-sm text-zinc-300">
+            <span className="text-zinc-400 mr-2">
+              {new Date(item.ts).toLocaleDateString([], {
+                month: "short",
+                day: "numeric",
+              })}
+            </span>
+            {item.text}
+          </li>
+        ))}
+        {(!club.activityFeed || club.activityFeed.length === 0) && (
+          <li className="text-sm text-zinc-500">No activity yet.</li>
+        )}
+      </ul>
+    </div>
+
+    {/* Full Members Dialog */}
+    {showMembersDialog && (
+      <MembersDialog
+        onClose={() => setShowMembersDialog(false)}
+        members={members}
+        memberSearch={memberSearch}
+        setMemberSearch={setMemberSearch}
+        isPresident={isPresident}
+        hasRole={hasRole}
+        user={user}
+        setMemberRole={setMemberRole}
+        transferPresidency={transferPresidency}
+      />
+    )}
+    </div>
+); // end return
+}   // end function ClubProfile
+
+export default ClubProfile;
+
 
 
