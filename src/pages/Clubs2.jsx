@@ -13,16 +13,16 @@ import './Clubs2.css';
 
 /* ---------- Base data ---------- */
 const baseClubs = [
-  { id: '1', name: 'Club 001', image: '/club-images/Club1-PFP.jpeg' },
-  { id: '2', name: 'Club 002', image: '/club-images/Club2-PFP.jpeg' },
-  { id: '3', name: 'Club 003', image: '/club-images/Club3-PFP.jpeg' },
-  { id: '4', name: 'Club 004', image: '/club-images/Club4-PFP.jpeg' },
-  { id: '5', name: 'Club 005', image: '/club-images/Club5-PFP.jpeg' },
-  { id: '6', name: 'Club 006', image: '/club-images/Club6-PFP.jpeg' },
-  { id: '7', name: 'Club 007', image: '/club-images/Club7-PFP.jpeg' },
-  { id: '8', name: 'Club 008', image: '/club-images/Club8-PFP.jpeg' },
-  { id: '9', name: 'Club 009', image: '/club-images/Club9-PFP.jpeg' },
-  { id: '10', name: 'Club 010', image: '/club-images/Club10-PFP.jpeg' },
+  { id: '1', name: 'Cinephiles United', image: '/club-images/Club1-PFP.jpeg' },
+  { id: '2', name: 'Frame by Frame', image: '/club-images/Club2-PFP.jpeg' },
+  { id: '3', name: 'The Reel Critics', image: '/club-images/Club3-PFP.jpeg' },
+  { id: '4', name: 'Indie Icons', image: '/club-images/Club4-PFP.jpeg' },
+  { id: '5', name: 'Hollywood Nights', image: '/club-images/Club5-PFP.jpeg' },
+  { id: '6', name: 'Foreign Film Society', image: '/club-images/Club6-PFP.jpeg' },
+  { id: '7', name: 'Late Night Screenings', image: '/club-images/Club7-PFP.jpeg' },
+  { id: '8', name: 'Couch Critics', image: '/club-images/Club8-PFP.jpeg' },
+  { id: '9', name: 'Cinema Underground', image: '/club-images/Club9-PFP.jpeg' },
+  { id: '10', name: 'Projector Club', image: '/club-images/Club10-PFP.jpeg' },
 ];
 
 /* Deterministic “metadata” so filters + badges have something to work with */
@@ -328,13 +328,8 @@ export default function Clubs2() {
         </div>
       </aside>
 
-<<<<<<< HEAD
-      <main className="relative flex-1 min-w-0 h-full overflow-y-auto pr-6 pt-8
-                      bg-gradient-to-b from-zinc-900 via-black to-zinc-900">
-=======
       {/* Main */}
       <main className="relative flex-1 min-w-0 h-full overflow-y-auto pr-6 pt-8">
->>>>>>> 9c224e1 (Events page added)
         <div className="flex items-end justify-between mb-4 pr-2">
           <div>
             <h2 className="text-3xl font-bold mb-1">Popular</h2>
@@ -452,26 +447,6 @@ export default function Clubs2() {
           </div>
         </div>
 
-<<<<<<< HEAD
-        <section className="rounded-xl border border-zinc-700 bg-zinc-900/60 p-5 overflow-hidden">
-          <Swiper {...swiperConfig} className="!w-full">
-            {popularClubs.map((club, index) => (
-              <SwiperSlide key={`popular-${index}`} className="!w-[220px]">
-                <Link to={`/club/${club.id}`} className="block bg-zinc-800 rounded-lg border border-zinc-700 shadow-md hover:shadow-yellow-500/20 hover:border-zinc-500 transition-transform duration-300 ease-out hover:scale-105">
-                  <div className="w-full h-56 bg-zinc-700 rounded-t-lg overflow-hidden">
-                    <img
-                      src={club.image}
-                      alt={club.name}
-                      loading="lazy"
-                      className="w-full h-full object-cover"
-                      onError={(e) => { e.currentTarget.src = 'https://via.placeholder.com/300x160?text=Coming+Soon'; }}
-                    />
-                  </div>
-                  <div className="p-3 text-white text-lg font-semibold">{club.name}</div>
-                </Link>
-              </SwiperSlide>
-            ))}
-=======
         {/* Carousel */}
         <section className="p-5">
           {filtered.length === 0 && (
@@ -511,7 +486,6 @@ export default function Clubs2() {
                 </SwiperSlide>
               );
             })}
->>>>>>> 9c224e1 (Events page added)
           </Swiper>
         </section>
         {/* Happening soon */}

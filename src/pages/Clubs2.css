@@ -1,53 +1,9 @@
-<<<<<<< HEAD
-/* ---- Clubs2.css (scoped to this page only) ---- */
-
-/* Belt-and-braces: never allow horizontal scrolling on this page */
-.clubs2 { overflow-x: hidden; }
-
-/* Contain loop clones inside the carousel viewport */
-.clubs2 .swiper { overflow: hidden; }
-
-/* Give each slide a fixed width so Swiper can calculate a sane track size */
-=======
 /* Swiper slide width so the track is measured correctly */
->>>>>>> 9c224e1 (Events page added)
 .clubs2 .swiper-slide {
   width: 220px !important;
   flex: 0 0 220px !important;
   box-sizing: border-box;
 }
-<<<<<<< HEAD
-
-/* Optional: raise arrow buttons above cards/tooltip */
-.clubs2 .swiper-button-next,
-.clubs2 .swiper-button-prev { z-index: 10; }
-
-/* (Optional) responsive slide widths
-@media (min-width: 640px)  { .clubs2 .swiper-slide { width: 240px !important; flex-basis: 240px !important; } }
-@media (min-width: 1280px) { .clubs2 .swiper-slide { width: 260px !important; flex-basis: 260px !important; } }
-*/
-
-/* ---- Clubs2.css ---- */
-.clubs2 { overflow-x: hidden; }
-
-.clubs2 .swiper { overflow: hidden; }
-
-.clubs2 .swiper-slide {
-  width: 220px !important;
-  flex: 0 0 auto !important;
-  box-sizing: border-box;
-  overflow: visible;
-}
-
-.clubs2 .swiper-button-next,
-.clubs2 .swiper-button-prev { z-index: 10; }
-
-/* Responsive slide widths */
-@media (min-width: 640px)  { .clubs2 .swiper-slide { width: 240px !important; flex-basis: 240px !important; } }
-@media (min-width: 1280px) { .clubs2 .swiper-slide { width: 260px !important; flex-basis: 260px !important; } }
-
-.clubs2 .swiper { overscroll-behavior-x: contain; }
-=======
 @media (min-width: 640px) {
   .clubs2 .swiper-slide { width: 240px !important; flex-basis: 240px !important; }
 }
@@ -373,4 +329,3 @@
   margin-top:2px;
 }
 .event-card:hover .event-cta{ filter:brightness(1.05); }
->>>>>>> 9c224e1 (Events page added)
