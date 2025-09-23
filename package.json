@@ -26,13 +26,10 @@
     "react-datepicker": "^8.4.0",
     "react-dom": "18.2.0",
     "react-easy-crop": "^5.4.2",
-<<<<<<< HEAD
     "react-hot-toast": "^2.6.0",
-=======
     "react-konva": "^18.2.14",
->>>>>>> 9c224e1 (Events page added)
     "react-router-dom": "^7.5.2",
-    "react-scripts": "5.0.1",
+    "react-scripts": "^5.0.1",
     "swiper": "^11.2.10",
     "web-vitals": "^2.1.4"
   },

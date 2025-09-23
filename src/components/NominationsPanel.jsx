@@ -1,9 +1,10 @@
 // src/components/NominationsPanel.jsx
-import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import React, { useMemo, useState, useEffect } from "react";
 import supabase from "../supabaseClient.js";
 import { Trash2 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom"; // ← single merged import
+import { useNavigate, useParams } from "react-router-dom";
+
 
 
 const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
