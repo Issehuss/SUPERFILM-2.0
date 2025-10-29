@@ -17,3 +17,18 @@
 .glow-purple {
   box-shadow: 0 0 10px 2px #a855f7;
 }
+
+/* === Profile Theme CSS Vars === */
+.sf-theme {
+  --sf-accent: #FACC15;
+  --sf-card-bg: rgba(24,24,27,0.6);
+  --sf-outline: rgba(255,255,255,0.06);
+  --sf-glow-from: rgba(250,204,21,0.18);
+  --sf-glow-to: rgba(250,204,21,0.02);
+}
+
+.sf-theme .themed-outline { border-color: var(--sf-outline); }
+.sf-theme .themed-card   { background: var(--sf-card-bg); }
+.sf-theme .themed-cta    { background: var(--sf-accent); color: #000; }
+.sf-theme .themed-glow   { background: radial-gradient(60% 60% at 50% 40%, var(--sf-glow-from) 0%, var(--sf-glow-to) 100%); }
+

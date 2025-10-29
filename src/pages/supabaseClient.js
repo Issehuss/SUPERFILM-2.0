@@ -1,22 +1,32 @@
+// src/supabaseClient.js
 import { createClient } from "@supabase/supabase-js";
-import { getEnv } from "./utils/env";
+import { env } from "./lib/env";
 
-const SUPABASE_URL = getEnv("SUPABASE_URL");
-const SUPABASE_ANON_KEY = getEnv("SUPABASE_ANON_KEY");
+/**
+ * Create a single supabase-js v2 client for the app.
+ * - If SUPABASE_FUNCTIONS_URL is set, Functions will use that origin.
+ *   (Otherwise they default to `${SUPABASE_URL}/functions/v1`.)
+ * - Auth session is persisted and auto-refreshed.
+ * - A tiny client header to help trace requests in logs.
+ */
+const options = {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+  },
+  global: {
+    headers: {
+      "x-client-info": "superfilm-web",
+    },
+  },
+};
 
-if (!SUPABASE_URL) {
-  throw new Error(
-    "Missing Supabase URL. Set REACT_APP_SUPABASE_URL (CRA) or VITE_SUPABASE_URL (Vite)."
-  );
+// Optional override for Functions host (useful for custom domain / edge region)
+if (env.SUPABASE_FUNCTIONS_URL) {
+  options.functions = { url: env.SUPABASE_FUNCTIONS_URL };
 }
-if (!SUPABASE_ANON_KEY) {
-  throw new Error(
-    "Missing Supabase anon key. Set REACT_APP_SUPABASE_ANON_KEY (CRA) or VITE_SUPABASE_ANON_KEY (Vite)."
-  );
-}
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-  auth: { persistSession: true, autoRefreshToken: true },
-});
+const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, options);
 
 export default supabase;

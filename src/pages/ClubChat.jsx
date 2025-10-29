@@ -1,240 +1,145 @@
+// src/pages/ClubChat.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Send, Users, Image as ImageIcon, X } from "lucide-react";
+import { ArrowLeft, Send, Users, Image as ImageIcon, X, Plus } from "lucide-react";
 import supabase from "../supabaseClient";
 import { useUser } from "../context/UserContext";
 import MessageItem from "../components/MessageItem";
-import useReports from "../hooks/useReports";
-import ReportModal from "../components/ReportModal";
 import PollComposer from "../components/polls/PollComposer";
-import { Plus } from "lucide-react";   // for the tools button
-
-
-
-
-
-
-
-/**
- * ClubChat.jsx — page-scroll version (no inner scrollbar)
- * ----------------------------------------------------------------------
- * Avatars:
- * - Initial fetch loads messages, then hydrates sender profiles (avatar_url, display_name, slug)
- * - Realtime INSERT also hydrates the sender’s profile
- * - Optimistic sends include the current user's profile so your own avatar shows instantly
- *
- * Scrolling:
- * - Removed inner container overflow/height; page owns scrolling now
- * - scrollToBottom() scrolls window/document
- * ----------------------------------------------------------------------
- */
+import { toast } from "react-hot-toast";
 
 const PAGE_SIZE = 50;
 const CHAT_BUCKET = "chat-images";
+const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isTempMessage(m) {
+  const id = String(m?.id || "");
+  return id.startsWith("temp_") || !UUID_RX.test(id) || m._optimistic === true;
+}
 
 export default function ClubChat() {
-  // Params: could be an actual UUID, or a slug
-  const { clubId: legacyClubId } = useParams(); // legacy /club/:clubId/chat
-  const { clubParam } = useParams();            // new     /clubs/:clubParam/chat
-
+  // Route params (support legacy id and new slug forms)
+  const { clubId: legacyClubId } = useParams();
+  const { clubParam } = useParams();
   const navigate = useNavigate();
   const { user } = useUser();
-  const { reportContent } = useReports();
 
-  // State that will always hold the real UUID
-  const [clubId, setClubId] = useState(null);
-  
-
-  // Resolve the route param (could be UUID or slug) into a real UUID
-useEffect(() => {
-  const routeId = (clubParam ?? legacyClubId) || "";
-  if (!routeId) return;
-
-  const UUID_RX =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-  if (UUID_RX.test(routeId)) {
-    setClubId(routeId);
-    return;
-  }
-
-  let cancelled = false;
-  (async () => {
-    const { data, error } = await supabase
-  .from("v_club_messages")
-  .select("*")
-  .eq("club_id", clubId)
-  .order("created_at", { ascending: true });
-
-const messages = (data || []).map(m => ({
-  ...m,
-  role: m.member_role,   // <- RoleBadge will use this
-  profiles: {
-    id: m.profile_id,
-    slug: m.profile_slug,
-    display_name: m.profile_display_name,
-    avatar_url: m.profile_avatar_url,
-  },
-}));
-
-setMessages(messages);
-setLoading(false);
-
-
-    if (!cancelled && data?.id) setClubId(data.id);
-    if (error) console.error("Failed to load club by slug", error);
-  })();
-
-  return () => {
-    cancelled = true;
-  };
-}, [clubParam, legacyClubId]);
-
-
-
-
-  // allow either slug or id to be passed in the URL
-  const [clubRow, setClubRow] = useState(null);
+  // Resolved club data
+  const [clubId, setClubId] = useState(null);      // raw param if UUID
+  const [clubRow, setClubRow] = useState(null);    // row from clubs (id, slug, name)
   const clubKey = (clubId || clubParam || "").trim();
 
-  // messages + ui state
+  // Chat state
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [online, setOnline] = useState(0);
+  const [isAdmin, setIsAdmin] = useState(false);
 
-  // image compose state
+  // Composer state
   const [imageFile, setImageFile] = useState(null);
   const [imageObjectUrl, setImageObjectUrl] = useState("");
 
-  // admin role
-  const [isAdmin, setIsAdmin] = useState(false);
+  // Tools / polls
+  const [showTools, setShowTools] = useState(false);
+  const [showPollComposer, setShowPollComposer] = useState(false);
 
+  // Reporting UI state (banner/spinner)
+  const [reporting, setReporting] = useState(false);
+  const [reportError, setReportError] = useState(null);
+
+  // Refs
   const listRef = useRef(null);
   const composerRef = useRef(null);
   const presenceRef = useRef(null);
-  const [reporting, setReporting] = useState(null); // {msg} or null
-  const [showPollComposer, setShowPollComposer] = useState(false)
-  const [showTools, setShowTools] = useState(false);
 
+  
 
+  const me = user?.id || null;
 
-function handleReportMessage(msg) {
-  setReporting({ msg });
+  // put this inside the ClubChat component (near other helpers/state)
+const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isTempMessage(m) {
+  const id = String(m?.id || "");
+  return id.startsWith("temp_") || !UUID_RX.test(id) || m._optimistic === true;
 }
 
 
-
-
-
-
-
-  // --------- bootstrap: resolve club (slug → id if needed)
-useEffect(() => {
-  let cancelled = false;
-  (async () => {
-    if (!clubKey) return;
-    setLoading(true);
-
-    // Accept either UUID/id or slug
-    const isUuid = /^[0-9a-f-]{10,}$/i.test(clubKey);
-    const q = isUuid
-      ? supabase.from("clubs").select("id, slug, name").eq("id", clubKey).maybeSingle()
-      : supabase.from("clubs").select("id, slug, name").eq("slug", clubKey).maybeSingle();
-
-    const { data, error } = await q;
-    if (cancelled) return;
-
-    if (error) {
-      console.error("Failed to resolve club:", error);
-    }
-    if (data) {
-      setClubRow(data);
-      // normalize pretty URL if they hit the legacy path
-      if (!clubId && clubParam && data.slug && clubParam !== data.slug) {
-        navigate(`/clubs/${data.slug}/chat`, { replace: true });
-      }
-    }
-    setLoading(false);
-  })();
-  return () => {
-    cancelled = true;
-  };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [clubKey]);
-
-// Always prefer the resolved row's id
-const resolvedClubId = clubRow?.id || clubId || null;
-const me = user?.id;
-
-// --------- fetch messages from the view (brings role + profile fields)
-useEffect(() => {
-  let active = true;
-  (async () => {
-    if (!resolvedClubId) return;
-    setLoading(true);
-    const { data, error } = await supabase
-      .from("v_club_messages")
-      .select("*")
-      .eq("club_id", resolvedClubId)
-      .order("created_at", { ascending: true });
-
-    if (!active) return;
-
-    if (error) {
-      console.error("load messages failed:", error);
-      setMessages([]); // or keep previous
-    } else {
-      const msgs = (data || []).map((m) => ({
-        ...m,
-        role: m.member_role, // <- used by <RoleBadge />
-        profiles: {
-          id: m.profile_id,
-          slug: m.profile_slug,
-          display_name: m.profile_display_name,
-          avatar_url: m.profile_avatar_url,
-        },
-      }));
-      setMessages(msgs);
-    }
-    setLoading(false);
-  })();
-
-  return () => {
-    active = false;
-  };
-}, [resolvedClubId]);
-
-
-  // --------- detect admin role
+  /** Resolve initial route param into a UUID (handles slug or id) */
   useEffect(() => {
+    const routeId = (clubParam ?? legacyClubId) || "";
+    if (!routeId) return;
+
+    const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (UUID_RX.test(routeId)) {
+      setClubId(routeId);
+      return;
+    }
+
     let cancelled = false;
     (async () => {
-      if (!resolvedClubId || !user?.id) return;
-      const { data } = await supabase
-        .from("club_members")
-        .select("role")
-        .eq("club_id", resolvedClubId)
-        .eq("user_id", user.id)
+      const { data, error } = await supabase
+        .from("clubs")
+        .select("id, slug, name")
+        .eq("slug", routeId)
         .maybeSingle();
-      if (!cancelled) {
-        const role = data?.role || "";
-        setIsAdmin(["president", "admin", "moderator"].includes(role));
+      if (cancelled) return;
+      if (error) {
+        console.error("Failed to load club by slug", error);
+        return;
       }
+      if (data?.id) setClubId(data.id);
     })();
+
     return () => {
       cancelled = true;
     };
-  }, [resolvedClubId, user?.id]);
+  }, [clubParam, legacyClubId]);
 
-  // --------- initial fetch + realtime INSERT (with profile hydration)
+  /** Fetch normalized club row by id or slug and normalize URL */
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!clubKey) return;
+      setLoading(true);
+
+      const isUuid = /^[0-9a-f-]{10,}$/i.test(clubKey);
+      const { data, error } = await (isUuid
+        ? supabase.from("clubs").select("id, slug, name").eq("id", clubKey).maybeSingle()
+        : supabase.from("clubs").select("id, slug, name").eq("slug", clubKey).maybeSingle());
+
+      if (cancelled) return;
+
+      if (error) console.error("Failed to resolve club:", error);
+      if (data) {
+        setClubRow(data);
+        // If user hit /clubs/:id/chat instead of /clubs/:slug/chat, normalize:
+        if (clubParam && data.slug && clubParam !== data.slug) {
+          navigate(`/clubs/${data.slug}/chat`, { replace: true });
+        }
+      }
+      setLoading(false);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clubKey]);
+
+  const resolvedClubId = clubRow?.id || clubId || null;
+
+  /** Load messages (base) + hydrate profiles; subscribe to realtime insert/update */
   useEffect(() => {
     if (!resolvedClubId) return;
     let cancelled = false;
 
     (async () => {
-      // 1) Fetch messages ONLY (no join) so RLS on profiles can't hide rows
+      setLoading(true);
+
+      // 1) Base fetch (no joins): avoids RLS surprises
       const { data: rows, error: err1 } = await supabase
         .from("club_messages")
         .select("id, club_id, user_id, body, image_url, is_deleted, created_at, type, metadata")
@@ -259,8 +164,7 @@ useEffect(() => {
           .from("profiles")
           .select("id, avatar_url, display_name, username")
           .in("id", uniqueUserIds);
-
-        if (!cancelled && !err2 && profs) {
+        if (!err2 && profs) {
           profileMap = Object.fromEntries(profs.map(p => [p.id, p]));
         } else if (err2) {
           console.warn("[Chat] profiles fetch warning (check RLS):", err2);
@@ -275,103 +179,58 @@ useEffect(() => {
       }
 
       // 3) Mark read
-      if (!cancelled && user?.id) {
-        await supabase
-          .from("club_message_reads")
-          .upsert({
-            club_id: resolvedClubId,
-            user_id: user.id,
-            last_read_at: new Date().toISOString(),
-          });
+      if (!cancelled && me) {
+        await supabase.from("club_message_reads").upsert({
+          club_id: resolvedClubId,
+          user_id: me,
+          last_read_at: new Date().toISOString(),
+        });
       }
     })();
 
-    // 4) Realtime INSERT (hydrate sender’s profile)
-   // 4) Realtime (INSERT + UPDATE)
-const channel = supabase
-.channel(`club-chat:${resolvedClubId}`)
-// New message
-.on(
-  "postgres_changes",
-  { event: "INSERT", schema: "public", table: "club_messages", filter: `club_id=eq.${resolvedClubId}` },
-  async (payload) => {
-    if (cancelled) return;
-    const msg = payload.new;
-
-    // hydrate sender profile best-effort
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("id, avatar_url, display_name, slug")
-      .eq("id", msg.user_id)
-      .maybeSingle();
-
-    setMessages(prev => [...prev, { ...msg, profiles: profile || null }]);
-    requestAnimationFrame(scrollToBottom);
-  }
-)
-// Message update (e.g., deleted)
-.on(
-  "postgres_changes",
-  { event: "UPDATE", schema: "public", table: "club_messages", filter: `club_id=eq.${resolvedClubId}` },
-  (payload) => {
-    if (cancelled) return;
-    const updated = payload.new;
-    setMessages(prev =>
-      prev.map(m => (m.id === updated.id ? { ...m, ...updated } : m))
-    );
-  }
-)
-.subscribe();
-
+    // 4) Realtime subscribe (INSERT + UPDATE)
+    const channel = supabase
+      .channel(`club-chat:${resolvedClubId}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "club_messages", filter: `club_id=eq.${resolvedClubId}` },
+        async (payload) => {
+          if (cancelled) return;
+          const msg = payload.new;
+          // hydrate profile best-effort
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("id, avatar_url, display_name, slug")
+            .eq("id", msg.user_id)
+            .maybeSingle();
+          setMessages(prev => [...prev, { ...msg, profiles: profile || null }]);
+          requestAnimationFrame(scrollToBottom);
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "club_messages", filter: `club_id=eq.${resolvedClubId}` },
+        (payload) => {
+          if (cancelled) return;
+          const updated = payload.new;
+          setMessages(prev => prev.map(m => (m.id === updated.id ? { ...m, ...updated } : m)));
+        }
+      )
+      .subscribe();
 
     return () => {
       cancelled = true;
       supabase.removeChannel(channel);
     };
-    return (
-      <div className="flex flex-col h-full">
-        {/* ... your chat UI ... */}
-    
-        {reporting && (
-          <ReportModal
-            open
-            onClose={() => setReporting(null)}
-            targetType="message"
-            targetId={reporting.msg.id}
-            clubId={clubId}
-          />
-        )}
-        {showPollComposer && clubId && (
-  <PollComposer
-    clubId={clubId}
-    onClose={() => setShowPollComposer(false)}
-    onCreated={async (pollId, question) => {
-      // post a normal message that references the poll
-      const { error } = await supabase.from("club_messages").insert({
-        club_id: clubId,
-        user_id: user?.id,
-        body: ` Poll: ${question}`,   // readable fallback text
-        type: "poll",
-        metadata: { poll_id: pollId },
-      });
-      if (error) console.error(error);
-      setShowPollComposer(false);
-    }}
-  />
-)}
+  }, [resolvedClubId, me]);
 
-      </div>
-    );
-    
-  }, [resolvedClubId, user?.id]);
-
-  // --------- presence only (separate from INSERT subscription)
+  /** Presence (separate from chat changes) */
   useEffect(() => {
     if (!resolvedClubId) return;
 
     if (presenceRef.current) supabase.removeChannel(presenceRef.current);
     const presence = supabase.channel(`presence-club-${resolvedClubId}`, {
-      config: { presence: { key: user?.id || Math.random().toString(36).slice(2) } },
+      config: { presence: { key: me || Math.random().toString(36).slice(2) } },
     });
     presence.on("presence", { event: "sync" }, () => {
       const members = Object.values(presence.presenceState() || {}).flat();
@@ -379,7 +238,7 @@ const channel = supabase
     });
     presence.subscribe(async (status) => {
       if (status === "SUBSCRIBED") {
-        await presence.track({ at: Date.now(), uid: user?.id || null });
+        await presence.track({ at: Date.now(), uid: me || null });
       }
     });
     presenceRef.current = presence;
@@ -387,140 +246,30 @@ const channel = supabase
     return () => {
       if (presenceRef.current) supabase.removeChannel(presenceRef.current);
     };
-  }, [resolvedClubId, user?.id]);
+  }, [resolvedClubId, me]);
 
-  // --------- input helpers
-  const onKeyDown = (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      send();
-    }
-  };
-
-  
-
-  const onPickImage = (file) => {
-    if (!file) return;
-    setImageFile(file);
-    const url = URL.createObjectURL(file);
-    setImageObjectUrl(url);
-  };
-
-  const clearPickedImage = () => {
-    if (imageObjectUrl) URL.revokeObjectURL(imageObjectUrl);
-    setImageObjectUrl("");
-    setImageFile(null);
-  };
-
-  // --------- sending (text + optional image)
-  const send = async () => {
-    if (!resolvedClubId || !me || sending) return;
-
-    const body = (input || "").trim();
-    const hasImage = !!imageFile;
-    if (!body && !hasImage) return;
-
-    setSending(true);
-
-    // Client-side banned-words warning (server trigger still blocks)
-    try {
-      if (body && (await messageViolatesFilter(body))) {
-        alert("Your message appears to include banned language. Please edit it.");
-        setSending(false);
-        return;
+  /** Admin role detection */
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!resolvedClubId || !me) return;
+      const { data } = await supabase
+        .from("club_members")
+        .select("role")
+        .eq("club_id", resolvedClubId)
+        .eq("user_id", me)
+        .maybeSingle();
+      if (!cancelled) {
+        const role = data?.role || "";
+        setIsAdmin(["president", "admin", "moderator"].includes(role));
       }
-    } catch (e) {
-      // ignore client check failures; server enforces anyway
-    }
-
-    // Clear input now (snappier UI)
-    setInput("");
-
-    // Optimistic UI — include current user's profile so avatar appears immediately
-    const tempId = `temp_${Date.now()}`;
-    const optimistic = {
-      id: tempId,
-      club_id: resolvedClubId,
-      user_id: me,
-      body: body || null,
-      image_url: imageObjectUrl || null, // preview immediately
-      created_at: new Date().toISOString(),
-      profiles: {
-        id: me,
-        avatar_url: user?.profileAvatarUrl || null,
-        display_name: user?.name || null,
-        username: user?.username || null,
-      },
+    })();
+    return () => {
+      cancelled = true;
     };
-    setMessages((prev) => [...prev, optimistic]);
-    scrollToBottom();
+  }, [resolvedClubId, me]);
 
-    let uploadedImageUrl = null;
-    try {
-      // Upload image first (if any)
-      if (hasImage) {
-        uploadedImageUrl = await uploadChatImage(imageFile, resolvedClubId, me);
-      }
-
-      // Insert the real row
-      const { data, error } = await supabase
-        .from("club_messages")
-        .insert([
-          {
-            club_id: resolvedClubId,
-            user_id: me,
-            body: body || null,
-            image_url: uploadedImageUrl,
-          },
-        ])
-        .select("id, created_at")
-        .single();
-
-      if (error) throw error;
-
-      // Replace optimistic with real id/timestamp (keep already-shown profiles)
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === tempId ? { ...m, id: data.id, created_at: data.created_at } : m
-        )
-      );
-
-      // Mark as read
-      await supabase.from("club_message_reads").upsert({
-        club_id: resolvedClubId,
-        user_id: me,
-        last_read_at: new Date().toISOString(),
-      });
-    } catch (err) {
-      console.error("Send failed:", err?.message || err);
-      // rollback optimistic
-      setMessages((prev) => prev.filter((m) => m.id !== tempId));
-      // restore input so user can edit/retry
-      setInput(body);
-      alert(err?.message || "Message failed to send.");
-    } finally {
-      // Cleanup image selection
-      clearPickedImage();
-      setSending(false);
-    }
-  };
-
-  
-
-  // --------- helpers
-  const scrollToBottom = () => {
-    try {
-      // page owns the scroll now
-      window.scrollTo({
-        top: document.documentElement.scrollHeight,
-        behavior: "smooth",
-      });
-    } catch {}
-  };
-
-  
-
-  // group messages by day (lightly)
+  /** Group messages by day (for sticky headers) */
   const grouped = useMemo(() => {
     const out = [];
     let lastDay = "";
@@ -535,140 +284,215 @@ const channel = supabase
     return out;
   }, [messages]);
 
-  // --------- moderation handlers
-  async function handleDeleteMessage(msg) {
-    try {
-      // optimistic UI: flip to deleted now
-      setMessages(prev =>
-        prev.map(m =>
-          m.id === msg.id
-            ? { ...m, is_deleted: true, body: null, image_url: null }
-            : m
-        )
-      );
+  async function insertMessage(row) {
+    for (let i = 0; i < 2; i++) {
+      const { data, error } = await supabase.from("club_messages")
+        .insert([row]).select("id, created_at").single();
+      if (!error) return { data };
+      if (i === 1) return { error };
+      await new Promise(r => setTimeout(r, 300)); // brief retry
+    }
+  }
   
-      // best-effort remove image from storage
-      if (msg.image_url) {
-        const path = extractStoragePathFromPublicUrl(msg.image_url);
-        if (path) await supabase.storage.from(CHAT_BUCKET).remove([path]);
+
+  async function handleReportMessage({ message, clubId, reason = "abuse" }) {
+    if (!message?.id || isTempMessage(message)) {
+      toast.error("Please wait until the message finishes sending.");
+      return;
+    }
+    if (!clubId) {
+      toast.error("Club isn’t ready yet. Try again.");
+      return;
+    }
+  
+    // Show a success toast immediately (optimistic UX)
+    const tid = toast.success("Report sent. We’ll review it.");
+  
+    // Fire the network request without blocking the UI
+    const started = Date.now();
+    const MIN_SPINNER_MS = 120;
+  
+    supabase.functions.invoke("notify-message2", {
+      body: { messageId: message.id, clubId, reason },
+    })
+    .then(({ error, data }) => {
+      // Keep toast; if duplicate or soft warnings, you can tweak here
+      if (error) {
+        toast.dismiss(tid);
+        toast.error("Couldn’t send report.");
+        console.error("report error:", error);
       }
-  
-      const { error } = await supabase
-        .from("club_messages")
-        .update({
-          is_deleted: true,
-          deleted_at: new Date().toISOString(),
-          deleted_by: user.id,
-          body: null,
-          image_url: null,
-        })
-        .eq("id", msg.id);
-  
-      if (error) throw error;
-    } catch (e) {
-      console.error(e);
-      // rollback if failed
-      setMessages(prev =>
-        prev.map(m =>
-          m.id === msg.id
-            ? { ...m, is_deleted: msg.is_deleted, body: msg.body, image_url: msg.image_url }
-            : m
-        )
-      );
-      alert("Couldn’t delete message.");
-    }
-  }
-  
-  // --------- moderation handlers
-  async function handleDeleteMessage(msg) {
-    try {
-      // best-effort remove image from storage
-      if (msg.image_url) {
-        const path = extractStoragePathFromPublicUrl(msg.image_url);
-        if (path) await supabase.storage.from(CHAT_BUCKET).remove([path]);
-      }
-
-      const { error } = await supabase
-        .from("club_messages")
-        .update({
-          is_deleted: true,
-          deleted_at: new Date().toISOString(),
-          deleted_by: user.id,
-          body: null,
-          image_url: null,
-        })
-        .eq("id", msg.id);
-
-      if (error) throw error;
-    } catch (e) {
-      console.error(e);
-      alert("Couldn’t delete message.");
-    }
+    })
+    .catch((e) => {
+      toast.dismiss(tid);
+      toast.error("Couldn’t send report.");
+      console.error("report exception:", e);
+    });
   }
 
-  async function handleDeleteMessage(msg) {
-    if (!msg?.id) return;
-  
-    // Optimistic UI
-    setMessages(prev =>
-      prev.map(m =>
-        m.id === msg.id ? { ...m, is_deleted: true } : m
-      )
-    );
-  
-    try {
-      const { error } = await supabase
-        .from("club_messages")
-        .update({
-          is_deleted: true,
-          // optional audit fields if you created them:
-          // deleted_at: new Date().toISOString(),
-          // deleted_by: user.id,
-        })
-        .eq("id", msg.id);
-  
-      if (error) throw error;
-    } catch (e) {
-      console.error("[delete] supabase update failed:", e.message);
-      alert("Could not delete message: " + e.message);
-      // rollback
-      setMessages(prev => prev.map(m => (m.id === msg.id ? { ...m, ...msg } : m)));
+  /** Input helpers */
+  const onKeyDown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      send();
     }
-  }
+  };
 
+  const onPickImage = (file) => {
+    if (!file) return;
+    setImageFile(file);
+    const url = URL.createObjectURL(file);
+    setImageObjectUrl(url);
+  };
 
-  // Permanently delete a message (admin/moderator only via RLS)
-async function handleHardDeleteMessage(msg) {
-  if (!msg?.id) return;
+  const clearPickedImage = () => {
+    if (imageObjectUrl) URL.revokeObjectURL(imageObjectUrl);
+    setImageObjectUrl("");
+    setImageFile(null);
+  };
 
+ // --------- sending (text + optional image)
+const send = async () => {
+  if (!resolvedClubId || !me || sending) return;
+
+  const body = (input || "").trim();
+  const hasImage = !!imageFile;
+  if (!body && !hasImage) return;
+
+  setSending(true);
+
+  // Client-side banned-words warning (server trigger still blocks)
   try {
-    // 1) (Optional) remove any stored image first (best-effort; ignore errors)
-    if (msg.image_url) {
-      try {
-        const path = extractStoragePathFromPublicUrl(msg.image_url);
-        if (path) await supabase.storage.from(CHAT_BUCKET).remove([path]);
-      } catch (e) {
-        console.warn("[hard delete] storage remove failed (ignored):", e?.message || e);
-      }
+    if (body && (await messageViolatesFilter(body))) {
+      alert("Your message appears to include banned language. Please edit it.");
+      setSending(false);
+      return;
+    }
+  } catch {
+    // ignore client check failures; server enforces anyway
+  }
+
+  // Clear input now (snappier UI)
+  setInput("");
+
+  // ✅ Optimistic UI — mark as _optimistic so we can tell it's not persisted yet
+  const tempId = `temp_${Date.now()}`;
+  const optimistic = {
+    id: tempId,
+    _optimistic: true,                 // ← add this flag
+    club_id: resolvedClubId,
+    user_id: me,
+    body: body || null,
+    image_url: imageObjectUrl || null, // preview immediately
+    created_at: new Date().toISOString(),
+    profiles: {
+      id: me,
+      avatar_url: user?.profileAvatarUrl || null,
+      display_name: user?.name || null,
+      username: user?.username || null,
+    },
+  };
+  setMessages((prev) => [...prev, optimistic]);
+  scrollToBottom();
+
+  let uploadedImageUrl = null;
+  try {
+    // Upload image first (if any)
+    if (hasImage) {
+      uploadedImageUrl = await uploadChatImage(imageFile, resolvedClubId, me);
     }
 
-    // 2) Hard delete the row
-    const { error } = await supabase
+    // Insert the real row
+    const { data, error } = await supabase
       .from("club_messages")
-      .delete()
-      .eq("id", msg.id);
+      .insert([
+        {
+          club_id: resolvedClubId,
+          user_id: me,
+          body: body || null,
+          image_url: uploadedImageUrl,
+        },
+      ])
+      .select("id, created_at")
+      .single();
 
     if (error) throw error;
 
-    // 3) Update local state immediately (no realtime DELETE event)
-    setMessages(prev => prev.filter(m => m.id !== msg.id));
-  } catch (e) {
-    console.error("[hard delete] supabase delete failed:", e?.message || e);
-    alert(e?.message || "Couldn't permanently delete message.");
-  }
-}
+    // ✅ Replace optimistic with real id/timestamp and clear the flag
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === tempId
+          ? { ...m, id: data.id, created_at: data.created_at, _optimistic: false }
+          : m
+      )
+    );
 
-  
+    // Mark as read
+    await supabase.from("club_message_reads").upsert({
+      club_id: resolvedClubId,
+      user_id: me,
+      last_read_at: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("Send failed:", err?.message || err);
+    // rollback optimistic
+    setMessages((prev) => prev.filter((m) => m.id !== tempId));
+    // restore input so user can edit/retry
+    setInput(body);
+    alert(err?.message || "Message failed to send.");
+  } finally {
+    // Cleanup image selection
+    if (imageObjectUrl) URL.revokeObjectURL(imageObjectUrl);
+    setImageObjectUrl("");
+    setImageFile(null);
+    setSending(false);
+  }
+};
+
+
+  /** Scroll helper */
+  const scrollToBottom = () => {
+    try {
+      window.scrollTo({
+        top: document.documentElement.scrollHeight,
+        behavior: "smooth",
+      });
+    } catch {}
+  };
+
+  /** Delete message (soft) */
+  async function handleDeleteMessage(msg) {
+    if (!msg?.id) return;
+
+    // Optimistic UI
+    const previous = msg;
+    setMessages((prev) => prev.map((m) => (m.id === msg.id ? { ...m, is_deleted: true, body: null, image_url: null } : m)));
+
+    try {
+      if (msg.image_url) {
+        const path = extractStoragePathFromPublicUrl(msg.image_url);
+        if (path) await supabase.storage.from(CHAT_BUCKET).remove([path]);
+      }
+
+      const { error } = await supabase
+        .from("club_messages")
+        .update({
+          is_deleted: true,
+          deleted_at: new Date().toISOString(),
+          deleted_by: me || null,
+          body: null,
+          image_url: null,
+        })
+        .eq("id", msg.id);
+
+      if (error) throw error;
+    } catch (e) {
+      console.error(e);
+      // rollback
+      setMessages((prev) => prev.map((m) => (m.id === msg.id ? { ...m, ...previous } : m)));
+      alert("Couldn’t delete message.");
+    }
+  }
 
   return (
     <div className="min-h-[calc(100vh-88px)] bg-gradient-to-b from-black via-zinc-950 to-black">
@@ -693,16 +517,12 @@ async function handleHardDeleteMessage(msg) {
         </div>
       </div>
 
-      {/* Messages list (no inner overflow/height) */}
+      {/* Messages list */}
       <div ref={listRef} className="mx-auto max-w-3xl px-4 pb-[168px] pt-4">
-        {loading && (
-          <div className="text-center text-zinc-400 py-12">Loading…</div>
-        )}
+        {loading && <div className="text-center text-zinc-400 py-12">Loading…</div>}
 
         {!loading && messages.length === 0 && (
-          <div className="text-center text-zinc-400 py-12">
-            Be the first to say hello 👋
-          </div>
+          <div className="text-center text-zinc-400 py-12">Be the first to say hello 👋</div>
         )}
 
         {!loading &&
@@ -714,21 +534,24 @@ async function handleHardDeleteMessage(msg) {
                 </span>
               </div>
             ) : (
-              <MessageItem
-              key={m.id}
-              msg={m}
-              isMe={m.user_id === me}
-              isAdmin={isAdmin}
-              onDelete={handleDeleteMessage}
-              onHardDelete={handleHardDeleteMessage}   // NEW
-              onReport={handleReportMessage}
-            />
+             // When rendering MessageItem in ClubChat.jsx
+<MessageItem
+  key={m.id}
+  msg={m}
+  isMe={m.user_id === me}
+  isAdmin={isAdmin}
+  onDelete={handleDeleteMessage}
+  onReport={(reason) => handleReportMessage({ message: m, clubId: m.club_id, reason })}
+  reportDisabled={isTempMessage(m)}   // <- new prop
+/>
+
             
+
             )
           )}
       </div>
 
-      {/* Composer – docked to bottom */}
+      {/* Composer – docked */}
       <div className="fixed bottom-0 left-0 right-0 z-20 pb-[env(safe-area-inset-bottom)]">
         <div className="mx-auto max-w-3xl px-4 pb-4">
           <div className="rounded-2xl border border-zinc-800 bg-black/70 backdrop-blur px-3 py-3">
@@ -754,95 +577,51 @@ async function handleHardDeleteMessage(msg) {
               </div>
             )}
 
-{showPollComposer && (
-  <PollComposer
-    clubId={resolvedClubId}
-    onClose={() => setShowPollComposer(false)}
-    onCreated={async (pollId, question) => {
-      try {
-        // Insert a chat message referencing the poll
-        const { data: newMsg, error } = await supabase
-          .from("club_messages")
-          .insert({
-            club_id: resolvedClubId,
-            user_id: user?.id,
-            body: `Poll: ${question}`, // no emoji
-            type: "poll",
-            metadata: { poll_id: pollId },
-          })
-          .select("id, club_id, user_id, body, image_url, is_deleted, created_at, type, metadata")
-          .single();
+            {/* Poll composer modal */}
+            {showPollComposer && (
+              <PollComposer
+                clubId={resolvedClubId}
+                onClose={() => setShowPollComposer(false)}
+                onCreated={async (pollId, question) => {
+                  try {
+                    const { data: newMsg, error } = await supabase
+                      .from("club_messages")
+                      .insert({
+                        club_id: resolvedClubId,
+                        user_id: me,
+                        body: `Poll: ${question}`,
+                        type: "poll",
+                        metadata: { poll_id: pollId },
+                      })
+                      .select(
+                        "id, club_id, user_id, body, image_url, is_deleted, created_at, type, metadata"
+                      )
+                      .single();
 
-        if (error) throw error;
+                    if (error) throw error;
 
-        // Optimistically add the message so it shows instantly
-        const optimistic = {
-          ...newMsg,
-          profiles: {
-            id: user?.id,
-            avatar_url: user?.profileAvatarUrl || null,
-            display_name: user?.name || null,
-            username: user?.username || null,
-          },
-        };
-        setMessages((prev) => [...prev, optimistic]);
-        requestAnimationFrame(scrollToBottom);
-      } catch (e) {
-        console.error("Poll insert failed:", e);
-        alert(e.message || "Couldn’t create poll message.");
-      } finally {
-        setShowPollComposer(false);
-      }
-    }}
-  />
-)}
-
-
-
-
-
-{showPollComposer && (
-  <PollComposer
-    clubId={resolvedClubId}
-    onClose={() => setShowPollComposer(false)}
-    onCreated={async (pollId, question) => {
-      try {
-        const { data: newMsg, error } = await supabase
-          .from("club_messages")
-          .insert({
-            club_id: resolvedClubId,   // ✅ use resolvedClubId
-            user_id: user?.id,
-            body: `Poll: ${question}`, // ✅ no emoji
-            type: "poll",
-            metadata: { poll_id: pollId },
-          })
-          .select("id, club_id, user_id, body, image_url, is_deleted, created_at, type, metadata")
-          .single();
-
-        if (error) throw error;
-
-        // ✅ Optimistically append so it shows instantly
-        setMessages(prev => [
-          ...prev,
-          {
-            ...newMsg,
-            profiles: {
-              id: user?.id,
-              avatar_url: user?.profileAvatarUrl || null,
-              display_name: user?.name || null,
-              username: user?.username || null,
-            },
-          },
-        ]);
-      } catch (e) {
-        console.error("[Poll insert failed]", e);
-        alert(e.message || "Couldn’t create poll message.");
-      } finally {
-        setShowPollComposer(false);
-      }
-    }}
-  />
-)}
+                    setMessages((prev) => [
+                      ...prev,
+                      {
+                        ...newMsg,
+                        profiles: {
+                          id: me,
+                          avatar_url: user?.profileAvatarUrl || null,
+                          display_name: user?.name || null,
+                          username: user?.username || null,
+                        },
+                      },
+                    ]);
+                    requestAnimationFrame(scrollToBottom);
+                  } catch (e) {
+                    console.error("Poll insert failed:", e);
+                    alert(e.message || "Couldn’t create poll message.");
+                  } finally {
+                    setShowPollComposer(false);
+                  }
+                }}
+              />
+            )}
 
             <div className="flex items-end gap-2">
               <label
@@ -858,40 +637,37 @@ async function handleHardDeleteMessage(msg) {
                 <ImageIcon size={20} />
               </label>
 
-              {/* Tools launcher */}
-<div className="relative">
-  <button
-    type="button"
-    onClick={() => setShowTools((v) => !v)}
-    className="rounded-xl px-2 py-2 border border-zinc-700 hover:border-zinc-600 bg-zinc-900 text-zinc-200"
-    aria-haspopup="menu"
-    aria-expanded={showTools}
-    aria-label="Open tools"
-  >
-    <Plus size={18} />
-  </button>
+              {/* Tools menu */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowTools((v) => !v)}
+                  className="rounded-xl px-2 py-2 border border-zinc-700 hover:border-zinc-600 bg-zinc-900 text-zinc-200"
+                  aria-haspopup="menu"
+                  aria-expanded={showTools}
+                  aria-label="Open tools"
+                >
+                  <Plus size={18} />
+                </button>
 
-  {showTools && (
-    <div className="absolute bottom-12 left-0 z-30 w-56 rounded-2xl border border-zinc-800 bg-zinc-950/98 shadow-2xl p-2">
-      <div className="px-2 pb-2 text-xs text-zinc-400">Tools</div>
+                {showTools && (
+                  <div className="absolute bottom-12 left-0 z-30 w-56 rounded-2xl border border-zinc-800 bg-zinc-950/98 shadow-2xl p-2">
+                    <div className="px-2 pb-2 text-xs text-zinc-400">Tools</div>
 
-      {/* Poll tool */}
-      <button
-        type="button"
-        onClick={() => {
-          setShowTools(false);
-          setShowPollComposer(true);
-        }}
-        className="w-full flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-zinc-800/60 text-sm text-zinc-200"
-      >
-        Create poll
-      </button>
-
-      {/* Future tools go here */}
-    </div>
-  )}
-</div>
-
+                    {/* Poll tool */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowTools(false);
+                        setShowPollComposer(true);
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-zinc-800/60 text-sm text-zinc-200"
+                    >
+                      Create poll
+                    </button>
+                  </div>
+                )}
+              </div>
 
               <textarea
                 ref={composerRef}
@@ -903,19 +679,20 @@ async function handleHardDeleteMessage(msg) {
                 className="flex-1 resize-none bg-zinc-900 text-white text-sm rounded-xl px-3 py-2 outline-none border border-zinc-800 focus:border-yellow-500/60"
               />
 
-
-
               <button
                 onClick={send}
-                disabled={(!input.trim() && !imageFile) || sending || !user?.id}
+                disabled={(!input.trim() && !imageFile) || sending || !me}
                 className="rounded-full w-10 h-10 shrink-0 grid place-items-center bg-yellow-500 hover:bg-yellow-400 disabled:opacity-50 text-black"
                 aria-label="Send"
               >
                 <Send size={18} />
               </button>
             </div>
+
             <div className="text-[11px] text-zinc-500 mt-1 ml-1">
               Press <b>Enter</b> to send • <b>Shift+Enter</b> for a new line
+              {reporting && <span className="ml-3">• Sending report…</span>}
+              {reportError && <span className="ml-2 text-red-400">{reportError}</span>}
             </div>
           </div>
         </div>
@@ -924,13 +701,9 @@ async function handleHardDeleteMessage(msg) {
   );
 }
 
+/* ------------------------------- Helpers ------------------------------- */
 
-
-
-
-// -------------------------------
 // Upload helper (Supabase Storage)
-// -------------------------------
 async function uploadChatImage(file, clubId, userId) {
   const ext = (file.name?.split(".").pop() || "jpg").toLowerCase();
   const path = `${clubId}/${userId}/${Date.now()}.${ext}`;
@@ -941,14 +714,11 @@ async function uploadChatImage(file, clubId, userId) {
 
   if (upErr) throw upErr;
 
-  // PUBLIC bucket path → public URL
   const publicUrl = supabase.storage.from(CHAT_BUCKET).getPublicUrl(path).data.publicUrl;
   return publicUrl;
 }
 
-// -------------------------------
-// Banned-words precheck (client)
-// -------------------------------
+// Client-side banned-words precheck (server trigger still enforces)
 async function messageViolatesFilter(text) {
   try {
     const { data } = await supabase.from("banned_words").select("pattern");
@@ -960,21 +730,18 @@ async function messageViolatesFilter(text) {
     }
     return false;
   } catch {
-    return false; // fail-open client; server trigger enforces anyway
+    return false; // fail-open on client
   }
 }
 
-// -------------------------------
-// Storage URL → internal path helper
-// -------------------------------
+// Storage public URL → internal path
 function extractStoragePathFromPublicUrl(publicUrl) {
-  // Expects: https://<proj>.supabase.co/storage/v1/object/public/<bucket>/<path>
   const marker = "/storage/v1/object/public/";
   const i = publicUrl.indexOf(marker);
   if (i === -1) return null;
-  const after = publicUrl.slice(i + marker.length); // e.g. chat-images/clubId/userId/file.jpg
+  const after = publicUrl.slice(i + marker.length);
   const firstSlash = after.indexOf("/");
-  return firstSlash === -1 ? null : after.slice(firstSlash + 1); // strip bucket name
+  return firstSlash === -1 ? null : after.slice(firstSlash + 1);
 }
 
 

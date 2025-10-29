@@ -1,121 +1,312 @@
 // src/pages/UserProfile.jsx
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useLocation, useNavigate } from "react-router-dom";
-import StatsAndWatchlist from "../components/StatsAndWatchlist";
-import FavoriteFilmsGrid from "../components/FavoriteFilmsGrid";
-import FavoriteFilmsPicker from "../components/FavoriteFilmsPicker";
-import TasteCard from "../components/TasteCard";
-import TasteCardPicker from "../components/TasteCardPicker";
-import ClubBadge from "../components/ClubBadge";
-import AvatarCropper from "../components/AvatarCropper";
-import { glowOptions } from "../constants/glowOptions";
+import supabase from "../supabaseClient";
+import { fetchActiveScheme } from "../lib/ratingSchemes";
+import RatingSchemeView from "../components/RatingSchemeView";
+import DirectorsCutBadge from "../components/DirectorsCutBadge";
+
+
+
 import { useUser } from "../context/UserContext";
-import EditProfilePanel from "../components/EditProfilePanel";
-
-// NEW: role pill + follow + supabase
-import RolePill from "../components/RolePill.jsx";
+import StatsAndWatchlist from "../components/StatsAndWatchlist";
+import ClubBadge from "../components/ClubBadge";
 import FollowButton from "../components/FollowButton.jsx";
-import supabase from "../supabaseClient.js";
+import AvatarCropper from "../components/AvatarCropper";
+import Moodboard from "../components/Moodboard.jsx";
+import EditProfilePanel from "../components/EditProfilePanel";
+import { getThemeVars } from "../theme/profileThemes";
+import ProfileTasteCards from "../components/ProfileTasteCards";
 
-// NEW: tiny badge next to the name
-import RoleBadge from "../components/RoleBadge.jsx";
+/* ---------------- small helpers ---------------- */
+function timeAgo(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  const s = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h`;
+  return d.toLocaleDateString();
+}
 
+function Stars5({ value = 0, size = 14 }) {
+  const full = Math.floor(value);
+  const half = value - full >= 0.5 ? 1 : 0;
+  const empty = 5 - full - half;
+
+  const Star = ({ filled }) => (
+    <svg width={size} height={size} viewBox="0 0 24 24" className={filled ? "text-yellow-400" : "text-zinc-600"}>
+      <path
+        fill="currentColor"
+        d="M12 17.3l-6.16 3.6 1.64-6.98L2 8.9l7.04-.6L12 1.8l2.96 6.5 7.04.6-5.48 5.02 1.64 6.98z"
+      />
+    </svg>
+  );
+
+  const Half = () => (
+    <svg width={size} height={size} viewBox="0 0 24 24">
+      <defs>
+        <linearGradient id="half">
+          <stop offset="50%" stopColor="rgb(250 204 21)" />
+          <stop offset="50%" stopColor="rgb(82 82 91)" />
+        </linearGradient>
+      </defs>
+      <path
+        fill="url(#half)"
+        d="M12 17.3l-6.16 3.6 1.64-6.98L2 8.9l7.04-.6L12 1.8l2.96 6.5 7.04.6-5.48 5.02 1.64 6.98z"
+      />
+    </svg>
+  );
+
+  return (
+    <div className="flex items-center gap-1">
+      {Array.from({ length: full }).map((_, i) => <Star key={`f${i}`} filled />)}
+      {half ? <Half key="h" /> : null}
+      {Array.from({ length: empty }).map((_, i) => <Star key={`e${i}`} filled={false} />)}
+    </div>
+  );
+}
+
+function ClubTakeItem({ t, showUser = false, canEdit = false, onRemove }) {
+  const poster = t.movie?.poster || t.movie_poster || t.poster || null;
+  const title = t.movie?.title || t.movie_title || t.title || "Untitled";
+  const year = t.movie?.year ?? t.movie_year ?? null;
+
+  const rating5 =
+    typeof t.rating_5 === "number"
+      ? t.rating_5
+      : typeof t.rating === "number"
+      ? t.rating
+      : null;
+
+  const clubName = t.club?.name || t.club_name || null;
+  const clubSlug = t.club?.slug || t.club_slug || null;
+  const clubId = t.club?.id || t.club_id || null;
+  const clubHref = clubSlug ? `/clubs/${clubSlug}` : clubId ? `/clubs/${clubId}` : "#";
+
+  return (
+    <li className="group rounded-2xl border border-zinc-800 bg-zinc-950/60 p-3 hover:bg-zinc-900/60 transition">
+      <div className="flex items-start gap-3">
+        {poster ? (
+          <img
+            src={poster}
+            alt={title}
+            className="h-16 w-12 rounded-md object-cover border border-zinc-800"
+            loading="lazy"
+          />
+        ) : null}
+
+        <div className="min-w-0 flex-1">
+          <div className="text-sm text-zinc-300">
+            {showUser && t.user?.name ? (
+              <span className="font-semibold text-white">{t.user.name}</span>
+            ) : (
+              <span className="font-semibold text-white">You</span>
+            )}{" "}
+            contributed to{" "}
+            {clubName ? (
+              <a href={clubHref} className="font-semibold text-white hover:underline">
+                {clubName}
+              </a>
+            ) : (
+              <span className="font-semibold text-white">a club</span>
+            )}
+            ’s review of <span className="font-semibold text-white">{title}</span>
+            {year ? <span className="text-zinc-500"> ({year})</span> : null}
+          </div>
+
+          <div className="mt-1 flex items-center gap-3">
+            {typeof rating5 === "number" ? (
+              <div className="flex items-center gap-2">
+                <Stars5 value={rating5} />
+                <span className="text-xs text-zinc-400">{rating5}/5</span>
+              </div>
+            ) : null}
+
+            {typeof t.club_avg_5 === "number" ? (
+              <span className="text-xs text-zinc-400">Club avg {t.club_avg_5}/5</span>
+            ) : null}
+
+            {t.contributors > 1 ? (
+              <span className="text-xs rounded-full bg-white/10 px-2 py-0.5">
+                {t.contributors} contributors
+              </span>
+            ) : null}
+
+            <span className="ml-auto text-xs text-zinc-500">
+              {timeAgo(t.created_at || t.updated_at || new Date().toISOString())}
+            </span>
+          </div>
+
+          {t.blurb ? <p className="mt-2 text-sm text-zinc-200 line-clamp-3">{t.blurb}</p> : null}
+
+          {canEdit && (
+            <div className="mt-2 flex justify-end">
+              <button onClick={onRemove} className="text-xs text-zinc-400 hover:text-red-400">
+                remove
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </li>
+  );
+}
+
+/* ============================ PAGE ============================ */
 const UserProfile = () => {
   const location = useLocation();
   const navigate = useNavigate();
-
   const { user, profile, setAvatar, saveProfilePatch, loading } = useUser();
 
-  // UI state
+  // View vs edit
   const [editMode, setEditMode] = useState(false);
-  const [editingTasteCards, setEditingTasteCards] = useState([]);
   const [editOpen, setEditOpen] = useState(false);
 
-  // Avatar cropper state
+  // Avatar editing
   const [rawAvatarImage, setRawAvatarImage] = useState(null);
   const [showCropper, setShowCropper] = useState(false);
 
-  // Local toggles
-  const [useGlowStyle] = useState(true);
-
-  // Banner overrides (for instant update when changed in panel)
+  // Banner overrides (local only)
   const [bannerOverride, setBannerOverride] = useState(null);
   const [bannerGradientOverride, setBannerGradientOverride] = useState(null);
 
-  // Derived profile values with fallbacks
+  // Derived profile fields (safe fallbacks if profile null)
   const displayName = profile?.display_name || "Your Name";
+  const isPremiumProfile =
+  profile?.plan === "directors_cut" || profile?.is_premium === true;
+
   const username = profile?.slug || "username";
   const bio = profile?.bio || "";
   const clubName = profile?.club_tag || "";
   const avatarUrl = profile?.avatar_url || "/avatars/default.jpg";
 
-  // Prefer override, fallback to DB values
-  const bannerUrl =
-    bannerOverride ?? profile?.banner_url ?? profile?.banner_image ?? "";
-  const bannerGradient =
-    bannerGradientOverride ?? profile?.banner_gradient ?? "";
-  const glowPreset = profile?.glow_preset ?? null;
+  const bannerUrl = bannerOverride ?? profile?.banner_url ?? profile?.banner_image ?? "";
+  const bannerGradient = bannerGradientOverride ?? profile?.banner_gradient ?? "";
 
-  // Favorite films
-  const favouriteFilmsRaw = useMemo(
-    () => (Array.isArray(profile?.favorite_films) ? profile.favorite_films : []),
-    [profile?.favorite_films]
-  );
-  const favouriteFilmsView = useMemo(
-    () =>
-      favouriteFilmsRaw.map((f) => ({
-        ...f,
-        posterPath: f.posterPath ?? f.poster_path ?? "",
-      })),
-    [favouriteFilmsRaw]
-  );
+  const themeId = profile?.theme_preset || "classic";
+  const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
 
-  // Taste cards
-  const tasteAnswers = useMemo(
-    () => (Array.isArray(profile?.taste_cards) ? profile.taste_cards : []),
-    [profile?.taste_cards]
-  );
+  // Taste Cards — live view state (stays in sync with panel)
+ // Taste Cards — live view state (stays in sync with panel)
+const [liveTasteCards, setLiveTasteCards] = useState(
+  Array.isArray(profile?.taste_cards) ? profile.taste_cards : []
+);
+const [liveGlobalGlow, setLiveGlobalGlow] = useState(
+  profile?.taste_card_style_global ?? null
+);
 
-  // NEW: viewing state, role badge, and follow counts
+useEffect(() => {
+  setLiveTasteCards(Array.isArray(profile?.taste_cards) ? profile.taste_cards : []);
+}, [profile?.taste_cards]);
+
+useEffect(() => {
+  setLiveGlobalGlow(profile?.taste_card_style_global ?? null);
+}, [profile?.taste_card_style_global]);
+
+
+  useEffect(() => {
+    function onTasteCardsUpdated(e) {
+      if (Array.isArray(e?.detail?.cards)) {
+        setLiveTasteCards(e.detail.cards);
+      }
+    }
+    window.addEventListener("sf:tastecards:updated", onTasteCardsUpdated);
+    return () => window.removeEventListener("sf:tastecards:updated", onTasteCardsUpdated);
+  }, []);
+
+  // Premium rating scheme (view mode)
+const [viewScheme, setViewScheme] = useState(null);
+
+useEffect(() => {
+  let mounted = true;
+  async function loadScheme() {
+    if (!profile?.id) {
+      if (mounted) setViewScheme(null);
+      return;
+    }
+    try {
+      const sch = await fetchActiveScheme(profile.id);
+      if (mounted) setViewScheme(sch);
+    } catch {
+      if (mounted) setViewScheme(null);
+    }
+  }
+  loadScheme();
+  return () => { mounted = false; };
+}, [profile?.id]);
+
+// (optional) listen for panel updates to refresh scheme without reload
+useEffect(() => {
+  function onSchemeUpdated() {
+    if (!profile?.id) return;
+    fetchActiveScheme(profile.id).then((sch) => setViewScheme(sch)).catch(() => {});
+  }
+  window.addEventListener("sf:ratingscheme:updated", onSchemeUpdated);
+  return () => window.removeEventListener("sf:ratingscheme:updated", onSchemeUpdated);
+}, [profile?.id]);
+
+
+  // Editing buffer (not rendered here; panel handles UI)
+  const [editingTasteCards, setEditingTasteCards] = useState([]);
+
   const viewingOwn = user?.id && profile?.id ? user.id === profile.id : true;
-  // 🔄 store full top-role object (not just string)
-  const [roleBadge, setRoleBadge] = useState(null);   // 'president' | 'vice_president' | 'editor_in_chief' | null
-  const [roleClub, setRoleClub] = useState(null);     // { club_slug, club_name, club_id } | null
+
+  const [roleBadge, setRoleBadge] = useState(null);
+  const [roleClub, setRoleClub] = useState(null);
   const [counts, setCounts] = useState({ followers: 0, following: 0 });
 
-  // Bootstrap from ?edit=true
+  // anchor for Moodboard
+  const moodboardAnchorRef = useRef(null);
+
+  /* ---------------- effects ---------------- */
+  // Respect ?edit=true (open once, then clean URL)
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     if (params.get("edit") === "true") {
       setEditMode(true);
-      setEditingTasteCards([...tasteAnswers]);
+      setEditOpen(true);
+      setEditingTasteCards(Array.isArray(profile?.taste_cards) ? [...profile.taste_cards] : []);
       params.delete("edit");
       navigate({ search: params.toString() }, { replace: true });
     }
-  }, [location.search, tasteAnswers, navigate]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search]);
 
-  // Bootstrap banner override from localStorage (optional)
+  // Restore banner from localStorage (if present)
   useEffect(() => {
-    const ls = localStorage.getItem("userBanner");
-    if (ls && !bannerOverride) setBannerOverride(ls);
+    try {
+      const ls = localStorage.getItem("userBanner");
+      if (ls && !bannerOverride) setBannerOverride(ls);
+    } catch {}
   }, [bannerOverride]);
 
-  // NEW: fetch role + follow counts for the profile owner
+  // Exit edit mode when panel broadcasts close
+  useEffect(() => {
+    function handleExitEdit() {
+      setEditOpen(false);
+      setEditMode(false);
+    }
+    window.addEventListener("sf:editpanel:close", handleExitEdit);
+    return () => window.removeEventListener("sf:editpanel:close", handleExitEdit);
+  }, []);
+
+  // Role pill + follow counts
   useEffect(() => {
     let isMounted = true;
     (async () => {
       if (!profile?.id) return;
 
-      // Highest-priority role from profile_roles view (president > vp > editor)
-      const { data: rolesRow, error: rolesErr } = await supabase
+      const { data: rolesRow } = await supabase
         .from("profile_roles")
         .select("roles")
         .eq("user_id", profile.id)
         .maybeSingle();
 
-      if (!rolesErr && isMounted) {
+      if (isMounted) {
         const roles = rolesRow?.roles || [];
-        const top = roles?.[0] || null; // { role, club_slug, club_name, club_id }
+        const top = roles?.[0] || null;
         setRoleBadge(top?.role || null);
         setRoleClub(
           top
@@ -124,7 +315,6 @@ const UserProfile = () => {
         );
       }
 
-      // Followers / Following counts from follow_counts view
       const { data: fc } = await supabase
         .from("follow_counts")
         .select("followers, following")
@@ -138,7 +328,24 @@ const UserProfile = () => {
     };
   }, [profile?.id]);
 
-  // Username change w/ 90-day lock
+  // Navigate to the profile view after the panel reports a successful save
+  useEffect(() => {
+    function onProfileSaved() {
+      const path =
+        (profile?.slug && `/u/${profile.slug}`) ||
+        (profile?.id && `/profile/${profile.id}`) ||
+        "/myprofile";
+
+      navigate(path, { replace: true });
+      setEditOpen(false);
+      setEditMode(false);
+    }
+
+    window.addEventListener("sf:profile:saved", onProfileSaved);
+    return () => window.removeEventListener("sf:profile:saved", onProfileSaved);
+  }, [navigate, profile?.slug, profile?.id]);
+
+  /* ---------------- handlers ---------------- */
   const handleUsernameChange = async (newUsername) => {
     const lastChange = localStorage.getItem("usernameLastChanged");
     const ninetyDays = 90 * 24 * 60 * 60 * 1000;
@@ -156,7 +363,6 @@ const UserProfile = () => {
     }
   };
 
-  // Avatar upload + crop
   const handleAvatarUpload = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -167,6 +373,7 @@ const UserProfile = () => {
     };
     reader.readAsDataURL(file);
   };
+
   const handleCropComplete = async (croppedImageUrl) => {
     try {
       await saveProfilePatch({ avatar_url: croppedImageUrl });
@@ -177,60 +384,6 @@ const UserProfile = () => {
     setShowCropper(false);
   };
 
-  // Favorite films helpers
-  const toDbShape = (arr) =>
-    (Array.isArray(arr) ? arr : []).map((m) => ({
-      id: m?.id ?? null,
-      title: m?.title ?? "",
-      glowClass: m?.glowClass || "",
-      poster_path: m?.poster_path ?? m?.posterPath ?? "",
-    }));
-
-  const handleSetFavoriteFilms = (updater) => {
-    try {
-      const current = Array.isArray(favouriteFilmsView)
-        ? favouriteFilmsView
-        : [];
-      const nextView =
-        typeof updater === "function" ? updater(current) : updater;
-      if (!Array.isArray(nextView)) return;
-
-      const cleaned = nextView
-        .filter(Boolean)
-        .map((m) => ({
-          ...m,
-          id: m?.id ?? null,
-          title: m?.title ?? "",
-          glowClass: m?.glowClass || "",
-          posterPath: m?.posterPath ?? m?.poster_path ?? "",
-        }))
-        .filter((m) => m.id && typeof m.posterPath === "string");
-
-      const nextDb = toDbShape(cleaned);
-      saveProfilePatch({ favorite_films: nextDb }).catch((e) =>
-        console.error("Failed to save favorite films:", e)
-      );
-    } catch (err) {
-      console.error("handleSetFavoriteFilms crashed:", err);
-    }
-  };
-
-  const handleRemoveFavorite = (title) => {
-    const nextDb = favouriteFilmsRaw.filter((f) => f.title !== title);
-    saveProfilePatch({ favorite_films: nextDb }).catch((e) =>
-      console.error("Failed to remove favorite film:", e)
-    );
-  };
-
-  const handleTasteCardsChange = async (next) => {
-    try {
-      await saveProfilePatch({ taste_cards: next });
-    } catch (e) {
-      console.warn("Saving taste_cards failed:", e);
-    }
-  };
-
-  // Apply updates from edit panel (instant banner update)
   const handlePanelUpdated = async (patch) => {
     if (!patch) return;
 
@@ -245,23 +398,46 @@ const UserProfile = () => {
       setBannerGradientOverride(patch.banner_gradient);
     }
 
-    const { banner_url, banner_image, banner_gradient, ...rest } = patch;
+    if (Array.isArray(patch.taste_cards)) {
+      setLiveTasteCards(patch.taste_cards);
+      try {
+        window.dispatchEvent(
+          new CustomEvent("sf:tastecards:updated", { detail: { cards: patch.taste_cards } })
+        );
+      } catch {}
+    }
+
+    // reflect global glow immediately in view mode
+if (Object.prototype.hasOwnProperty.call(patch, "taste_card_style_global")) {
+  setLiveGlobalGlow(patch.taste_card_style_global ?? null);
+}
+
+
+
+    const { banner_url, banner_image, banner_gradient, taste_cards, ...rest } = patch;
     if (Object.keys(rest).length) {
-      try { await saveProfilePatch(rest); }
-      catch (e) { console.error("Failed to apply profile patch:", e); }
+      try {
+        await saveProfilePatch(rest);
+      } catch (e) {
+        console.error("Failed to apply profile patch:", e);
+      }
     }
   };
 
-  // NEW: navigate to club from role pill
-  const handleGoToRoleClub = () => {
-    if (!roleClub) return;
-    const path = roleClub.club_slug
-      ? `/clubs/${roleClub.club_slug}`
-      : `/clubs/${roleClub.club_id}`;
-    navigate(path);
+  const handleRemoveTake = async (id) => {
+    if (!id) return;
+    if (typeof window !== "undefined" && !window.confirm("Remove this take?")) return;
+
+    const current = Array.isArray(profile?.film_takes) ? profile.film_takes : [];
+    const next = current.filter((t) => t.id !== id);
+    try {
+      await saveProfilePatch({ film_takes: next });
+    } catch (e) {
+      console.error("Failed to remove take:", e);
+    }
   };
 
-  // Banner renderer
+  /* ---------------- banner ---------------- */
   const Banner = () => {
     const style = bannerUrl
       ? {
@@ -280,11 +456,16 @@ const UserProfile = () => {
         <div className="absolute inset-0 bg-black/40 group-hover:bg-black/60 transition" />
         <div className="absolute bottom-0 left-0 w-full h-32 bg-gradient-to-b from-transparent to-black pointer-events-none" />
 
-        {/* Edit vs Follow */}
         <div className="absolute top-4 right-4 z-20">
           {viewingOwn ? (
             <button
-              onClick={() => setEditOpen(true)}
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setEditOpen(true);
+                setEditMode(true);
+              }}
               className="bg-black/70 text-white text-sm px-4 py-2 rounded-full hover:bg-black/90 transition border border-white/10"
             >
               Edit Profile
@@ -306,56 +487,67 @@ const UserProfile = () => {
                 }}
                 className="w-full h-full rounded-full border-4 border-black object-cover"
               />
-              {editMode && (
+              {editMode && viewingOwn && (
                 <div className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center opacity-0 hover:opacity-100 transition">
-                  <label htmlFor="avatar-upload" className="cursor-pointer text-white text-lg">📷</label>
-                  <input id="avatar-upload" type="file" accept="image/*" onChange={handleAvatarUpload} className="hidden" />
+                  <label
+                    htmlFor="avatar-upload"
+                    className="cursor-pointer text-white text-sm px-3 py-1 rounded-full bg-black/60 border border-white/10"
+                  >
+                    Change
+                  </label>
+                  <input
+                    id="avatar-upload"
+                    type="file"
+                    accept="image/*"
+                    onChange={handleAvatarUpload}
+                    className="hidden"
+                  />
                 </div>
               )}
             </div>
             <div className="w-full">
-              {editMode ? (
+              {editMode && viewingOwn ? (
                 <input
                   type="text"
-                  value={displayName}
-                  onChange={(e) => saveProfilePatch({ display_name: e.target.value })}
+                  defaultValue={displayName}
+                  onBlur={(e) => {
+                    const v = (e.target.value || "").trim();
+                    if (v && v !== displayName) saveProfilePatch({ display_name: v });
+                  }}
                   className="text-xl font-bold bg-zinc-800/40 p-1 rounded w-full"
                 />
               ) : (
-                // NEW: badge next to the name
-                <h2 className="text-xl font-bold flex items-center gap-2">
-                  {displayName}
-                  <RoleBadge role={roleBadge} />
-                </h2>
+                <h2 className="text-xl font-bold">{displayName}</h2>
               )}
-              {editMode ? (
+              {editMode && viewingOwn ? (
                 <input
                   type="text"
-                  value={username}
-                  onChange={(e) => handleUsernameChange(e.target.value)}
+                  defaultValue={username}
+                  onBlur={(e) => {
+                    const v = (e.target.value || "").trim();
+                    if (v && v !== username) handleUsernameChange(v);
+                  }}
                   className="text-sm text-gray-300 bg-zinc-800/40 p-1 rounded w-full mt-1"
                 />
               ) : (
-                <p className="text-sm text-gray-300">@{username}</p>
+                <p className="text-sm text-gray-300 mt-1 flex items-center">
+  <span>@{username}</span>
+  {isPremiumProfile && <DirectorsCutBadge className="ml-2" size="xs" />}
+</p>
+
               )}
 
-              {/* Identity + Role pills row under name */}
               <div className="mt-1 flex items-center flex-wrap gap-2">
                 <ClubBadge clubName={clubName} />
-                {/* NEW: show a RolePill if the user has a top role */}
-                {roleBadge && (
-                  <RolePill
-                    role={roleBadge}
-                    club={roleClub}
-                    onClick={handleGoToRoleClub}
-                  />
-                )}
               </div>
 
-              {editMode ? (
+              {editMode && viewingOwn ? (
                 <textarea
-                  value={bio}
-                  onChange={(e) => saveProfilePatch({ bio: e.target.value })}
+                  defaultValue={bio}
+                  onBlur={(e) => {
+                    const v = e.target.value;
+                    if (v !== bio) saveProfilePatch({ bio: v });
+                  }}
                   rows={2}
                   className="mt-1 text-sm text-white bg-zinc-800/40 p-2 rounded w-full resize-none"
                 />
@@ -369,6 +561,7 @@ const UserProfile = () => {
     );
   };
 
+  /* ---------------- loading ---------------- */
   if (loading) {
     return (
       <div className="w-full text-white py-16 px-4 bg-black grid place-items-center">
@@ -377,18 +570,25 @@ const UserProfile = () => {
     );
   }
 
+  const filmTakes = Array.isArray(profile?.film_takes) ? profile.film_takes : [];
+
+  /* ---------------- render ---------------- */
   return (
-    <div className="w-full text-white py-8 px-4 bg-black">
+    <div
+      className="sf-theme w-full text-white py-8 px-4 bg-black"
+      style={themeStyle}
+      data-theme={themeId}
+    >
       <div className="max-w-6xl mx-auto bg-black rounded-2xl overflow-hidden shadow-lg">
         <Banner />
 
-        {/* ⬇️ Keep your existing Watchlist layout intact. */}
         <StatsAndWatchlist
           statsData={{
             followers: counts.followers,
             following: counts.following,
             role: roleBadge,
-            roleClub, // { club_slug, club_name, club_id }
+            roleClub,
+            className: "themed-card themed-outline forge",
           }}
           userId={profile?.id}
           movieRoute="/movie"
@@ -402,73 +602,86 @@ const UserProfile = () => {
           />
         )}
 
-        {/* Favorites */}
-        {editMode && (
-          <FavoriteFilmsPicker
-            films={favouriteFilmsView}
-            editMode={editMode}
-            setFavoriteFilms={handleSetFavoriteFilms}
-            onRemove={handleRemoveFavorite}
-            useGlowStyle={useGlowStyle}
-            enableHoverEffect
-            enableNavigation={false}
-            onFilmClick={() => {}}
-          />
-        )}
-
-        <div className="px-6 pt-6 w-1/2">
-          <FavoriteFilmsGrid
-            films={favouriteFilmsView}
-            setFilms={(next) => handleSetFavoriteFilms(next)}
-            editMode={editMode}
-            useGlowStyle={useGlowStyle}
-          />
-        </div>
-
-        {editMode && (
-          <div className="px-6 pt-8">
-            <TasteCardPicker
-              selected={editingTasteCards}
-              setSelected={(next) => {
-                setEditingTasteCards(next);
-                handleTasteCardsChange(next);
-              }}
-              useGlowStyle={useGlowStyle}
-              setUseGlowStyle={(val) => saveProfilePatch({ use_glow_style: !!val })}
+        <div className="px-6 pt-6">
+          <div ref={moodboardAnchorRef} id="moodboard">
+            <Moodboard
+              profileId={profile?.id}
+              isOwner={viewingOwn}
+              className="themed-card themed-outline forge w-full"
             />
           </div>
-        )}
+        </div>
 
-        {!editMode && tasteAnswers.length > 0 && (
-          <div className="mt-10 px-6">
-            <h3 className="text-lg font-semibold mb-4">Taste Questions</h3>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              {tasteAnswers.map((item, index) => {
-                const chosenClass = item.glowClass || glowPreset;
-                const glow = glowOptions.free.find((g) => g.class === chosenClass);
-                return (
-                  <TasteCard
-                    key={index}
-                    question={item.question}
-                    answer={item.answer}
-                    glowColor={glow?.color || "#FF0000"}
-                    glowStyle={glow?.glow || "none"}
-                    useGlowStyle={useGlowStyle}
-                  />
-                );
-              })}
+        {/* Taste Cards — view */}
+        {!editMode && liveTasteCards.length > 0 && (
+          <section className="mt-6 px-6">
+            <div className="themed-card themed-outline forge rounded-2xl border bg-black/40">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+                <h3 className="text-sm font-semibold text-white">Taste Cards</h3>
+              </div>
+              <ProfileTasteCards
+                cards={liveTasteCards}
+                globalGlow={liveGlobalGlow}
+              />
             </div>
-          </div>
+          </section>
         )}
 
-        {/* Slide-out edit panel */}
-        <EditProfilePanel
-          open={editOpen}
-          onClose={() => setEditOpen(false)}
-          onUpdated={handlePanelUpdated}
-          // If/when your EditProfilePanel supports role-signing via clubId, pass it here:
-          // clubId={roleClub?.club_id}
-        />
+        {/* Rating language — view (premium users' phrase groups) */}
+{!editMode && viewScheme?.tags?.length > 0 && (
+  <section className="mt-6 px-6">
+    <div className="themed-card themed-outline forge rounded-2xl border bg-black/40">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+        <h3 className="text-sm font-semibold text-white">Rating Language</h3>
+      </div>
+      <RatingSchemeView scheme={viewScheme} />
+    </div>
+  </section>
+)}
+
+
+        {/* Film Takes */}
+        <section className="mt-6 px-6">
+          <div className="themed-card themed-outline forge rounded-2xl border bg-black/40">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+              <h3 className="text-sm font-semibold text-white">Film Takes</h3>
+            </div>
+
+            {filmTakes.length === 0 ? (
+              <div className="px-4 py-6 text-sm text-zinc-400">No takes yet.</div>
+            ) : (
+              <ul className="px-2 py-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-3">
+                {filmTakes.map((t, idx) => (
+                  <ClubTakeItem
+                    key={t.id || idx}
+                    t={t}
+                    showUser={false}
+                    canEdit={viewingOwn && editMode}
+                    onRemove={() => handleRemoveTake(t.id)}
+                  />
+                ))}
+              </ul>
+            )}
+          </div>
+        </section>
+
+        {/* Edit panel in a PORTAL — mount only when open */}
+        {editOpen &&
+          typeof document !== "undefined" &&
+          createPortal(
+            <EditProfilePanel
+              open={true}
+              onClose={() => {
+                setEditOpen(false);
+                setEditMode(false);
+              }}
+              onUpdated={handlePanelUpdated}
+              profile={profile}
+              profileId={profile?.id}
+              isOwner={viewingOwn}
+            />,
+            document.body
+          )}
       </div>
     </div>
   );

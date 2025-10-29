@@ -1,45 +1,79 @@
-import React, { useState } from 'react';
+// src/components/TasteCard.jsx
+import React, { useMemo } from "react";
 
-const TasteCard = ({ question, answer, glowColor = '#FF0000', glowStyle = 'none', useGlowStyle = false }) => {
-  const [flipped, setFlipped] = useState(false);
+/**
+ * Props
+ * - question: string
+ * - answer: string
+ * - style?: { mode: 'glow'|'outline', glow: string, outline: string }
+ * - fallbackColor?: string  (e.g., profile?.taste_card_style_global)
+ *
+ * Back-compat props (legacy):
+ * - glowClass?: string
+ * - glowColor?: string
+ * - glowStyle?: 'none' | any
+ * - useGlowStyle?: boolean
+ */
+const DEFAULT_COLOR = "#f59e0b"; // amber
+
+export default function TasteCard({
+  question,
+  answer,
+  style,
+  fallbackColor,
+  // legacy (kept so old data doesn’t break)
+  glowClass,
+  glowColor,
+  glowStyle = "none",
+  useGlowStyle = true,
+  className = "",
+}) {
+  // Resolve a color priority:
+  // 1) style.glow/outline depending on mode
+  // 2) fallbackColor (global)
+  // 3) legacy glowColor
+  // 4) default
+  const mode = style?.mode === "outline" ? "outline" : "glow";
+  const colorFromStyle = mode === "outline" ? style?.outline : style?.glow;
+
+  const color = useMemo(() => {
+    return (
+      colorFromStyle ||
+      fallbackColor ||
+      glowColor ||
+      DEFAULT_COLOR
+    );
+  }, [colorFromStyle, fallbackColor, glowColor]);
+
+  // Visual treatment
+  const cardStyle =
+    mode === "outline"
+      ? {
+          outline: `2px solid ${color}`,
+          outlineOffset: "2px",
+        }
+      : useGlowStyle
+      ? {
+          boxShadow: `0 0 0 2px ${color}22, 0 0 22px ${color}66, 0 0 48px ${color}33`,
+        }
+      : undefined;
 
   return (
-    <div
-      onClick={() => setFlipped(!flipped)}
-      className="w-full h-48 perspective"
-    >
+    <div className={`rounded-2xl border border-white/10 p-4 bg-black/30 ${className}`}>
       <div
-        className={`relative w-full h-full rounded-xl transition-transform duration-700 transform-style-preserve-3d ${flipped ? 'rotate-y-180' : ''}`}
-        style={
-          useGlowStyle
-            ? { boxShadow: glowStyle, outlineOffset: '4px' }
-            : { border: `3px solid ${glowColor}`, borderRadius: '1rem' }
-        }
+        className="relative rounded-xl p-5 h-32 grid place-items-center text-center"
+        style={cardStyle}
       >
-        {/* Front */}
-        <div className="absolute w-full h-full backface-hidden bg-zinc-800 text-white rounded-xl flex items-center justify-center p-4">
-          <span className="text-center font-bold text-base">{question}</span>
+        <div className="text-[10px] uppercase tracking-wide text-zinc-400 mb-1">
+          {question}
         </div>
-
-        {/* Back */}
-        <div className="absolute w-full h-full backface-hidden bg-zinc-900 text-white rounded-xl flex items-center justify-center p-4 rotate-y-180">
-          <span className="text-center font-bold text-base">
-            {answer || 'No answer yet.'}
-          </span>
+        <div className="text-sm text-white/90 line-clamp-3 max-w-[95%]">
+          {answer}
         </div>
       </div>
     </div>
   );
-};
-
-export default TasteCard;
-
-
-
-
-
-
-
+}
 
 
 

@@ -168,6 +168,10 @@ function Movies({ searchQuery = "" }) {
                   </div>
                 )}
 
+<Link to={`/movies/${movie.tmdb_id || movie.id}`}>
+  {/* poster/title */}
+</Link>
+
                 {/* Nominate button */}
                 <button
                   onClick={(e) => handleNominate(movie, e)}

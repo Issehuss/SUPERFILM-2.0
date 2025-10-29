@@ -13,17 +13,35 @@ export const REPORT_REASONS = [
   "other",
 ];
 
+/* ─────────────────────────────── constants ─────────────────────────────── */
+// Hard-coded to match your Supabase dashboard
+const REPORT_NOTIFY_FN = "notify-report";
+const NOTIFY_MESSAGE_FN = "notify-message2";
+
+// PG duplicate/unique helpers
+function isUniqueViolation(err) {
+  const m = (err?.message || "").toLowerCase();
+  const c = (err?.code || "").toString();
+  return (
+    c === "23505" ||
+    m.includes("duplicate key") ||
+    m.includes("already exists") ||
+    m.includes("unique constraint") ||
+    m.includes("content_reports_no_dupe")
+  );
+}
+
+/* ─────────────────────────────── API ─────────────────────────────── */
 /**
- * createContentReport
- * Inserts a row in public.content_reports.
+ * Inserts a row in public.content_reports, then (optionally) invokes an Edge Function to notify mods.
  *
  * @param {Object} args
  * @param {'message'|'post'|'profile'|'club'} args.targetType
- * @param {string} args.targetId            // uuid of the thing being reported
+ * @param {string} args.targetId
  * @param {'abuse'|'harassment'|'spam'|'nsfw'|'hate'|'self-harm'|'other'} args.reason
  * @param {string=} args.details
- * @param {string=} args.clubId             // uuid if report pertains to a club context (optional)
- * @param {boolean=} args.notify            // call edge func / webhook after insert (default true)
+ * @param {string=} args.clubId
+ * @param {boolean=} args.notify (default: true)
  * @returns {Promise<{ok:boolean, data?:any, error?:string, duplicate?:boolean}>}
  */
 export async function createContentReport({
@@ -34,23 +52,20 @@ export async function createContentReport({
   clubId,
   notify = true,
 }) {
-  // quick guards to give helpful errors before hitting DB
+  // guards
   if (!REPORT_TARGETS.includes(targetType)) {
     return { ok: false, error: `Invalid targetType "${targetType}".` };
   }
   if (!REPORT_REASONS.includes(reason)) {
     return { ok: false, error: `Invalid reason "${reason}".` };
   }
-  if (!targetId) {
-    return { ok: false, error: "targetId is required." };
-  }
+  if (!targetId) return { ok: false, error: "targetId is required." };
 
   // must be signed in
   const { data: ures } = await supabase.auth.getUser();
   const user = ures?.user;
   if (!user) return { ok: false, error: "You must be signed in to report." };
 
-  // insert
   const payload = {
     reporter_id: user.id,
     target_type: targetType,
@@ -60,6 +75,7 @@ export async function createContentReport({
     club_id: clubId || null,
   };
 
+  // insert
   const { data, error } = await supabase
     .from("content_reports")
     .insert(payload)
@@ -67,29 +83,23 @@ export async function createContentReport({
     .single();
 
   if (error) {
-    const msg = (error.message || "").toLowerCase();
-    // handle unique constraint: content_reports_no_dupe
-    if (msg.includes("duplicate") || msg.includes("unique")) {
+    if (isUniqueViolation(error)) {
       return { ok: false, duplicate: true, error: "You’ve already reported this." };
     }
     return { ok: false, error: error.message || "Failed to submit report." };
   }
 
-  // optional: notify (Edge Function, webhook, etc). Fire-and-forget.
+  // notify via Edge Function (fire-and-forget)
   if (notify) {
     try {
-      const fnBase =
-        import.meta.env.VITE_SUPABASE_FUNCTIONS_URL ||
-        process.env.REACT_APP_SUPABASE_FUNCTIONS_URL;
-      if (fnBase) {
-        await fetch(`${fnBase}/report-notify`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ report: data, reporter: user }),
-        });
-      }
+      await supabase.functions.invoke(REPORT_NOTIFY_FN, {
+        body: {
+          report: data,
+          reporter: { id: user.id, email: user.email ?? null },
+        },
+      });
     } catch {
-      // ignore notification failures—report is already saved
+      // ignore notify failures; report already saved
     }
   }
 
@@ -98,9 +108,8 @@ export async function createContentReport({
 
 /**
  * updateReportStatus (for admins / club leaders per your RLS)
- * @param {string} reportId     // uuid
+ * @param {string} reportId
  * @param {'open'|'dismissed'|'actioned'} status
- * @returns {Promise<{ok:boolean, data?:any, error?:string}>}
  */
 export async function updateReportStatus(reportId, status) {
   const { data, error } = await supabase
@@ -113,9 +122,7 @@ export async function updateReportStatus(reportId, status) {
   return { ok: true, data };
 }
 
-/**
- * listMyReports: reporter sees only their reports (per your policy)
- */
+/** reporter sees only their reports (RLS should enforce) */
 export async function listMyReports() {
   const { data, error } = await supabase
     .from("content_reports")
@@ -125,14 +132,24 @@ export async function listMyReports() {
   return { ok: true, data };
 }
 
-/**
- * listReportsForModeration: admins see all; club leaders see their club’s
- * (RLS enforces access; no service key needed if roles/funcs are correct.)
- */
+/** moderators view (RLS enforces scope) */
 export async function listReportsForModeration({ clubId } = {}) {
   let q = supabase.from("content_reports").select("*").order("created_at", { ascending: false });
   if (clubId) q = q.eq("club_id", clubId);
   const { data, error } = await q;
   if (error) return { ok: false, error: error.message };
   return { ok: true, data };
+}
+
+/* ───────────────────────── chat message notifier (optional) ───────────────────────── */
+/**
+ * callNotifyMessageFn — use when reporting chat messages elsewhere
+ * @param {{ messageId:string, clubId?:string, reason?:string, extra?:any }} args
+ */
+export async function callNotifyMessageFn({ messageId, clubId, reason, extra }) {
+  const { error } = await supabase.functions.invoke(NOTIFY_MESSAGE_FN, {
+    body: { messageId, clubId: clubId ?? null, reason: reason ?? null, extra: extra ?? null },
+  });
+  if (error) throw error;
+  return { ok: true };
 }

@@ -1,97 +1,167 @@
 // src/components/ReportModal.jsx
-import { useState } from "react";
-import useReports from "../hooks/useReports";
+import { useState, useMemo } from "react";
+import { X } from "lucide-react";
+import supabase from "../supabaseClient";
+import { useUser } from "../context/UserContext";
 
-const REASONS = [
-  { value: "abuse",             label: "Abuse" },
-  { value: "harassment",        label: "Harassment" },
-  { value: "spam",              label: "Spam" },
-  { value: "nsfw",              label: "NSFW" },
-  { value: "hate speech",       label: "Hate Speech" },
-  { value: "self-harm content", label: "Self-harm content" },
-  { value: "other",             label: "Other" },
-];
+// Human label -> enum token (adjust to your enum)
+const REASON_MAP = {
+  "Spam": "spam",
+  "Harassment or hate": "harassment",
+  "Self-harm content": "self_harm",
+  "Violence or threats": "violence",
+  "Scam or fraud": "scam",
+  "Nudity / sexual content": "nudity",
+  "Other": "other",
+};
+const ENUM_TOKENS = ["spam", "harassment", "self_harm", "violence", "scam", "nudity", "other"];
 
-export default function ReportModal({
-  open,
-  onClose,
-  targetType = "general", // e.g. "message" or "general"
-  targetId = null,        // message id when reporting a message
-  clubId = null,          // optional
-}) {
-  const { reportContent } = useReports();
-  const [reason, setReason] = useState("");
+// ID helpers: accept UUID or numeric ids
+const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const INT_RX = /^\d+$/;
+const isValidId = (x) => UUID_RX.test(String(x)) || INT_RX.test(String(x));
+
+// Normalize target type for your enum
+function normalizeTargetType(x) {
+  const s = (x || "message").toString().toLowerCase();
+  return s; // change to 'club_message' if that's your DB enum
+}
+
+export default function ReportModal({ open, onClose, targetType, targetId, clubId }) {
+  const { user } = useUser();
+  const [reasonLabel, setReasonLabel] = useState("Spam");
   const [details, setDetails] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
+
+  const reasonToken = useMemo(() => {
+    const token = REASON_MAP[reasonLabel] || "other";
+    return ENUM_TOKENS.includes(token) ? token : "other";
+  }, [reasonLabel]);
 
   if (!open) return null;
 
-  const handleSubmit = async () => {
-    if (!reason) return;
+  async function submit() {
     setSubmitting(true);
+    setErrorMsg("");
+
     try {
-      await reportContent({
-        targetType,
-        targetId,   // may be null for general feedback
-        clubId,
-        reason,     // if not in enum, hook coerces to 'other' and preserves text in details
-        details: details.trim(),
-      });
-      onClose?.({ ok: true });
+      if (!user?.id) throw new Error("You must be signed in to report.");
+      const tt = normalizeTargetType(targetType);
+
+      // Guard: we expect a valid UUID or integer id
+      if (tt === "message" && !isValidId(targetId)) {
+        throw new Error("This message hasn’t been fully saved yet. Please try again in a moment.");
+      }
+
+      const finalDetails =
+        reasonToken === "other" && reasonLabel !== "Other"
+          ? `[Chosen: ${reasonLabel}] ${details || ""}`.trim()
+          : details || null;
+
+      const payload = {
+        club_id: clubId || null,
+        target_type: tt,
+        target_id: targetId,     // may be uuid or bigint (ensure DB column matches)
+        reason: reasonToken,     // enum-safe token
+        details: finalDetails,   // text or null
+        created_by: user.id,     // satisfies typical RLS
+      };
+
+      const { error } = await supabase.from("reports").insert(payload);
+      if (error) {
+        const parts = [error.code, error.message, error.details, error.hint]
+          .filter(Boolean)
+          .join(" — ");
+        throw new Error(parts || "DB insert failed");
+      }
+
+      onClose?.();
     } catch (e) {
-      console.error(e);
-      alert(e?.message || "Couldn’t submit report.");
+      console.error("[Report] submit failed:", e);
+      setErrorMsg(e.message || "Couldn’t submit report.");
     } finally {
       setSubmitting(false);
     }
-  };
+  }
+  console.log("[ReportModal] targetId:", targetId);
+
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60">
-      <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-900 p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold text-white">Report</h3>
-          <button onClick={() => onClose?.()} className="text-zinc-400 hover:text-white">✕</button>
-        </div>
+    <div className="fixed inset-0 z-[2000]">
+      {/* Scrim */}
+      <div
+        className="absolute inset-0 bg-black/60"
+        onClick={() => !submitting && onClose?.()}
+      />
 
-        <div className="grid grid-cols-2 gap-2">
-          {REASONS.map(r => (
+      {/* Dialog */}
+      <div className="absolute inset-0 flex items-center justify-center p-4">
+        <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-950 text-zinc-100 shadow-2xl">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+            <h3 className="font-semibold">Report message</h3>
             <button
-              key={r.value}
-              type="button"
-              onClick={() => setReason(r.value)}
-              className={`px-3 py-2 rounded-lg border ${
-                reason === r.value
-                  ? "bg-yellow-500 text-black border-yellow-400"
-                  : "bg-zinc-800 text-zinc-200 border-zinc-700 hover:bg-zinc-700"
-              }`}
+              onClick={() => !submitting && onClose?.()}
+              className="rounded-lg p-1 hover:bg-zinc-800"
+              aria-label="Close"
             >
-              {r.label}
+              <X size={18} />
             </button>
-          ))}
-        </div>
+          </div>
 
-        {/* Only show free text when "Other" or anytime you like */}
-        <label className="block text-sm text-zinc-400 mt-4 mb-1">Details (optional)</label>
-        <textarea
-          value={details}
-          onChange={(e) => setDetails(e.target.value)}
-          rows={4}
-          className="w-full resize-none rounded-lg border border-zinc-700 bg-zinc-900 text-white p-2"
-          placeholder="Tell us what happened…"
-        />
+          <div className="px-4 py-4 space-y-4">
+            <div>
+              <label className="block text-sm mb-1">Reason</label>
+              <select
+                className="w-full rounded-lg bg-zinc-900 border border-zinc-800 px-3 py-2"
+                value={reasonLabel}
+                onChange={(e) => setReasonLabel(e.target.value)}
+                disabled={submitting}
+              >
+                {Object.keys(REASON_MAP).map((label) => (
+                  <option key={label} value={label}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-zinc-400">
+                Saved as <code className="text-zinc-300">{reasonToken}</code>
+              </p>
+            </div>
 
-        <div className="mt-4 flex justify-end gap-2">
-          <button onClick={() => onClose?.()} className="px-3 py-2 rounded-lg bg-zinc-800 text-zinc-200">
-            Cancel
-          </button>
-          <button
-            disabled={!reason || submitting}
-            onClick={handleSubmit}
-            className="px-3 py-2 rounded-lg bg-yellow-500 text-black disabled:opacity-50"
-          >
-            {submitting ? "Submitting…" : "Submit report"}
-          </button>
+            <div>
+              <label className="block text-sm mb-1">Details (optional)</label>
+              <textarea
+                rows={4}
+                className="w-full rounded-lg bg-zinc-900 border border-zinc-800 px-3 py-2 resize-none"
+                placeholder="Tell us what happened…"
+                value={details}
+                onChange={(e) => setDetails(e.target.value)}
+                disabled={submitting}
+              />
+            </div>
+
+            {errorMsg && (
+              <div className="text-sm text-red-400">{errorMsg}</div>
+            )}
+          </div>
+
+          <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-zinc-800">
+            <button
+              onClick={() => onClose?.()}
+              disabled={submitting}
+              className="rounded-lg px-3 py-2 border border-zinc-800 hover:bg-zinc-800"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={submit}
+              disabled={submitting}
+              className="rounded-lg px-3 py-2 bg-yellow-500 text-black hover:bg-yellow-400 disabled:opacity-50"
+            >
+              {submitting ? "Submitting…" : "Submit report"}
+            </button>
+          </div>
         </div>
       </div>
     </div>

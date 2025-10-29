@@ -1,3 +1,4 @@
+
 /* src/pages/Events.css */
 .events-page { --brand-yellow: 241 183 7; padding: 1.25rem; }
 
@@ -203,4 +204,148 @@
 .studio-loading {
   padding: 12px;
   color: #a1a1aa;
+}
+
+/* Minimal chrome for the poster studio */
+.studio-min{
+  display:grid;
+  grid-template-rows: 1fr auto;
+  height: min(78vh, 820px);
+  border:1px solid #2b2c34;
+  border-radius:12px;
+  overflow:hidden;
+  background:#0f1014;
+}
+
+/* canvas area */
+.studio-board{
+  position:relative;
+  display:grid;
+  place-items:center;
+  overflow:hidden;
+  background:#0a0b0e;
+}
+
+/* small top bar (only appears for text selection) */
+.studio-topbar{
+  position:absolute;
+  top:8px; left:50%;
+  transform: translateX(-50%);
+  display:flex; gap:8px; align-items:center;
+  padding:6px 8px;
+  background:rgba(15,16,20,.78);
+  border:1px solid #2b2c34;
+  border-radius:10px;
+  backdrop-filter: blur(6px);
+  box-shadow:0 12px 24px rgba(0,0,0,.3);
+}
+.studio-topbar .hint{ color:#a1a1aa; font-size:.85rem; }
+
+/* left icon rail */
+.studio-leftbar{
+  position:absolute;
+  left:8px; top:50%;
+  transform: translateY(-50%);
+  display:flex; flex-direction:column; gap:8px;
+  padding:6px;
+  background:rgba(15,16,20,.78);
+  border:1px solid #2b2c34;
+  border-radius:12px;
+  backdrop-filter: blur(6px);
+  box-shadow:0 12px 24px rgba(0,0,0,.3);
+  z-index:2;
+}
+
+/* bottom bar */
+.studio-bottombar{
+  display:flex; align-items:center; gap:8px;
+  padding:8px;
+  border-top:1px solid #2b2c34;
+  background:#0b0c0f;
+}
+.studio-bottombar .hint{ color:#a1a1aa; font-size:.85rem; }
+.studio-bottombar .spacer{ flex:1; }
+
+/* re-use existing tokens */
+.icon-btn{ width:40px; height:40px; border-radius:10px; background:#12131a; color:#e5e5e5; border:1px solid #31323c; display:flex; align-items:center; justify-content:center; cursor:pointer; }
+.icon-btn.active{ border-color:rgb(var(--brand-yellow)/.7); box-shadow:0 0 0 2px rgb(var(--brand-yellow)/.25); }
+.icon-btn:hover{ border-color:#4b4c55; }
+.rail-item{ position:relative; }
+.flyout{ position:absolute; min-width:220px; background:#0f1014; border:1px solid #2b2c34; border-radius:12px; padding:10px; box-shadow:0 24px 40px rgba(0,0,0,.4); z-index:30; }
+.flyout.left{ left:-232px; top:0; }
+.flyout .row{ display:flex; align-items:center; gap:8px; }
+.flyout .hint{ color:#a1a1aa; font-size:.85rem; }
+
+/* Compact studio layout */
+.studio-shell {
+  display: grid;
+  grid-template-columns: 120px 1fr; /* left rail + poster */
+  gap: 12px;
+  align-items: stretch;
+  min-height: 0;
+}
+
+.studio-left {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px;
+  background: #0c0d10;
+  border: 1px solid #26262b;
+  border-radius: 12px;
+}
+
+.rail-text {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #111215;
+  border: 1px solid #2a2b31;
+  color: #e5e7eb;
+  font-weight: 800;
+  cursor: pointer;
+}
+.rail-text:hover { border-color: #4b4c55; }
+
+.canvas-wrap {
+  position: relative;
+  display: grid;
+  place-items: center;
+  background: #0a0b0e;
+  border: 1px solid #26262b;
+  border-radius: 12px;
+  overflow: hidden; /* poster inside */
+  min-height: 0;
+}
+
+.canvas-panel {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 20;
+  background: #0f1014;
+  border: 1px solid #2b2c34;
+  border-radius: 10px;
+  padding: 8px;
+  box-shadow: 0 24px 40px rgba(0,0,0,.4);
+}
+
+.text-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  margin-top: 8px;
+  background: #0c0d10;
+  border: 1px solid #26262b;
+  border-radius: 10px;
+}
+.text-toolbar .spacer { flex: 1; }
+
+/* Prevent any pseudo-element headers above the poster in the preview card */
+.poster-card::before,
+.poster-card .poster-media::before {
+  content: none !important;
 }

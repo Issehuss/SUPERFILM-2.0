@@ -1,0 +1,13 @@
+{
+    "compilerOptions": {
+      "strict": true,
+      "lib": ["deno.window", "dom"],
+      "experimentalDecorators": true
+    },
+    "imports": {
+      "stripe": "npm:stripe@16.6.0",
+      "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2",
+      "std/http": "https://deno.land/std@0.224.0/http/server.ts"
+    }
+  }
+  

@@ -1,66 +1,42 @@
+// src/components/BannerPicker.jsx
 import { useState } from "react";
 import BannerCropper from "./BannerCropper";
 import { FastAverageColor } from "fast-average-color";
-import { getEnv } from "../utils/env";
 import { useUser } from "../context/UserContext";
 import supabase from "../supabaseClient";
+import { searchMovies } from "../lib/tmdbClient";
 
-const BUCKET = "banners"; // create this bucket in Supabase Storage
+const BUCKET = "banners"; // make sure this bucket exists in Supabase Storage
 
-const BannerPicker = ({ onSelect }) => {
+export default function BannerPicker({ onSelect }) {
   const { user, saveProfilePatch } = useUser();
+
   const [query, setQuery] = useState("");
-  const [backdrops, setBackdrops] = useState([]);
+  const [backdrops, setBackdrops] = useState([]); // [{ id, title, url }]
   const [loading, setLoading] = useState(false);
-  const [bannerToCrop, setBannerToCrop] = useState(null);
+
+  const [bannerToCrop, setBannerToCrop] = useState(null); // data URL
   const [showCropper, setShowCropper] = useState(false);
 
-  const TMDB_KEY = getEnv("TMDB_KEY") || getEnv("TMDB_API_KEY");
+  // --- Helpers ---------------------------------------------------------------
 
-  async function tmdbSearchMovies(q, page = 1) {
-    if (!TMDB_KEY || !q?.trim()) return { results: [] };
-    const url = `https://api.themoviedb.org/3/search/movie?api_key=${TMDB_KEY}&language=en-US&query=${encodeURIComponent(
-      q
-    )}&include_adult=false&page=${page}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`TMDB search failed: ${res.status}`);
-    return res.json();
+  // Convert TMDB CDN URL like .../w780/abc.jpg -> .../original/abc.jpg (better for cropping)
+  function toOriginalSize(url) {
+    if (!url) return url;
+    return url.replace(/\/w\d+\//, "/original/");
   }
 
-  const handleSearch = async () => {
-    if (!query.trim() || !TMDB_KEY) return;
-    setLoading(true);
-    try {
-      const data = await tmdbSearchMovies(query);
-      const images = (data?.results || [])
-        .map((m) => m?.backdrop_path)
-        .filter(Boolean)
-        .slice(0, 10);
-      setBackdrops(images);
-    } catch (err) {
-      console.error("Failed to fetch backdrops:", err);
-      setBackdrops([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleImageClick = async (path) => {
-    const originalUrl = `https://image.tmdb.org/t/p/original${path}`;
-    try {
-      const res = await fetch(originalUrl);
-      if (!res.ok) throw new Error(`Failed to fetch image: ${res.status}`);
-      const blob = await res.blob();
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setBannerToCrop(reader.result);
-        setShowCropper(true);
-      };
+  async function fetchAsDataUrl(url) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Failed to fetch image: ${res.status}`);
+    const blob = await res.blob();
+    const reader = new FileReader();
+    return await new Promise((resolve, reject) => {
+      reader.onloadend = () => resolve(reader.result);
+      reader.onerror = reject;
       reader.readAsDataURL(blob);
-    } catch (err) {
-      console.error("Failed to load image securely:", err);
-    }
-  };
+    });
+  }
 
   const getGradientFromImage = async (imageSrc) => {
     const fac = new FastAverageColor();
@@ -80,7 +56,7 @@ const BannerPicker = ({ onSelect }) => {
     });
   };
 
-  // Convert data URL -> Blob
+  // dataURL -> Blob
   function dataURLtoBlob(dataUrl) {
     const [meta, data] = dataUrl.split(",");
     const mime = meta.match(/data:(.*);base64/)?.[1] || "image/jpeg";
@@ -111,11 +87,55 @@ const BannerPicker = ({ onSelect }) => {
     return publicUrl;
   }
 
-  const handleCropComplete = async (croppedImage) => {
+  // --- TMDB search (via secure proxy) ---------------------------------------
+
+  async function handleSearch() {
+    const term = query.trim();
+    if (!term) {
+      setBackdrops([]);
+      return;
+    }
+    setLoading(true);
+    try {
+      const hits = await searchMovies(term); // normalized: { id, title, year, posterUrl, backdropUrl }
+      const items = (hits || [])
+        .map((h) => ({
+          id: h.id,
+          title: h.title,
+          url: h.backdropUrl || h.posterUrl || "", // prefer backdrops for banners
+        }))
+        .filter((x) => !!x.url)
+        .slice(0, 10);
+      setBackdrops(items);
+    } catch (err) {
+      console.error("Failed to fetch backdrops:", err);
+      setBackdrops([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter") handleSearch();
+  };
+
+  async function handleImageClick(item) {
+    try {
+      const originalUrl = toOriginalSize(item.url);
+      const dataUrl = await fetchAsDataUrl(originalUrl);
+      setBannerToCrop(dataUrl);
+      setShowCropper(true);
+    } catch (err) {
+      console.error("Failed to load image:", err);
+    }
+  }
+
+  async function handleCropComplete(croppedImage) {
     try {
       const gradient = (await getGradientFromImage(croppedImage)) || "";
+
       if (!user) {
-        // Not signed in: fallback to localStorage, still call onSelect for UI
+        // Not signed in: store locally but still bubble up to UI
         localStorage.setItem("userBanner", croppedImage);
         localStorage.setItem("userGradient", gradient);
         onSelect?.({ image: croppedImage, gradient });
@@ -124,9 +144,8 @@ const BannerPicker = ({ onSelect }) => {
         return;
       }
 
-      // Upload to Storage + save to profiles
       const publicUrl = await uploadBannerToStorage(user.id, croppedImage);
-      await saveProfilePatch({ banner_url: publicUrl, banner_gradient: gradient });
+      await saveProfilePatch?.({ banner_url: publicUrl, banner_gradient: gradient });
 
       onSelect?.({ image: publicUrl, gradient });
     } catch (e) {
@@ -135,16 +154,14 @@ const BannerPicker = ({ onSelect }) => {
       setShowCropper(false);
       setBannerToCrop(null);
     }
-  };
+  }
 
   const handleCancelCrop = () => {
     setShowCropper(false);
     setBannerToCrop(null);
   };
 
-  const handleKeyDown = (e) => {
-    if (e.key === "Enter") handleSearch();
-  };
+  // --- UI --------------------------------------------------------------------
 
   return (
     <div className="mt-6 bg-zinc-900 p-4 rounded-md shadow">
@@ -157,34 +174,27 @@ const BannerPicker = ({ onSelect }) => {
           onKeyDown={handleKeyDown}
           className="flex-1 px-3 py-2 rounded bg-zinc-800 text-white border border-zinc-700 focus:outline-none"
           placeholder="Enter film name..."
-          disabled={!TMDB_KEY}
         />
         <button
           onClick={handleSearch}
           className="px-4 py-2 bg-yellow-400 text-black font-semibold rounded hover:bg-yellow-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
-          disabled={!TMDB_KEY || loading}
+          disabled={loading}
         >
           {loading ? "Searching..." : "Search"}
         </button>
       </div>
 
-      {!TMDB_KEY && (
-        <p className="mt-3 text-xs text-red-400">
-          Set <code>REACT_APP_TMDB_KEY</code> (CRA) or <code>VITE_TMDB_KEY</code> (Vite) in <code>.env.local</code>.
-        </p>
-      )}
-
-      {loading && TMDB_KEY && <p className="mt-3 text-zinc-400">Searching backdrops...</p>}
+      {loading && <p className="mt-3 text-zinc-400">Searching backdrops...</p>}
 
       {!!backdrops.length && (
         <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
-          {backdrops.map((path, index) => (
+          {backdrops.map((item) => (
             <img
-              key={`${path}-${index}`}
-              src={`https://image.tmdb.org/t/p/w500${path}`}
-              alt="Backdrop"
+              key={item.id + "_" + item.url}
+              src={item.url.replace("/original/", "/w500/")} // lighter thumbs in the grid
+              alt={item.title || "Backdrop"}
               className="rounded-lg cursor-pointer hover:opacity-80 transition"
-              onClick={() => handleImageClick(path)}
+              onClick={() => handleImageClick(item)}
               loading="lazy"
             />
           ))}
@@ -200,6 +210,4 @@ const BannerPicker = ({ onSelect }) => {
       )}
     </div>
   );
-};
-
-export default BannerPicker;
+}

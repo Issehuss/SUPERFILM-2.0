@@ -1,10 +1,10 @@
 // src/components/FavoriteFilmsPicker.jsx
 import { useMemo, useState } from "react";
-import { getEnv } from "../utils/env"; // make sure this file exists as we added earlier
+import { searchMovies } from "../lib/tmdbClient";
 
 /**
  * Props:
- * - value: array of current favourites, e.g. [{ id, title, poster_path, title, release_date }]
+ * - value: array of current favourites, e.g. [{ id, title, poster_path, release_date }]
  * - max: number (optional) limit of favourites (default 20)
  * - onChange: (newArray) => void
  * - onAdd?: (movie) => void
@@ -17,56 +17,61 @@ export default function FavoriteFilmsPicker({
   onAdd,
   onRemove,
 }) {
-  const TMDB_KEY = getEnv("TMDB_KEY") || getEnv("TMDB_API_KEY");
-
   const [q, setQ] = useState("");
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
 
   const canAddMore = value.length < max;
 
-  async function tmdbSearchMovies(query, page = 1) {
-    if (!TMDB_KEY || !query?.trim()) return { results: [] };
-    const url = `https://api.themoviedb.org/3/search/movie?api_key=${TMDB_KEY}&language=en-US&query=${encodeURIComponent(
-      query
-    )}&include_adult=false&page=${page}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`TMDB search failed: ${res.status}`);
-    return res.json(); // { results: [...] }
+  // Helper: convert normalized searchMovies result -> shape your app stores
+  function normalizeToFavShape(hit) {
+    // hit: { id, title, year, posterUrl, backdropUrl }
+    // We want poster_path only (relative), if possible.
+    let poster_path = null;
+    if (hit?.posterUrl) {
+      // try to extract the TMDB relative path from a full CDN URL
+      // e.g. https://image.tmdb.org/t/p/w500/abc.jpg -> /abc.jpg
+      const m = hit.posterUrl.match(/\/t\/p\/w\d+(.+)$/);
+      poster_path = m ? m[1] : null; // will be like "/abc.jpg"
+    }
+    return {
+      id: hit.id,
+      title: hit.title,
+      poster_path, // acceptable to be null; UI has a placeholder
+      release_date: hit.year ? String(hit.year) + "-01-01" : null, // best-effort; original API had full date
+    };
   }
 
-  const handleSearch = async () => {
-    if (!TMDB_KEY || !q.trim()) return;
+  async function handleSearch() {
+    const query = q.trim();
+    if (!query) {
+      setResults([]);
+      return;
+    }
     setLoading(true);
     try {
-      const data = await tmdbSearchMovies(q);
-      const items = (data?.results || []).slice(0, 20);
-      setResults(items);
+      const hits = await searchMovies(query); // normalized array
+      // Keep up to 20 (like your old behavior)
+      setResults((hits || []).slice(0, 20));
     } catch (e) {
-      console.error(e);
+      console.error("FavoriteFilmsPicker search error:", e);
       setResults([]);
     } finally {
       setLoading(false);
     }
-  };
+  }
 
   const handleKeyDown = (e) => {
     if (e.key === "Enter") handleSearch();
   };
 
   const alreadyPicked = useMemo(() => {
-    const set = new Set(value.map((m) => m.id));
-    return set;
+    return new Set(value.map((m) => m.id));
   }, [value]);
 
-  const addFav = (m) => {
+  const addFav = (hit) => {
     if (!canAddMore) return;
-    const movie = {
-      id: m.id,
-      title: m.title,
-      poster_path: m.poster_path,
-      release_date: m.release_date,
-    };
+    const movie = normalizeToFavShape(hit);
     const next = [...value, movie];
     onChange?.(next);
     onAdd?.(movie);
@@ -95,24 +100,15 @@ export default function FavoriteFilmsPicker({
           onKeyDown={handleKeyDown}
           placeholder="Search films…"
           className="flex-1 px-3 py-2 rounded bg-zinc-800 text-white border border-zinc-700 focus:outline-none"
-          disabled={!TMDB_KEY}
         />
         <button
           onClick={handleSearch}
           className="px-4 py-2 bg-yellow-500 text-black font-semibold rounded hover:bg-yellow-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
-          disabled={!TMDB_KEY || loading}
+          disabled={loading}
         >
           {loading ? "Searching…" : "Search"}
         </button>
       </div>
-
-      {!TMDB_KEY && (
-        <p className="mt-3 text-xs text-red-400">
-          Set <code>REACT_APP_TMDB_KEY</code> (CRA) or <code>VITE_TMDB_KEY</code> (Vite) in{" "}
-          <code>.env.local</code> to enable search. (Also supported:{" "}
-          <code>REACT_APP_TMDB_API_KEY</code>/<code>VITE_TMDB_API_KEY</code>.)
-        </p>
-      )}
 
       {/* Current favourites */}
       {value.length > 0 && (
@@ -147,7 +143,7 @@ export default function FavoriteFilmsPicker({
         </div>
       )}
 
-      {/* Search results */}
+      {/* Search results (from secure proxy) */}
       {!!results.length && (
         <div className="mt-6">
           <h4 className="text-sm text-zinc-300 mb-2">Results</h4>
@@ -157,25 +153,26 @@ export default function FavoriteFilmsPicker({
             </p>
           )}
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3">
-            {results.map((m) => {
-              const picked = alreadyPicked.has(m.id);
+            {results.map((hit) => {
+              const picked = alreadyPicked.has(hit.id);
+              const posterUrl =
+                hit.posterUrl ||
+                (hit.poster_path
+                  ? `https://image.tmdb.org/t/p/w342${hit.poster_path}`
+                  : "");
               return (
-                <div key={m.id} className="relative">
+                <div key={hit.id} className="relative">
                   <img
-                    src={
-                      m.poster_path
-                        ? `https://image.tmdb.org/t/p/w342${m.poster_path}`
-                        : "https://via.placeholder.com/342x513?text=No+Poster"
-                    }
-                    alt={m.title}
+                    src={posterUrl || "https://via.placeholder.com/342x513?text=No+Poster"}
+                    alt={hit.title}
                     className={`rounded-lg shadow w-full h-auto ${
                       picked ? "opacity-60" : "cursor-pointer hover:opacity-90"
                     }`}
                     loading="lazy"
-                    onClick={() => (!picked && canAddMore ? addFav(m) : null)}
+                    onClick={() => (!picked && canAddMore ? addFav(hit) : null)}
                   />
                   <div className="mt-1 text-xs text-zinc-300 line-clamp-2">
-                    {m.title}
+                    {hit.title}
                   </div>
                   {picked && (
                     <div className="absolute inset-0 flex items-center justify-center">

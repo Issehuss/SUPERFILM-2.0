@@ -1,58 +1,49 @@
 // src/components/NavBar.jsx
-import { Link } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useMemo } from "react";
 import { useUser } from "../context/UserContext";
+import AccountMenu from "./AccountMenu"; // if you prefer the avatar+menu when signed in
 
 export default function NavBar() {
-  const { user, avatar, signOut } = useUser();
+  const { user } = useUser();
+  const location = useLocation();
+  const navigate = useNavigate();
 
-  const handleSignOut = async () => {
-    try {
-      await signOut();
-    } catch (e) {
-      alert(e.message || "Sign out failed");
-    }
-  };
+  // Hide auth buttons while already on /auth
+  const isAuthPage = useMemo(
+    () => location.pathname.startsWith("/auth"),
+    [location.pathname]
+  );
 
   return (
-    <header className="sticky top-0 z-40 bg-black/70 backdrop-blur border-b border-zinc-800">
-      <nav className="mx-auto max-w-6xl px-4 py-3 flex items-center justify-between text-white">
-        <Link to="/" className="font-semibold tracking-wide">SuperFilm</Link>
+    <header className="sticky top-0 z-40 bg-black/70 backdrop-blur border-b border-zinc-900/80">
+      <nav className="mx-auto max-w-6xl px-4 py-3 flex items-center gap-4 text-white">
+        <Link to="/" className="font-semibold tracking-wide text-lg">
+          SuperFilm
+        </Link>
 
-        <div className="flex items-center gap-3">
-          {user?.id ? (
-            <>
-              <Link to="/profile" className="flex items-center gap-2">
-                <img
-                  src={avatar}
-                  alt="Your avatar"
-                  className="h-8 w-8 rounded-full border border-zinc-700"
-                />
-                <span className="hidden sm:inline text-sm text-zinc-300">
-                  {user.email || "Account"}
-                </span>
-              </Link>
-              <button
-                onClick={handleSignOut}
-                className="text-sm px-3 py-1.5 rounded-lg border border-zinc-700 hover:bg-zinc-800"
-              >
-                Sign out
-              </button>
-            </>
+        <div className="ml-auto flex items-center gap-3">
+          {user ? (
+            // Signed in → show your account menu
+            <AccountMenu />
           ) : (
-            <>
-              <Link
-                to="/auth"
-                className="text-sm px-3 py-1.5 rounded-lg border border-zinc-700 hover:bg-zinc-800"
-              >
-                Sign in
-              </Link>
-              <Link
-                to="/auth"
-                className="text-sm px-3 py-1.5 rounded-lg bg-yellow-500 text-black hover:bg-yellow-400"
-              >
-                Sign up
-              </Link>
-            </>
+            // Signed out → SuperFilm-styled actions
+            !isAuthPage && (
+              <>
+                <Link
+                  to="/auth?mode=signin"
+                  className="px-3 h-9 inline-flex items-center rounded-full border border-white/10 bg-white/5 hover:bg-white/10 text-sm transition"
+                >
+                  Sign in
+                </Link>
+                <button
+                  onClick={() => navigate("/auth?mode=signup")}
+                  className="px-4 h-9 inline-flex items-center rounded-full bg-yellow-400/90 hover:bg-yellow-400 text-black text-sm font-semibold shadow-[0_0_0_1px_rgba(0,0,0,0.25)]"
+                >
+                  Join SuperFilm
+                </button>
+              </>
+            )
           )}
         </div>
       </nav>

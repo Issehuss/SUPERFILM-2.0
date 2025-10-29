@@ -52,7 +52,7 @@ export default function useReports() {
 
     // fire the email (best-effort)
     try {
-      await supabase.functions.invoke("notify-report", { body: { record: data } });
+      
     } catch (e) {
       console.warn("[notify-report] invoke failed:", e?.message || e);
     }

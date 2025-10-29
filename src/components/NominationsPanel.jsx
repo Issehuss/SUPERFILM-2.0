@@ -2,10 +2,7 @@
 import React, { useMemo, useState, useEffect } from "react";
 import supabase from "../supabaseClient.js";
 import { Trash2 } from "lucide-react";
-import { Link } from "react-router-dom"; // ← single merged import
-import { useNavigate, useParams } from "react-router-dom";
-
-
+import { Link, useNavigate, useParams } from "react-router-dom";
 
 const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -17,6 +14,7 @@ const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * - onPosterClick?: (movie: { id, title, poster_path }) => void
  * - movieRoute?: string = "/movies"
  * - canRemove?: boolean = false
+ * - isEditing?: boolean = false
  */
 export default function NominationsPanel({
   clubId: propClubId,
@@ -25,6 +23,7 @@ export default function NominationsPanel({
   onPosterClick,
   movieRoute = "/movies",
   canRemove = false,
+  isEditing = false,
 }) {
   const { clubParam, id: legacyId } = useParams();
   const navigate = useNavigate();
@@ -36,6 +35,7 @@ export default function NominationsPanel({
   const [resolving, setResolving] = useState(false);
   const [error, setError] = useState("");
 
+  // ─── Resolve Club ID ───────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
 
@@ -53,6 +53,7 @@ export default function NominationsPanel({
         setResolvedClubId(routeParam);
         return;
       }
+
       try {
         setResolving(true);
         const { data, error } = await supabase
@@ -62,7 +63,6 @@ export default function NominationsPanel({
           .maybeSingle();
 
         if (cancelled) return;
-
         if (error) setError(error.message || "Could not resolve club.");
         setResolvedClubId(data?.id || null);
       } catch (e) {
@@ -81,6 +81,7 @@ export default function NominationsPanel({
     };
   }, [propClubId, routeParam]);
 
+  // ─── Load Nominations ───────────────────────────────────────────────
   async function load(resolvedId) {
     setLoading(true);
     setError("");
@@ -111,13 +112,19 @@ export default function NominationsPanel({
     load(resolvedClubId);
   }, [resolvedClubId, limit]);
 
+  // ─── Live Updates (Realtime) ───────────────────────────────────────
   useEffect(() => {
     if (!resolvedClubId) return;
     const channel = supabase
       .channel(`nominations:${resolvedClubId}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "nominations", filter: `club_id=eq.${resolvedClubId}` },
+        {
+          event: "*",
+          schema: "public",
+          table: "nominations",
+          filter: `club_id=eq.${resolvedClubId}`,
+        },
         () => load(resolvedClubId)
       )
       .subscribe();
@@ -126,33 +133,39 @@ export default function NominationsPanel({
     };
   }, [resolvedClubId]);
 
+  // ─── Poster Click ─────────────────────────────────────────────────
   function handlePosterClick(movie) {
     if (!movie?.id) return;
     if (typeof onPosterClick === "function") {
-      onPosterClick(movie);   // uses the parent navigate from ClubProfile
+      onPosterClick(movie);
     } else {
-      navigate(`/movies/${movie.id}`); // fallback
+      navigate(`/movies/${movie.id}`);
     }
   }
-  
 
-  // Remove all nominations for a movie in this club (admin action)
+  // ─── Remove Nomination ─────────────────────────────────────────────
   async function handleRemove(movieId) {
     if (!resolvedClubId || !movieId) return;
-    // optimistic update
+    const ok = window.confirm("Remove this nomination?");
+    if (!ok) return;
+
+    // Optimistic remove
     setItems((prev) => prev.filter((x) => x.movie_id !== movieId));
+
     const { error } = await supabase
       .from("nominations")
       .delete()
       .eq("club_id", resolvedClubId)
       .eq("movie_id", movieId);
+
     if (error) {
-      // revert if failed
+      // Revert if failed
       await load(resolvedClubId);
       alert(error.message || "Could not remove nomination.");
     }
   }
 
+  // ─── Render ────────────────────────────────────────────────────────
   if (resolving) {
     return (
       <section className="mt-8">
@@ -161,6 +174,7 @@ export default function NominationsPanel({
       </section>
     );
   }
+
   if (!resolvedClubId) return null;
 
   return (
@@ -177,20 +191,27 @@ export default function NominationsPanel({
       {loading ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 mt-3">
           {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className="aspect-[2/3] rounded-2xl bg-white/5 ring-1 ring-white/10 animate-pulse" />
+            <div
+              key={i}
+              className="aspect-[2/3] rounded-2xl bg-white/5 ring-1 ring-white/10 animate-pulse"
+            />
           ))}
         </div>
       ) : items?.length ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 mt-3">
           {items.map((n) => {
-            const movie = { id: n.movie_id, title: n.movie_title, poster_path: n.poster_path };
+            const movie = {
+              id: n.movie_id,
+              title: n.movie_title,
+              poster_path: n.poster_path,
+            };
             return (
               <div
                 key={n.movie_id}
                 className={`group relative overflow-hidden rounded-2xl bg-white/5 ring-1 ring-white/10 ${posterHoverClass}`}
                 title={n.movie_title}
               >
-                {/* Poster in fixed 2:3 box */}
+                {/* Poster */}
                 <button
                   type="button"
                   onClick={() => handlePosterClick(movie)}
@@ -198,21 +219,25 @@ export default function NominationsPanel({
                 >
                   <div className="aspect-[2/3] w-full overflow-hidden">
                     <img
-                      src={n.poster_path ? `https://image.tmdb.org/t/p/w500${n.poster_path}` : "/fallback-next.jpg"}
+                      src={
+                        n.poster_path
+                          ? `https://image.tmdb.org/t/p/w500${n.poster_path}`
+                          : "/fallback-next.jpg"
+                      }
                       alt={n.movie_title}
                       className="h-full w-full object-cover"
                       loading="lazy"
                     />
                   </div>
 
-                  {/* Top-right upvotes chip */}
+                  {/* Upvote count chip */}
                   {"upvotes" in n && (
                     <div className="pointer-events-none absolute top-2 right-2 rounded-full bg-black/70 text-xs text-white px-2 py-1 ring-1 ring-white/10">
                       ▲ {n.upvotes ?? 0}
                     </div>
                   )}
 
-                  {/* Bottom gradient title band */}
+                  {/* Title band */}
                   <div className="pointer-events-none absolute inset-x-0 bottom-0 p-3">
                     <div className="rounded-xl bg-gradient-to-t from-black/80 to-black/0 p-3">
                       <p className="text-sm font-medium text-white line-clamp-2">
@@ -220,26 +245,29 @@ export default function NominationsPanel({
                       </p>
                       {n.last_nomination_at && (
                         <p className="text-[11px] text-zinc-300/80 mt-0.5">
-                          Last nominated {new Date(n.last_nomination_at).toLocaleDateString()}
+                          Last nominated{" "}
+                          {new Date(
+                            n.last_nomination_at
+                          ).toLocaleDateString()}
                         </p>
                       )}
                     </div>
                   </div>
                 </button>
 
-                {/* Admin remove */}
-                {canRemove && (
+                {/* Remove button (admins + edit mode only) */}
+                {canRemove && isEditing && (
                   <button
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
                       handleRemove(n.movie_id);
                     }}
-                    className="absolute top-2 left-2 inline-flex items-center justify-center w-8 h-8 rounded-full bg-black/70 hover:bg-black/90 ring-1 ring-white/10 opacity-0 group-hover:opacity-100 transition"
+                    className="absolute top-2 left-2 inline-flex items-center justify-center w-8 h-8 rounded-full bg-red-600/90 hover:bg-red-500 text-white ring-1 ring-white/10 opacity-0 group-hover:opacity-100 transition"
                     title="Remove nomination"
                     aria-label="Remove nomination"
                   >
-                    <Trash2 className="w-4 h-4 text-white" />
+                    <Trash2 className="w-4 h-4" />
                   </button>
                 )}
               </div>

@@ -1,183 +1,274 @@
 // src/context/UserContext.jsx
-import { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  useCallback,
+} from "react";
 import supabase from "../supabaseClient.js";
 
-/**
- * Exposed:
- * - user: Supabase auth user (null if signed out)
- * - profile: row from public.profiles (banner_url, banner_gradient, favorite_films, etc.)
- * - loading: boolean while bootstrapping / switching sessions
- * - avatar, setAvatar: UI-level avatar (synced with profile.avatar_url)
- * - saveProfilePatch(patch): updates public.profiles for the signed-in user and syncs context
- * - refreshProfile(): re-fetches the profile from DB
- */
 const UserContext = createContext(null);
 export const useUser = () => useContext(UserContext);
 
-// Only select columns we actually use in the app.
-// (Removed "roles" and "joined_clubs" which were causing 400s if absent.)
-const PROFILE_COLUMNS = [
-  "id",
-  "slug",
-  "display_name",
-  "avatar_url",
-  "banner_url",
-  "banner_gradient",
-  "favorite_films",
-  "bio",
-  "taste_cards",
-  "glow_preset",
-  "club_tag",
-].join(",");
-
-export const UserProvider = ({ children }) => {
+/**
+ * This provider:
+ * - Loads auth user and profile on bootstrap and auth changes
+ * - Ensures a profiles row exists (inserts a skeleton if missing)
+ * - Subscribes to realtime updates for the current user's profile
+ * - Exposes saveProfilePatch with optimistic UI + server reconciliation
+ */
+function UserProvider({ children }) {
+  const [user, setUser] = useState(null);          // Supabase auth user
+  const [profile, setProfile] = useState(null);    // Row from public.profiles
+  const [avatar, setAvatar] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Local avatar fallback for snappy UI
-  const [avatar, setAvatar] = useState(() => {
-    return localStorage.getItem("userAvatar") || "/avatars/default.jpg";
-  });
+  /* ───────────────────────────── Derived flags ───────────────────────────── */
+  const isPremium =
+    profile?.plan === "directors_cut" || profile?.is_premium === true;
 
-  // Auth + Profile
-  const [user, setUser] = useState(null);      // null when signed out
-  const [profile, setProfile] = useState(null); // null until loaded
+  /* ─────────────────────── Ensure profile row exists ─────────────────────── */
+  const ensureProfileExists = useCallback(
+    async (uid) => {
+      if (!uid) return null;
 
-  useEffect(() => {
-    localStorage.setItem("userAvatar", avatar);
-  }, [avatar]);
+      // Try to fetch first
+      const { data: existing, error: selErr } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("id", uid)
+        .maybeSingle();
 
-  // ------- DB helpers -------
-  const fetchProfile = useCallback(async (userId) => {
-    const { data, error } = await supabase
-      .from("profiles")
-      .select(PROFILE_COLUMNS)
-      .eq("id", userId)
-      .single();
-
-    if (error) {
-      // Better console visibility than "[object Object]"
-      try {
-        // eslint-disable-next-line no-console
-        console.error("fetchProfile error:", error, JSON.stringify(error));
-      } catch {
-        // eslint-disable-next-line no-console
-        console.error("fetchProfile error:", error);
+      if (selErr) {
+        console.error("[UserContext] ensureProfileExists (select) error:", selErr);
+        // don’t throw; continue to try upsert below
       }
-      throw error;
+
+      if (existing?.id) return existing;
+
+      // Create a minimal row (RLS must allow INSERT with check id = auth.uid())
+      const now = new Date().toISOString();
+      const { data: inserted, error: insErr } = await supabase
+        .from("profiles")
+        .upsert(
+          [{ id: uid, updated_at: now }],
+          { onConflict: "id" }
+        )
+        .select("id")
+        .maybeSingle();
+
+      if (insErr) {
+        console.error("[UserContext] ensureProfileExists (upsert) error:", insErr);
+        return null;
+      }
+      return inserted;
+    },
+    []
+  );
+
+  /* ───────────────────────────── Load profile ────────────────────────────── */
+  const loadProfile = useCallback(
+    async (uid) => {
+      if (!uid) return null;
+
+      // Make sure there is a row to read (prevents "blank until save")
+      await ensureProfileExists(uid);
+
+      const { data: prof, error } = await supabase
+        .from("profiles")
+        .select(`
+          id,
+          display_name,
+          slug,
+          avatar_url,
+          banner_url,
+          banner_gradient,
+          theme_preset,
+          favorite_films,
+          joined_clubs,
+          is_partner,
+          plan,
+          is_premium,
+          premium_started_at,
+          premium_expires_at,
+          cancel_at_period_end,
+          taste_cards,
+          taste_card_style_global,
+          film_takes,
+          moodboard
+        `)
+        .eq("id", uid)
+        .maybeSingle();
+
+      if (error) {
+        console.error("[UserContext] loadProfile error:", error);
+        return null;
+      }
+
+      // Keep previous UI if nothing returned (shouldn’t happen after ensure)
+      if (prof) {
+        setProfile(prof);
+        setAvatar(prof.avatar_url || null);
+      }
+      return prof;
+    },
+    [ensureProfileExists]
+  );
+
+  /* ─────────────────────────── Public refresh API ────────────────────────── */
+  const refreshProfile = useCallback(async () => {
+    if (!user?.id) return;
+    await loadProfile(user.id);
+  }, [user?.id, loadProfile]);
+
+  /* ─────────────────────────────── Logout API ────────────────────────────── */
+  const logout = useCallback(async () => {
+    try {
+      await supabase.auth.signOut();
+    } finally {
+      setUser(null);
+      setProfile(null);
+      setAvatar(null);
     }
-    return data;
   }, []);
 
-  const refreshProfile = useCallback(async () => {
-    if (!user) return null;
-    const p = await fetchProfile(user.id);
-    setProfile(p);
-    if (p?.avatar_url) setAvatar(p.avatar_url);
-    return p;
-  }, [user, fetchProfile]);
-
-  const saveProfilePatch = useCallback(async (patch) => {
-    if (!user) throw new Error("Not signed in");
-    const { data, error } = await supabase
-      .from("profiles")
-      .update(patch)
-      .eq("id", user.id)
-      .select(PROFILE_COLUMNS)
-      .single();
-
-    if (error) {
-      try {
-        // eslint-disable-next-line no-console
-        console.error("saveProfilePatch error:", error, JSON.stringify(error), "patch:", patch);
-      } catch {
-        // eslint-disable-next-line no-console
-        console.error("saveProfilePatch error:", error);
-      }
-      throw error;
-    }
-
-    // Keep context canonical with server
-    setProfile((prev) => ({ ...(prev || {}), ...data }));
-
-    // Sync UI avatar if changed
-    if (data?.avatar_url) setAvatar(data.avatar_url);
-
-    return data;
-  }, [user]);
-
-  // ------- Bootstrap on load -------
+  /* ───────────────────────────── Bootstrap auth ──────────────────────────── */
   useEffect(() => {
-    let isMounted = true;
+    let mounted = true;
 
     (async () => {
       try {
         setLoading(true);
-        const { data: { session } } = await supabase.auth.getSession();
-        const authUser = session?.user || null;
+        const { data: sessionData } = await supabase.auth.getSession();
+        const authUser = sessionData?.session?.user ?? null;
+        if (!mounted) return;
 
-        if (!authUser) {
-          if (isMounted) {
-            setUser(null);
-            setProfile(null);
-          }
-          return;
-        }
+        setUser(authUser || null);
 
-        const p = await fetchProfile(authUser.id);
-
-        if (isMounted) {
-          setUser(authUser);
-          setProfile(p);
-          if (p?.avatar_url) setAvatar(p.avatar_url);
+        if (authUser?.id) {
+          await loadProfile(authUser.id);
+        } else {
+          setProfile(null);
+          setAvatar(null);
         }
       } finally {
-        if (isMounted) setLoading(false);
+        if (mounted) setLoading(false);
       }
     })();
 
-    // Listen for sign-in/sign-out and token refresh events
-    const { data: sub } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === "SIGNED_OUT" || !session?.user) {
-        setUser(null);
-        setProfile(null);
-        setLoading(false);
-        return;
-      }
+    const { data: sub } = supabase.auth.onAuthStateChange(
+      async (_event, session) => {
+        const authUser = session?.user ?? null;
+        setUser(authUser || null);
 
-      if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED" || event === "USER_UPDATED") {
-        setLoading(true);
-        try {
-          const authUser = session.user;
-          const p = await fetchProfile(authUser.id);
-          setUser(authUser);
-          setProfile(p);
-          if (p?.avatar_url) setAvatar(p.avatar_url);
-        } finally {
-          setLoading(false);
+        if (authUser?.id) {
+          setLoading(true);
+          try {
+            await loadProfile(authUser.id);
+          } finally {
+            setLoading(false);
+          }
+        } else {
+          setProfile(null);
+          setAvatar(null);
         }
       }
-    });
+    );
 
     return () => {
-      isMounted = false;
+      mounted = false;
       sub?.subscription?.unsubscribe?.();
     };
-  }, [fetchProfile]);
+  }, [loadProfile]);
 
+  /* ─────────────────────────── Realtime sync (self) ──────────────────────── */
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const channel = supabase
+      .channel(`profiles:uid=${user.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "profiles",
+          filter: `id=eq.${user.id}`,
+        },
+        (payload) => {
+          const row = payload.new || payload.old;
+          if (!row) return;
+
+          // Merge without nuking unknown fields
+          setProfile((prev) => ({ ...(prev || {}), ...row }));
+          if (row.avatar_url !== undefined) setAvatar(row.avatar_url || null);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user?.id]);
+
+  /* ────────────────────────── Save (optimistic, safe) ────────────────────── */
+  const saveProfilePatch = useCallback(
+    async (patch) => {
+      if (!user?.id) throw new Error("Not signed in");
+      if (!patch || typeof patch !== "object") return null;
+
+      // Optimistic UI
+      setProfile((prev) => ({ ...(prev || {}), ...patch }));
+      if (Object.prototype.hasOwnProperty.call(patch, "avatar_url")) {
+        setAvatar(patch.avatar_url || null);
+      }
+
+      const { data, error } = await supabase
+        .from("profiles")
+        .update({ ...patch, updated_at: new Date().toISOString() })
+        .eq("id", user.id)
+        .select()
+        .maybeSingle();
+
+      if (error) {
+        console.error("[UserContext] saveProfilePatch error:", error);
+        // Reconcile with server truth to avoid stale optimistic state
+        await loadProfile(user.id);
+        throw error;
+      }
+
+      // Ensure local matches canonical row
+      if (data) {
+        setProfile((prev) => ({ ...(prev || {}), ...data }));
+        if (Object.prototype.hasOwnProperty.call(data, "avatar_url")) {
+          setAvatar(data.avatar_url || null);
+        }
+      }
+      return data;
+    },
+    [user?.id, loadProfile]
+  );
+
+  /* ─────────────────────────────── Context value ─────────────────────────── */
   const value = useMemo(
     () => ({
       user,
       profile,
       loading,
       avatar,
-      setAvatar,
-      saveProfilePatch,
-      refreshProfile,
+      setAvatar,          // expose if callers want to pre-preview avatar
+      saveProfilePatch,   // persist partial updates
+      refreshProfile,     // manual refetch
+      isPremium,
+      logout,
     }),
-    [user, profile, loading, avatar, saveProfilePatch, refreshProfile]
+    [user, profile, loading, avatar, saveProfilePatch, refreshProfile, isPremium, logout]
   );
 
   return <UserContext.Provider value={value}>{children}</UserContext.Provider>;
-};
+}
 
-export default UserContext;
+export { UserProvider };
+export default UserProvider;

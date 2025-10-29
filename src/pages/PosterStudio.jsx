@@ -1,5 +1,7 @@
 // src/pages/PosterStudio.jsx
 import React, { useEffect, useState, useRef } from 'react';
+import 'polotno/css/polotno.css';
+
 
 export default function PosterStudio() {
   const [polotno, setPolotno] = useState(null);

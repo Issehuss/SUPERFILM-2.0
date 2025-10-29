@@ -1,0 +1,5 @@
+
+[functions.tmdb-search]
+verify_jwt = false
+[functions.tmdb-search]
+verfiy_jwt = false

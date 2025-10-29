@@ -1,0 +1,52 @@
+{
+  "version": "5",
+  "redirects": {
+    "https://deno.land/x/dotenv/load.ts": "https://deno.land/x/dotenv@v3.2.2/load.ts"
+  },
+  "remote": {
+    "https://deno.land/x/dotenv@v3.2.2/load.ts": "cbd76a0aee01aad8d09222afaa1dd04b84d9d3e44637503b01bf77a91df9e041",
+    "https://deno.land/x/dotenv@v3.2.2/mod.ts": "077b48773de9205266a0b44c3c3a3c3083449ed64bb0b6cc461b95720678d38e",
+    "https://deno.land/x/dotenv@v3.2.2/util.ts": "693730877b13f8ead2b79b2aa31e2a0652862f7dc0c5f6d2f313f4d39c7b7670"
+  },
+  "workspace": {
+    "packageJson": {
+      "dependencies": [
+        "npm:@blueprintjs/core@^5.19.1",
+        "npm:@blueprintjs/icons@^5.23.0",
+        "npm:@emotion/react@^11.14.0",
+        "npm:@emotion/styled@^11.14.0",
+        "npm:@mui/material@^7.1.1",
+        "npm:@supabase/auth-helpers-react@0.5",
+        "npm:@supabase/supabase-js@^2.55.0",
+        "npm:@tailwindcss/aspect-ratio@~0.4.2",
+        "npm:@tailwindcss/postcss@^4.1.4",
+        "npm:@testing-library/dom@^10.4.0",
+        "npm:@testing-library/jest-dom@^6.6.3",
+        "npm:@testing-library/react@^16.3.0",
+        "npm:@testing-library/user-event@^13.5.0",
+        "npm:autoprefixer@^10.4.21",
+        "npm:fast-average-color@^9.5.0",
+        "npm:framer-motion@^12.12.2",
+        "npm:init-p@1",
+        "npm:konva@^10.0.2",
+        "npm:lodash.debounce@^4.0.8",
+        "npm:lucide-react@0.508",
+        "npm:lucide@0.507",
+        "npm:npx@^10.2.2",
+        "npm:polotno@^2.27.0",
+        "npm:postcss@^8.5.3",
+        "npm:react-datepicker@^8.4.0",
+        "npm:react-dom@18.2.0",
+        "npm:react-easy-crop@^5.4.2",
+        "npm:react-hot-toast@^2.6.0",
+        "npm:react-konva@^18.2.14",
+        "npm:react-router-dom@^7.5.2",
+        "npm:react-scripts@^5.0.1",
+        "npm:react@18.2.0",
+        "npm:swiper@^11.2.10",
+        "npm:tailwindcss@^3.4.1",
+        "npm:web-vitals@^2.1.4"
+      ]
+    }
+  }
+}

@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import supabase from "../supabaseClient.js";
+import { useSearchParams } from "react-router-dom";
 
 export default function AuthPage() {
   const navigate = useNavigate();
@@ -11,6 +12,9 @@ export default function AuthPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState(null); // { type: 'success' | 'error', text: string } | null
+  const [search] = useSearchParams();
+const initialMode = search.get("mode") === "signup" ? "signup" : "signin";
+
 
   const handleSignIn = async (e) => {
     e.preventDefault();
