@@ -1,4 +1,4 @@
-
+/* Swiper slide width */
 .clubs2 .swiper-slide {
   width: 220px !important;
   flex: 0 0 220px !important;
@@ -264,4 +264,3 @@
   transition: transform .15s ease, filter .15s ease;
 }
 .event-card:hover .event-go{ transform: translateX(2px); }
-

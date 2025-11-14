@@ -10,6 +10,7 @@ import {
 } from "react-konva";
 import useImage from "use-image";
 import "./Events.css";
+import supabase from "../supabaseClient.js";
 
 /* ---------- poster output size (3:4) ---------- */
 const CANVAS_W = 900;
@@ -22,100 +23,6 @@ const splitCsv = (s) =>
     .split(",")
     .map((t) => t.trim())
     .filter(Boolean);
-
-/* ---------- Small Google Maps preview ---------- */
-function MapPreview({ query }) {
-  const q = (query || "").trim();
-  const embedSrc = q
-    ? `https://www.google.com/maps?q=${encodeURIComponent(q)}&output=embed`
-    : "";
-  const dirHref = q
-    ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(q)}`
-    : "";
-
-  return (
-    <div
-      className="map-preview"
-      style={{
-        border: "1px solid #2b2c34",
-        borderRadius: 12,
-        background: "var(--panel, #0e0f13)",
-        padding: 12,
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          marginBottom: 8,
-        }}
-      >
-        <h3 className="text-base font-semibold">Location preview</h3>
-        {q && (
-          <a
-            className="btn ghost sm"
-            href={dirHref}
-            target="_blank"
-            rel="noreferrer"
-            title="Open in Google Maps"
-          >
-            Open in Google Maps
-          </a>
-        )}
-      </div>
-
-      {q ? (
-        <div
-          style={{
-            borderRadius: 10,
-            overflow: "hidden",
-            width: "100%",
-            height: 220,
-          }}
-        >
-          <iframe
-            title="Map preview"
-            src={embedSrc}
-            width="100%"
-            height="100%"
-            style={{ border: 0 }}
-            loading="lazy"
-            referrerPolicy="no-referrer-when-downgrade"
-          />
-        </div>
-      ) : (
-        <div
-          style={{
-            height: 220,
-            display: "grid",
-            placeItems: "center",
-            border: "1px dashed #2b2c34",
-            borderRadius: 10,
-            color: "#a1a1aa",
-            background: "#0f1014",
-          }}
-        >
-          Enter a venue/address to preview the map
-        </div>
-      )}
-
-      {q && (
-        <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
-          <a
-            className="btn primary"
-            href={dirHref}
-            target="_blank"
-            rel="noreferrer"
-            title="Get directions"
-          >
-            Get directions
-          </a>
-        </div>
-      )}
-    </div>
-  );
-}
 
 /* ---------- Cropping UI (left) ---------- */
 function Cropper({
@@ -366,7 +273,7 @@ function usePosterDataURL(fileUrl, crop) {
   return posterUrl;
 }
 
-// --- Card preview (text below image only) ---
+// --- Small display-only card preview ---
 function CardPreview({ evt }) {
   const d = evt.date ? new Date(evt.date) : null;
   const month = d ? d.toLocaleString(undefined, { month: "short" }) : null;
@@ -388,6 +295,7 @@ function CardPreview({ evt }) {
             </div>
           )}
         </div>
+
         <div className="poster-info">
           <h3 className="title">{evt.title || "Untitled Screening"}</h3>
           <div className="meta">
@@ -404,6 +312,7 @@ function CardPreview({ evt }) {
           {evt.summary && <p className="summary">{evt.summary}</p>}
         </div>
       </article>
+
       <div className="hint" style={{ color: "#a1a1aa", marginTop: 6 }}>
         Live preview of how this event will appear in the grid
       </div>
@@ -415,9 +324,73 @@ function CardPreview({ evt }) {
 export default function EventNew() {
   const navigate = useNavigate();
 
+  // --- Auth + Role gate (must be president of ≥1 club) ---
+  const [authChecked, setAuthChecked] = useState(false);
+  const [presidentClubs, setPresidentClubs] = useState([]); // [{id,name}]
+  const [selectedClubId, setSelectedClubId] = useState(null);
+  const [roleError, setRoleError] = useState("");
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const { data: userRes, error: userErr } = await supabase.auth.getUser();
+        if (userErr) throw userErr;
+        const user = userRes?.user;
+
+        if (!user) {
+          // Not signed in → send to auth
+          navigate("/auth", {
+            replace: true,
+            state: { from: "/events/new" },
+          });
+          return;
+        }
+
+        // ✅ Use clubs.president_user_id instead of memberships
+        const { data: clubs, error: clubErr } = await supabase
+          .from("clubs")
+          .select("id, name")
+          .eq("president_user_id", user.id)
+          .eq("published", true);
+
+        if (clubErr) throw clubErr;
+
+        if (!clubs || clubs.length === 0) {
+          if (!mounted) return;
+          setPresidentClubs([]);
+          setSelectedClubId(null);
+          setRoleError("You must be a club president to list an event.");
+          return;
+        }
+
+        if (!mounted) return;
+        const list = clubs.map((c) => ({
+          id: c.id,
+          name: c.name || "Untitled Club",
+        }));
+        setPresidentClubs(list);
+        setSelectedClubId(list[0].id);
+        setRoleError("");
+      } catch (e) {
+        console.error("[EventNew] role gate error", e);
+        if (mounted) {
+          setRoleError("We couldn't confirm your club permissions. Please try again.");
+          setPresidentClubs([]);
+          setSelectedClubId(null);
+        }
+      } finally {
+        if (mounted) setAuthChecked(true);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [navigate]);
+
   // --- Card fields (what appears on the Events grid) ---
   const [title, setTitle] = useState("Untitled Screening");
-  const [clubName, setClubName] = useState("Projector Club");
+  const [clubName, setClubName] = useState("Projector Club"); // will be overridden by selected club
   const [date, setDate] = useState("");
   const [time, setTime] = useState("");
   const [venue, setVenue] = useState("");
@@ -433,28 +406,40 @@ export default function EventNew() {
   const [capacity, setCapacity] = useState("");
   const [waitlist, setWaitlist] = useState(false);
 
-  const [hostsInput, setHostsInput] = useState(""); // CSV
-  const [price, setPrice] = useState(""); // e.g. "£5" or "Free"
+  const [hostsInput, setHostsInput] = useState("");         // CSV
+  const [price, setPrice] = useState("");                   // e.g. "£5" or "Free"
   const [rsvpRequired, setRsvpRequired] = useState(true);
   const [rsvpLink, setRsvpLink] = useState("");
   const [contactEmail, setContactEmail] = useState("");
-  const [accessibility, setAccessibility] = useState(""); // wheelchair access, subtitles, etc.
+  const [accessibility, setAccessibility] = useState("");   // wheelchair access, subtitles, etc.
   const [ageRating, setAgeRating] = useState("");
   const [dressCode, setDressCode] = useState("");
 
-  // Agenda rows
+  // structured agenda rows [{id,time,text}]
   const [agendaRows, setAgendaRows] = useState([
     { id: uid(), time: "19:00", text: "Doors open & welcome" },
     { id: uid(), time: "19:15", text: "Feature screening" },
     { id: uid(), time: "21:05", text: "Q&A + discussion" },
   ]);
 
+  // keep clubName in sync with selectedClubId for preview
+  useEffect(() => {
+    if (!presidentClubs.length) return;
+    const found = presidentClubs.find((c) => String(c.id) === String(selectedClubId));
+    if (found) setClubName(found.name);
+  }, [selectedClubId, presidentClubs]);
+
+  // helpers for agenda UI
   const addAgendaRow = () =>
     setAgendaRows((rows) => [...rows, { id: uid(), time: "", text: "" }]);
+
   const removeAgendaRow = (id) =>
     setAgendaRows((rows) => rows.filter((r) => r.id !== id));
+
   const updateAgendaRow = (id, key, value) =>
-    setAgendaRows((rows) => rows.map((r) => (r.id === id ? { ...r, [key]: value } : r)));
+    setAgendaRows((rows) =>
+      rows.map((r) => (r.id === id ? { ...r, [key]: value } : r))
+    );
 
   const handleUpload = (f) => {
     if (!f) return;
@@ -464,15 +449,11 @@ export default function EventNew() {
 
   const handleSave = () => {
     if (!posterUrl || !date) return;
-
-    const mapQuery = venue?.trim() || "";
-    const directionsUrl = mapQuery
-      ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(mapQuery)}`
-      : "";
+    if (!selectedClubId) return;
 
     const evt = {
       id: "evt-" + uid(),
-      clubId: "10",
+      clubId: String(selectedClubId),
       clubName,
       date: new Date(`${date}T${time || "19:00"}`).toISOString(),
       title: title || "Untitled Screening",
@@ -480,6 +461,8 @@ export default function EventNew() {
       posterUrl,
       tags: splitCsv(tagsInput),
       summary: summary || "",
+
+      // Event Details payload (consumed by EventDetails page)
       details: {
         capacity: capacity ? Number(capacity) : null,
         waitlist,
@@ -487,6 +470,7 @@ export default function EventNew() {
         agenda: agendaRows
           .filter((r) => r.time || r.text)
           .map((r) => ({ time: r.time.trim(), text: r.text.trim() })),
+        schedule: [],
         price: price || "Free",
         rsvpRequired,
         rsvpLink: rsvpLink || "",
@@ -494,11 +478,10 @@ export default function EventNew() {
         accessibility: accessibility || "",
         ageRating: ageRating || "",
         dressCode: dressCode || "",
-        mapQuery,
-        directionsUrl,
       },
     };
 
+    // Hand off to /events list (existing optimistic navigation)
     navigate("/events", { replace: true, state: { newEvent: evt } });
   };
 
@@ -512,6 +495,43 @@ export default function EventNew() {
     posterUrl,
   };
 
+  // ---------- Loading state ----------
+  if (!authChecked) {
+    return (
+      <div className="events-page" style={{ paddingTop: 10 }}>
+        <header className="page-head" style={{ marginBottom: 8 }}>
+          <h1 className="text-2xl font-bold">List Event</h1>
+        </header>
+        <div className="text-zinc-400">Checking your permissions…</div>
+      </div>
+    );
+  }
+
+  // ---------- Not a president / error state ----------
+  if (authChecked && presidentClubs.length === 0) {
+    return (
+      <div className="events-page" style={{ paddingTop: 10 }}>
+        <header className="page-head" style={{ marginBottom: 8 }}>
+          <div>
+            <h1 className="text-3xl font-bold">List Event</h1>
+            <p className="text-zinc-400 mt-1">
+              {roleError || "You must be a club president to list an event."}
+            </p>
+          </div>
+          <div className="head-actions">
+            <button className="btn ghost" onClick={() => navigate(-1)}>
+              ← Back
+            </button>
+            <button className="btn primary" onClick={() => navigate("/create-club")}>
+              Create a club
+            </button>
+          </div>
+        </header>
+      </div>
+    );
+  }
+
+  // ---------- Main form (has at least one president club) ----------
   return (
     <div className="events-page" style={{ paddingTop: 10 }}>
       <header className="page-head" style={{ marginBottom: 8 }}>
@@ -525,7 +545,7 @@ export default function EventNew() {
           <button className="btn ghost" onClick={() => navigate(-1)}>
             ← Back
           </button>
-          <button className="btn primary" onClick={handleSave} disabled={!posterUrl || !date}>
+          <button className="btn primary" onClick={handleSave} disabled={!posterUrl || !date || !selectedClubId}>
             Save & List Event
           </button>
         </div>
@@ -540,10 +560,25 @@ export default function EventNew() {
             <label className="label">Event title</label>
             <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} />
           </div>
+
+          {/* Club selection (role-gated) */}
           <div>
             <label className="label">Club</label>
-            <input className="input" value={clubName} onChange={(e) => setClubName(e.target.value)} />
+            {presidentClubs.length <= 1 ? (
+              <input className="input" value={clubName} disabled />
+            ) : (
+              <select
+                className="input"
+                value={selectedClubId || ""}
+                onChange={(e) => setSelectedClubId(e.target.value)}
+              >
+                {presidentClubs.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            )}
           </div>
+
           <div>
             <label className="label">Date</label>
             <input type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} />
@@ -552,17 +587,17 @@ export default function EventNew() {
             <label className="label">Time</label>
             <input type="time" className="input" value={time} onChange={(e) => setTime(e.target.value)} />
           </div>
-          <div className="md:col-span-2">
+          <div>
             <label className="label">Venue / Link</label>
             <input className="input" value={venue} onChange={(e) => setVenue(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">Tags (comma-separated)</label>
+            <input className="input" value={tagsInput} onChange={(e) => setTagsInput(e.target.value)} />
           </div>
           <div className="md:col-span-2">
             <label className="label">Summary</label>
             <input className="input" value={summary} onChange={(e) => setSummary(e.target.value)} />
-          </div>
-          <div className="md:col-span-2">
-            <label className="label">Tags (comma-separated)</label>
-            <input className="input" value={tagsInput} onChange={(e) => setTagsInput(e.target.value)} />
           </div>
         </div>
 
@@ -579,14 +614,9 @@ export default function EventNew() {
           </div>
           <CardPreview evt={liveEvt} />
         </div>
-
-        {/* Map preview tied to the Venue field */}
-        <div style={{ marginTop: 16 }}>
-          <MapPreview query={venue} />
-        </div>
       </section>
 
-      {/* EVENT PAGE DETAILS (not shown on card) */}
+      {/* EVENT PAGE DETAILS */}
       <section className="events-modal__body" style={{ padding: 10, marginTop: 4 }}>
         <h2 className="text-xl font-semibold mb-3">Event Page Details (shown on the event detail page)</h2>
 
@@ -607,7 +637,7 @@ export default function EventNew() {
             </label>
           </div>
 
-        <div>
+          <div>
             <label className="label">Ticket Price</label>
             <input
               className="input"
@@ -669,19 +699,16 @@ export default function EventNew() {
           </div>
         </div>
 
-        {/* AGENDA (structured rows) */}
+        {/* AGENDA */}
         <div style={{ marginTop: 16 }}>
           <h3 className="text-lg font-semibold mb-2">Agenda</h3>
 
-          <div
-            className="agenda-box"
-            style={{
-              background: "var(--panel, #0e0f13)",
-              border: "1px solid #2b2c34",
-              borderRadius: 12,
-              padding: 12,
-            }}
-          >
+          <div className="agenda-box" style={{
+            background: "var(--panel, #0e0f13)",
+            border: "1px solid #2b2c34",
+            borderRadius: 12,
+            padding: 12
+          }}>
             {agendaRows.map((row) => (
               <div
                 key={row.id}
@@ -695,7 +722,7 @@ export default function EventNew() {
                   borderRadius: 10,
                   border: "1px solid rgba(255,255,255,0.06)",
                   background: "rgba(255,255,255,0.02)",
-                  marginBottom: 8,
+                  marginBottom: 8
                 }}
               >
                 <input
@@ -741,11 +768,7 @@ export default function EventNew() {
               placeholder="https://…"
             />
             <label className="checkbox" style={{ display: "flex", gap: 8, marginTop: 8 }}>
-              <input
-                type="checkbox"
-                checked={rsvpRequired}
-                onChange={(e) => setRsvpRequired(e.target.checked)}
-              />
+              <input type="checkbox" checked={rsvpRequired} onChange={(e) => setRsvpRequired(e.target.checked)} />
               RSVP required
             </label>
           </div>
