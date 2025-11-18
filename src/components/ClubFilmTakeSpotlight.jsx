@@ -10,18 +10,18 @@ export default function ClubFilmTakeSpotlight({ takes = [], intervalMs = 8000 })
   );
 
   useEffect(() => {
-    if (!safeTakes.length) return;
+    // reset pager when list length changes
+    setIndex(0);
+  }, [safeTakes.length]);
+
+  useEffect(() => {
     clearInterval(timerRef.current);
+    if (!safeTakes.length) return;
     timerRef.current = setInterval(() => {
       setIndex((i) => (i + 1) % safeTakes.length);
     }, intervalMs);
     return () => clearInterval(timerRef.current);
   }, [safeTakes.length, intervalMs]);
-
-  useEffect(() => {
-    // reset to 0 when the list changes (e.g., film switched)
-    setIndex(0);
-  }, [safeTakes.length]);
 
   if (!safeTakes.length) {
     return (
@@ -40,6 +40,10 @@ export default function ClubFilmTakeSpotlight({ takes = [], intervalMs = 8000 })
           src={cur?.profiles?.avatar_url || "/avatar_placeholder.png"}
           alt={cur?.profiles?.display_name || "Member"}
           className="h-10 w-10 rounded-full object-cover"
+          onError={(e) => {
+            e.currentTarget.onerror = null;
+            e.currentTarget.src = "/avatar_placeholder.png";
+          }}
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between">
@@ -56,7 +60,6 @@ export default function ClubFilmTakeSpotlight({ takes = [], intervalMs = 8000 })
         </div>
       </div>
 
-      {/* simple pager */}
       {safeTakes.length > 1 && (
         <div className="mt-3 flex justify-center gap-1.5">
           {safeTakes.map((_, i) => (
@@ -72,3 +75,4 @@ export default function ClubFilmTakeSpotlight({ takes = [], intervalMs = 8000 })
     </div>
   );
 }
+

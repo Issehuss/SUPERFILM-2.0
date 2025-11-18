@@ -76,7 +76,9 @@ export const PROFILE_THEMES = [
   
   // Turn a theme id into an inline style map of CSS vars
   export function getThemeVars(id) {
-    const theme = PROFILE_THEMES.find((t) => t.id === id) || PROFILE_THEMES[0];
-    return theme.vars;
+    if (!id) return {}; // no theme → base/default look
+    const found = PROFILE_THEMES.find(t => t.id === id);
+    return found?.vars || {};
   }
+  
   

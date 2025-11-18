@@ -4,31 +4,42 @@ import { Link } from "react-router-dom";
 import supabase from "../supabaseClient";
 import { useUser } from "../context/UserContext";
 
+// ─── 1) env + in-memory cache (module-level so it survives re-renders) ───
+const TMDB_KEY =
+  process.env.REACT_APP_TMDB_KEY || process.env.REACT_APP_TMDB_API_KEY || "";
+const TMDB_CACHE = new Map();
+
 function Movies({ searchQuery = "" }) {
   const [movies, setMovies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
-  const [nominating, setNominating] = useState(new Set());
-
+  const [nominating, setNominating] = useState({});
   const { user } = useUser();
 
-  const TMDB_KEY =
-    process.env.REACT_APP_TMDB_KEY || process.env.REACT_APP_TMDB_API_KEY;
-
+  // ─── 2) debounced + cached TMDB fetch ───
   useEffect(() => {
-    let cancelled = false;
+    if (!TMDB_KEY) {
+      setMovies([]);
+      setErr("TMDB key missing. Add REACT_APP_TMDB_KEY to .env.local");
+      setLoading(false);
+      return;
+    }
 
-    async function fetchMovies() {
+    const q = (searchQuery || "").trim();
+    const cacheKey = q || "__now_playing__";
+
+    // serve from cache instantly if we have it
+    if (TMDB_CACHE.has(cacheKey)) {
+      setMovies(TMDB_CACHE.get(cacheKey));
+      setLoading(false);
+    } else {
       setLoading(true);
-      setErr("");
-      try {
-        if (!TMDB_KEY) {
-          setMovies([]);
-          setErr("TMDB key missing. Add REACT_APP_TMDB_KEY to .env.local");
-          return;
-        }
+    }
 
-        const q = (searchQuery || "").trim();
+    const controller = new AbortController();
+    // debounced fetch — tighter for search, instant for now_playing
+    const timer = setTimeout(async () => {
+      try {
         const base = "https://api.themoviedb.org/3";
         const url = q
           ? `${base}/search/movie?api_key=${TMDB_KEY}&language=en-GB&query=${encodeURIComponent(
@@ -36,10 +47,10 @@ function Movies({ searchQuery = "" }) {
             )}&page=1&include_adult=false`
           : `${base}/movie/now_playing?api_key=${TMDB_KEY}&language=en-GB&region=GB&page=1`;
 
-        const res = await fetch(url);
+        const res = await fetch(url, { signal: controller.signal });
         if (!res.ok) {
           const text = await res.text();
-          throw new Error(`TMDB ${res.status}: ${text.slice(0, 200)}`);
+          throw new Error(`TMDB ${res.status}: ${text.slice(0, 140)}`);
         }
         const data = await res.json();
         const list = Array.isArray(data.results) ? data.results : [];
@@ -47,23 +58,24 @@ function Movies({ searchQuery = "" }) {
           (a, b) => (b.popularity || 0) - (a.popularity || 0)
         );
 
-        if (!cancelled) setMovies(sorted);
+        TMDB_CACHE.set(cacheKey, sorted);
+        setMovies(sorted);
+        setErr("");
       } catch (e) {
+        if (e.name === "AbortError") return;
         console.warn("[Movies] fetch error:", e?.message);
-        if (!cancelled) {
-          setMovies([]);
-          setErr("Couldn’t load movies from TMDB.");
-        }
+        setErr("Couldn’t load movies from TMDB.");
+        setMovies([]);
       } finally {
-        if (!cancelled) setLoading(false);
+        setLoading(false);
       }
-    }
+    }, q ? 350 : 0);
 
-    fetchMovies();
     return () => {
-      cancelled = true;
+      controller.abort();
+      clearTimeout(timer);
     };
-  }, [searchQuery, TMDB_KEY]);
+  }, [searchQuery]);
 
   // ✅ Updated nominate helper with upsert (one vote per user)
   const handleNominate = async (movie, e) => {
@@ -82,7 +94,7 @@ function Movies({ searchQuery = "" }) {
       return;
     }
 
-    setNominating((prev) => new Set(prev).add(movie.id));
+    setNominating((prev) => ({ ...prev, [movie.id]: true }));
     try {
       const { error } = await supabase
         .from("nominations")
@@ -94,7 +106,7 @@ function Movies({ searchQuery = "" }) {
             poster_path: movie.poster_path || null,
             created_by: user.id,
           },
-          { onConflict: ["club_id", "movie_id", "created_by"] } // ✅ prevents duplicates
+          { onConflict: ["club_id", "movie_id", "created_by"] }
         );
 
       if (error) {
@@ -109,8 +121,8 @@ function Movies({ searchQuery = "" }) {
       alert(e2.message || "Could not add nomination.");
     } finally {
       setNominating((prev) => {
-        const next = new Set(prev);
-        next.delete(movie.id);
+        const next = { ...prev };
+        delete next[movie.id];
         return next;
       });
     }
@@ -148,7 +160,7 @@ function Movies({ searchQuery = "" }) {
       {!loading && !err && movies.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-6">
           {movies.map((movie) => {
-            const isBusy = nominating.has(movie.id);
+            const isBusy = !!nominating[movie.id];
             return (
               <Link
                 to={`/movie/${movie.id}`}
@@ -159,18 +171,16 @@ function Movies({ searchQuery = "" }) {
                   <img
                     src={`https://image.tmdb.org/t/p/w500${movie.poster_path}`}
                     alt={movie.title}
-                    className="w-full h-72 object-cover"
+                    className="w-full h-72 object-cover aspect-[2/3]"
                     loading="lazy"
+                    decoding="async"
+                    referrerPolicy="no-referrer"
                   />
                 ) : (
                   <div className="w-full h-72 flex items-center justify-center bg-zinc-800 text-zinc-400">
                     No Image
                   </div>
                 )}
-
-<Link to={`/movies/${movie.tmdb_id || movie.id}`}>
-  {/* poster/title */}
-</Link>
 
                 {/* Nominate button */}
                 <button
@@ -191,3 +201,4 @@ function Movies({ searchQuery = "" }) {
 }
 
 export default Movies;
+

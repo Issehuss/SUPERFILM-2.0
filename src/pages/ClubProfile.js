@@ -1,6 +1,6 @@
-// src/pages/ClubProfile.jsx — avatar upload + 90‑day rename (presidents only)
-import { useParams, useNavigate } from 'react-router-dom';
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+// src/pages/ClubProfile.jsx — avatar upload + 90-day rename (presidents only)
+import React, { lazy, Suspense, useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useParams, useNavigate, Link } from "react-router-dom";
 import {
   MapPin,
   Film,
@@ -10,45 +10,63 @@ import {
   CalendarClock,
   Trash2,
   Shield,
-} from 'lucide-react';
+  Info,
+  MoreHorizontal,
+  LogOut,
+} from "lucide-react";
 
-import { useUser } from '../context/UserContext';
-import DatePicker from 'react-datepicker';
-import 'react-datepicker/dist/react-datepicker.css';
-import BannerCropper from '../components/BannerCropper';
-
-import supabase from '../supabaseClient.js';
-import NominationsPanel from "../components/NominationsPanel";
-import ClubChatTeaserCard from "../components/ClubChatTeaserCard";
+import { useUser } from "../context/UserContext";
+import "react-datepicker/dist/react-datepicker.css";
+import supabase from "../supabaseClient.js";
 import uploadAvatar from "../lib/uploadAvatar";
-import ClubNoticeBoard from "../components/ClubNoticeBoard";
-import { Link } from "react-router-dom";
-import { Check } from "lucide-react";
-import RoleBadge from "../components/RoleBadge.jsx";
 import { toast } from "react-hot-toast";
-import AssignRoleMenu from "../components/AssignRoleMenu.jsx";
-import JoinClubButton from "../components/JoinClubButton";
-import ClubYearInReview from "../components/ClubYearInReview.jsx";
-import { Info } from "lucide-react";
-import PointsReviewPanel from "../components/PointsReviewPanel.jsx";
 import useStaff from "../hooks/useStaff";
-import AttendButton from "../components/AttendButton.jsx";
-import FilmAverageCell from "../components/FilmAverageCell.jsx";
-import RecentPointAwards from "../components/RecentPointAwards.jsx";
-import { MoreHorizontal, LogOut } from "lucide-react";
 import { searchMovies } from "../lib/tmdbClient";
 import AspectPicker from "../components/AspectPicker";
 import { ASPECTS } from "../constants/aspects";
+import FilmAverageCell from "../components/FilmAverageCell.jsx";
+import DatePicker from "react-datepicker";
+import { leaveClubAndMaybeDelete } from "../lib/leaveClub";
+
+
+
+
+// keep these eager (used above the fold / core to page)
+import ClubAboutCard from "../components/ClubAboutCard.jsx";
 import ClubFilmTakesSection from "../components/ClubFilmTakesSection.jsx";
-import NominationsCarousel from "../components/NominationsCarousel.jsx";
+import ClubChatTeaserCard from "../components/ClubChatTeaserCard";
+import JoinClubButton from "../components/JoinClubButton";
+import DirectorsCutBadge from "../components/DirectorsCutBadge";
+import PartnerBadge from "../components/PartnerBadge.jsx";
+
+// lazy: below-the-fold / admin-ish / heavy
+const ClubNoticeBoard = lazy(() => import("../components/ClubNoticeBoard"));
+const FeaturedFilms = lazy(() => import("../components/FeaturedFilms.jsx"));
+const ClubYearInReview = lazy(() => import("../components/ClubYearInReview.jsx"));
+const NominationsCarousel = lazy(() => import("../components/NominationsCarousel.jsx"));
+const RecentPointAwards = lazy(() => import("../components/RecentPointAwards.jsx"));
+const BannerCropper = lazy(() => import("../components/BannerCropper"));
+const PartnerPointsReviewPanel = lazy(() =>
+  import("../components/PartnerPointsReviewPanel.jsx")
+);
+const PartnerChatAuditPanel = lazy(() =>
+  import("../components/PartnerChatAuditPanel.jsx")
+);
+const AvatarCropper = lazy(() => import("../components/AvatarCropper"));
+
+
+
+
+
+
+
 // at top with other imports
 
 
 
-import FeaturedFilms from "../components/FeaturedFilms.jsx";
-import ClubAboutCard from "../components/ClubAboutCard.jsx";
 
-import DirectorsCutBadge from "../components/DirectorsCutBadge";
+
+
 
 
 
@@ -161,6 +179,80 @@ const TicketCard = ({ title, tagline, location, datetime, onClick }) => (
 const fallbackNext = '/fallback-next.jpg';
 const fallbackBanner = '/fallback-banner.jpg';
 const fallbackAvatar = '/avatars/default.jpg';
+// Upload any blob/dataURL to Supabase storage and return a cache-busted public URL
+// Convert various cropper outputs to a Blob
+async function normalizeToBlob(result) {
+  // Already a Blob/File
+  if (result instanceof Blob || result instanceof File) return result;
+
+  // data URL string ("data:image/jpeg;base64,...")
+  if (typeof result === "string" && result.startsWith("data:")) {
+    const res = await fetch(result);
+    return await res.blob();
+  }
+
+  // object URL or http(s) URL (e.g., "blob:..." or "https://...")
+  if (typeof result === "string" && (result.startsWith("blob:") || result.startsWith("http"))) {
+    const res = await fetch(result);
+    return await res.blob();
+  }
+
+  // Common wrappers: { blob }, { file }, { base64, mime }
+  if (result && typeof result === "object") {
+    if (result.blob instanceof Blob) return result.blob;
+    if (result.file instanceof File) return result.file;
+
+    if (typeof result.base64 === "string") {
+      const mime = result.mime || "image/jpeg";
+      // ensure it’s a proper data URL
+      const dataUrl = result.base64.startsWith("data:")
+        ? result.base64
+        : `data:${mime};base64,${result.base64}`;
+      const res = await fetch(dataUrl);
+      return await res.blob();
+    }
+
+    // Canvas from some croppers: { canvas: HTMLCanvasElement }
+    if (result.canvas && typeof result.canvas.toBlob === "function") {
+      const type = result.type || "image/jpeg";
+      const quality = typeof result.quality === "number" ? result.quality : 0.9;
+      const blob = await new Promise((resolve) =>
+        result.canvas.toBlob((b) => resolve(b), type, quality)
+      );
+      if (blob) return blob;
+    }
+
+    // Function form: { toBlob: fn(cb) } or async toBlob()
+    if (typeof result.toBlob === "function") {
+      const type = result.type || "image/jpeg";
+      const quality = typeof result.quality === "number" ? result.quality : 0.9;
+      const maybeBlob = await new Promise((resolve) =>
+        result.toBlob((b) => resolve(b), type, quality)
+      );
+      if (maybeBlob) return maybeBlob;
+    }
+  }
+
+  throw new Error("Unsupported crop result format");
+}
+
+// Upload any blob-like to Supabase storage and return a cache-busted public URL
+async function uploadToBucket({ bucket, path, file, contentType = "image/jpeg" }) {
+  const blob = await normalizeToBlob(file);
+  const inferredType = blob.type || contentType;
+
+  const { error: upErr } = await supabase.storage.from(bucket).upload(path, blob, {
+    upsert: true,
+    contentType: inferredType,
+  });
+  if (upErr) throw upErr;
+
+  const { data } = supabase.storage.from(bucket).getPublicUrl(path);
+  const url = data?.publicUrl;
+  return url ? `${url}?v=${Date.now()}` : null;
+}
+
+
 
 
 
@@ -382,86 +474,104 @@ function MembersDialog({
 
 
 // ⬇️ put this ABOVE `export default function ClubProfile()`
-function LeaveClubMenu({ clubId, isMember, onLeft }) {
-  const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [coords, setCoords] = useState({ top: 0, right: 0 });
-  const btnRef = useRef(null);
+// ⬇️ put this ABOVE `export default function ClubProfile()`
 
-  async function leave() {
-    const ok = typeof window !== "undefined"
-      ? window.confirm("Are you sure you want to leave this club?")
-      : true;
-    if (!ok) return;
+function LeaveClubMenu({ clubId, isMember, isPresident, members }) {
+  const { user } = useUser();
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [showTransfer, setShowTransfer] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [nextPresident, setNextPresident] = useState(null);
+
+  if (!isMember) return null;
+
+  function handleLeaveClick() {
+    if (isPresident) {
+      const others = members.filter(m => m.user_id !== user.id);
+      if (others.length === 0) {
+        // Only member → delete club path
+        setShowConfirm(true);
+      } else {
+        // Must transfer first
+        setNextPresident(others[0].user_id);
+        setShowTransfer(true);
+      }
+    } else {
+      setShowConfirm(true);
+    }
+  }
+
+  async function leaveClub() {
     setBusy(true);
     try {
-      const { data, error } = await supabase.rpc("leave_club", { p_club: clubId });
-      if (error) throw error;
-      if (data?.ok) {
-        if (data.code === "NEED_VP") {
-          alert("Appoint a Vice President before leaving.");
-        } else if (data.code === "ONLY_MEMBER") {
-          alert("Club needs at least one member. Contact a company partner to archive.");
-        } else {
-          onLeft?.();
-        }
-      } else {
-        alert(data?.message || "Could not leave.");
-      }
-    } catch (e) {
-      alert(e.message || "Could not leave.");
-    } finally {
-      setBusy(false);
-      setOpen(false);
-    }
+      await supabase
+        .from("club_members")
+        .delete()
+        .eq("club_id", clubId)
+        .eq("user_id", user.id);
+
+      navigate("/create-club", { replace: true });
+      setTimeout(() => window.location.reload(), 0);
+    } finally { setBusy(false); }
   }
 
-  function toggleMenu() {
-    if (btnRef.current) {
-      const r = btnRef.current.getBoundingClientRect();
-      setCoords({ top: r.bottom + 8, right: window.innerWidth - r.right });
-    }
-    setOpen((v) => !v);
+  async function transferAndLeave() {
+    setBusy(true);
+    try {
+      // 1) assign new president
+      await supabase
+        .from("club_members")
+        .update({ role: "president" })
+        .eq("club_id", clubId)
+        .eq("user_id", nextPresident);
+
+      // 2) downgrade you to member
+      await supabase
+        .from("club_members")
+        .update({ role: "member" })
+        .eq("club_id", clubId)
+        .eq("user_id", user.id);
+
+      // 3) now leave normally
+      await leaveClub();
+    } finally { setBusy(false); }
   }
 
-  // ✅ hooks are never conditional
-  useEffect(() => {
-    if (!open) return;
-    function onDocClick(e) {
-      if (btnRef.current && btnRef.current.contains(e.target)) return;
-      setOpen(false);
-    }
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, [open]);
 
-  
-  // Guard AFTER hooks so order never changes
-  if (!isMember) return null;
 
   return (
     <>
-      <button
-        ref={btnRef}
-        type="button"
-        onClick={toggleMenu}
-        className="rounded-full bg-zinc-800 w-9 h-9 flex items-center justify-center hover:bg-zinc-700"
-        aria-label="More actions"
-      >
-        <MoreHorizontal size={18} />
-      </button>
+      {/* Leave option in menu */}
+      <button onClick={handleLeaveClick} className="text-red-300">Leave club</button>
 
-      {open && (
-        <div
-          className="fixed z-[100] w-44 rounded-xl bg-black/95 ring-1 ring-white/10 shadow-2xl py-1"
-          style={{ top: coords.top, right: coords.right }}
-        >
-          <button
-            onClick={leave}
-            disabled={busy}
-            className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-white/10 text-left"
-          >
-            <LogOut size={16} /> Leave club
+      {/* Transfer presidency modal */}
+      {showTransfer && (
+        <div className="modal">
+          <h3>Transfer presidency</h3>
+          <select value={nextPresident} onChange={e => setNextPresident(e.target.value)}>
+            {members
+              .filter(m => m.user_id !== user.id)
+              .map(m => (
+                <option key={m.user_id} value={m.user_id}>
+                  {m.profiles?.display_name || "Unnamed"}
+                </option>
+              ))}
+          </select>
+
+          <button onClick={() => setShowTransfer(false)}>Cancel</button>
+          <button disabled={busy} onClick={transferAndLeave}>Confirm transfer</button>
+        </div>
+      )}
+
+      {/* Normal leave confirm (or delete if only member) */}
+      {showConfirm && (
+        <div className="modal">
+          <h3>{members.length === 1 ? "Delete club?" : "Leave club?"}</h3>
+          <button onClick={() => setShowConfirm(false)}>Cancel</button>
+          <button disabled={busy} onClick={leaveClub}>
+            {busy ? "Leaving…" : members.length === 1 ? "Yes, delete club" : "Yes, leave"}
           </button>
         </div>
       )}
@@ -469,10 +579,13 @@ function LeaveClubMenu({ clubId, isMember, onLeft }) {
   );
 }
 
+
+
   
 
 function useFilmTakes() {
-  const { user, profile, saveProfilePatch } = useUser();
+  const { user, profile, saveProfilePatch, isPartner, hasRole } = useUser();
+
 
   async function addTake({ text, rating_5 = null, aspect_key = null, movie, club }) {
     if (!user?.id) throw new Error("Not signed in");
@@ -501,6 +614,8 @@ function useFilmTakes() {
     return next;
   }
 
+  
+
   return { addTake };
 }
 
@@ -509,23 +624,57 @@ function useFilmTakes() {
 
 // ...
 
+// REPLACE your existing ClubAddTake function with this whole block
 function ClubAddTake({ movie, club }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
-  const [rating, setRating] = useState(null); // half-steps via input below
+  const [rating, setRating] = useState(null); // 0.5–5.0
   const [aspect, setAspect] = useState(null); // key from ASPECTS
   const [busy, setBusy] = useState(false);
+  const [hasExisting, setHasExisting] = useState(false);
+
   const { user } = useUser();
   const { addTake } = useFilmTakes();
-  
 
+  // ✅ Hooks must come before any early return
+  useEffect(() => {
+    function onOpen(e) {
+      const preset = e?.detail?.preset ?? "";
+      const r = e?.detail?.rating ?? null;
+      setText(preset);
+      setRating(typeof r === "number" ? r : null);
+      setOpen(true);
+    }
+    window.addEventListener("open-take-editor", onOpen);
+    return () => window.removeEventListener("open-take-editor", onOpen);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      if (!user?.id || !club?.id || !movie?.id) {
+        if (active) setHasExisting(false);
+        return;
+      }
+      const { count } = await supabase
+        .from("club_film_takes")
+        .select("*", { count: "exact", head: true })
+        .eq("club_id", club.id)
+        .eq("user_id", user.id)
+        .eq("film_id", Number(movie.id))
+        .eq("is_archived", false);
+      if (active) setHasExisting((count || 0) > 0);
+    })();
+    return () => { active = false; };
+  }, [user?.id, club?.id, movie?.id]);
+
+  // ✅ Early return AFTER hooks (now it's not conditional for the hooks)
   if (!user) return null;
 
   async function save() {
     if (!text.trim()) return;
     setBusy(true);
     try {
-      // 1) Keep your existing profile.film_takes update
       await addTake({
         text,
         rating_5: typeof rating === "number" ? rating : null,
@@ -533,46 +682,46 @@ function ClubAddTake({ movie, club }) {
         movie,
         club,
       });
-  
-      // 2) Also persist to club_film_takes (one active take per user+film+club)
-      if (!movie?.id || !club?.id) {
-        // silently skip if missing context
-        console.warn("[ClubAddTake] missing movie.id or club.id — skipping club_film_takes upsert");
-      } else {
+
+      if (movie?.id && club?.id) {
         const payload = {
           club_id: club.id,
           user_id: user.id,
-          film_id: movie.id,
-          screening_id: null, // <- if you track specific screenings, set the id here
+          film_id: Number(movie.id),
+          screening_id: null,
           film_title: movie.title ?? null,
           poster_path: movie.poster ?? null,
-          rating: rating != null ? Number((Number(rating) * 2).toFixed(1)) : null, // convert 0.5–5.0 → 0–10 scale, optional
+          rating: rating != null ? Number((Number(rating) * 2).toFixed(1)) : null, // 0–10
           take: text.trim(),
           is_archived: false,
         };
-  
-        const { error: takeErr } = await supabase
+
+        const { data: row, error: takeErr } = await supabase
           .from("club_film_takes")
           .upsert(payload, {
             onConflict: "club_id,user_id,film_id",
             ignoreDuplicates: false,
           })
-          .select("*");
-  
+          .select(`
+            id, club_id, user_id, film_id, rating, take, is_archived, created_at,
+            profiles:profiles!user_id ( display_name, avatar_url )
+          `)
+          .maybeSingle();
+
         if (takeErr) {
-          console.warn("[club_film_takes upsert] failed:", takeErr.message);
-          // do not throw; we already saved to profile.film_takes, and UI should not break
-        } else {
-          // optional: notify listeners to refresh spotlight/section
-          window.dispatchEvent(
-            new CustomEvent("club-film-takes-updated", {
-              detail: { clubId: club.id, filmId: movie.id },
-            })
-          );
+          console.error("[club_film_takes upsert] failed:", takeErr);
+          alert(takeErr.message || "Could not save your take (RLS or membership?)");
+          return;
         }
+
+        window.dispatchEvent(
+          new CustomEvent("club-film-takes-updated", {
+            detail: { clubId: club.id, filmId: Number(movie.id), row },
+          })
+        );
+        setHasExisting(true);
       }
-  
-      // reset UI
+
       setText("");
       setRating(null);
       setAspect(null);
@@ -581,7 +730,6 @@ function ClubAddTake({ movie, club }) {
       setBusy(false);
     }
   }
-  
 
   return (
     <div className="mt-2">
@@ -591,7 +739,7 @@ function ClubAddTake({ movie, club }) {
           onClick={() => setOpen(true)}
           className="text-sm text-yellow-400 hover:underline"
         >
-          click to add your take
+          {hasExisting ? "click to edit your take" : "click to add your take"}
         </button>
       ) : (
         <div className="rounded-xl border border-zinc-800 p-3 bg-black/40">
@@ -621,6 +769,7 @@ function ClubAddTake({ movie, club }) {
             value={text}
             onChange={(e) => setText(e.target.value)}
           />
+
           <div className="mt-2 flex gap-2 justify-end">
             <button
               type="button"
@@ -635,7 +784,7 @@ function ClubAddTake({ movie, club }) {
               disabled={busy || !text.trim()}
               className="rounded-lg bg-yellow-500 px-3 py-1.5 text-sm font-semibold text-black disabled:opacity-50"
             >
-              {busy ? "Saving…" : "Post take"}
+              {busy ? "Saving…" : (hasExisting ? "Save changes" : "Post take")}
             </button>
           </div>
         </div>
@@ -644,7 +793,33 @@ function ClubAddTake({ movie, club }) {
   );
 }
 
+function ConfirmModal({ title, body, confirmLabel, cancelLabel = "Cancel", onConfirm, onClose, busy }) {
+  return (
+    <div className="fixed inset-0 z-[200] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+      <div className="bg-zinc-950 border border-zinc-800 rounded-2xl w-full max-w-sm p-5 relative shadow-2xl">
+        <h2 className="text-lg font-bold text-white mb-2">{title}</h2>
+        <p className="text-sm text-zinc-300 mb-4 leading-relaxed">{body}</p>
 
+        <div className="flex gap-2 justify-end">
+          <button
+            onClick={onClose}
+            className="px-3 py-1.5 rounded bg-zinc-800 text-sm text-zinc-200 hover:bg-zinc-700"
+          >
+            {cancelLabel}
+          </button>
+
+          <button
+            disabled={busy}
+            onClick={onConfirm}
+            className="px-3 py-1.5 rounded bg-yellow-500 text-sm font-semibold text-black hover:bg-yellow-400 disabled:opacity-50"
+          >
+            {busy ? "Please wait…" : confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 
 
@@ -662,7 +837,7 @@ const [aspect, setAspect] = useState(null);  // standout craft key
   // 0.5–5.0
         // blurb
   
-  const { user, profile, saveProfilePatch } = useUser();
+        const { user, profile, saveProfilePatch, isPartner, hasRole } = useUser();
   const [isMember, setIsMember] = useState(false);
 
   const { id: routeId, clubParam } = useParams();
@@ -671,6 +846,7 @@ const [aspect, setAspect] = useState(null);  // standout craft key
 
 
   const [club, setClub] = useState(null);
+  const nextFilmAverage = club?.nextEvent?.average ?? club?.nextEvent?.avg ?? null;
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [lastAdded, setLastAdded] = useState(null);
@@ -693,6 +869,10 @@ const [persistedFilmId, setPersistedFilmId] = useState(null);
 
   const [showBannerCropper, setShowBannerCropper] = useState(false);
   const [rawBannerImage, setRawBannerImage] = useState(null);
+  // NEW: avatar crop state
+const [showAvatarCropper, setShowAvatarCropper] = useState(false);
+const [rawAvatarImage, setRawAvatarImage] = useState(null);
+
 
   const [showMembersDialog, setShowMembersDialog] = useState(false);
   const [memberSearch, setMemberSearch] = useState("");
@@ -707,6 +887,10 @@ const posterRef = useRef(null);
 const teaserWrapRef = useRef(null);
 const [teaserHeight, setTeaserHeight] = useState(null);
 const [members, setMembers] = useState([]);
+const membersCount = useMemo(
+  () => (Array.isArray(members) ? members.length : Number(club?.members) || 0),
+  [members, club?.members]
+);
 const [membersLoading, setMembersLoading] = useState(true);
 const [selectedResultId, setSelectedResultId] = useState(null);
 const [membersErr, setMembersErr] = useState("");
@@ -728,39 +912,68 @@ const [nominations, setNominations] = useState([]);
 
 
 
+
+
+
+
 // re-fetch members (used after role changes)
 const loadMembers = useCallback(async () => {
   if (!club?.id) return;
   try {
-    const { data, error } = await supabase
+    // 1) raw member rows
+    const { data: memRows, error: memErr } = await supabase
       .from("club_members")
-      .select(`
-        user_id,
-        role,
-        profiles:profiles (id, slug, display_name, avatar_url)
-      `)
+      .select("user_id, role")
       .eq("club_id", club.id);
 
-    if (error) throw error;
+    if (memErr) throw memErr;
 
-    // leadership first, then name
+    const ids = (memRows || []).map(r => r.user_id).filter(Boolean);
+    let profilesMap = {};
+
+    if (ids.length) {
+      // 2) fetch profiles in bulk
+      const { data: profRows, error: profErr } = await supabase
+        .from("profiles")
+        .select("id, slug, display_name, avatar_url")
+        .in("id", ids);
+
+      if (profErr) {
+        // fail-safe: keep going with empty profiles
+        profilesMap = {};
+      } else {
+        profilesMap = Object.fromEntries(
+          (profRows || []).map(p => [p.id, p])
+        );
+      }
+    }
+
+    // merge + sort
     const priority = { president: 0, vice_president: 1, editor_in_chief: 2, member: 3 };
-    const sorted = (data || []).slice().sort((a, b) => {
-      const pa = priority[a?.role] ?? 9;
-      const pb = priority[b?.role] ?? 9;
+    const merged = (memRows || []).map(r => ({
+      user_id: r.user_id,
+      role: r.role || "member",
+      profiles: profilesMap[r.user_id] || null,
+    }));
+
+    const sorted = merged.slice().sort((a, b) => {
+      const pa = priority[a.role] ?? 9;
+      const pb = priority[b.role] ?? 9;
       if (pa !== pb) return pa - pb;
-      const an = (a?.profiles?.display_name || "").toLowerCase();
-      const bn = (b?.profiles?.display_name || "").toLowerCase();
+      const an = (a.profiles?.display_name || "").toLowerCase();
+      const bn = (b.profiles?.display_name || "").toLowerCase();
       return an.localeCompare(bn);
     });
 
     setMembers(sorted);
   } catch (e) {
     console.error("loadMembers failed:", e);
+    setMembers([]);
   } finally {
     setMembersLoading(false);
   }
-}, [club?.id, setMembers, setMembersLoading]);
+}, [club?.id]);
+
 
 
 
@@ -873,67 +1086,23 @@ useEffect(() => {
 useEffect(() => {
   if (!club?.id) return;
 
-  let cancelled = false;
-
-  async function loadMembers() {
-    try {
-      if (!club?.id) return; // avoid filtering on undefined/null
-  
-      // 1) Fetch membership rows only (no join here)
-      const { data: memberRows, error: mErr } = await supabase
-        .from("club_members")
-        .select("user_id, role") // keep it simple — exact column names
-        .eq("club_id", club.id);
-  
-      if (mErr) {
-        console.error("loadMembers failed (members):", mErr.message, mErr.details, mErr.hint);
-        return;
-      }
-  
-      if (!memberRows?.length) {
-        setMembers([]);
-        return;
-      }
-  
-      // 2) Fetch profiles for those user_ids
-      const userIds = memberRows.map((r) => r.user_id).filter(Boolean);
-      const { data: profiles, error: pErr } = await supabase
-        .from("profiles")
-        .select("id, avatar_url, slug, display_name");
-  
-      if (pErr) {
-        console.error("loadMembers failed (profiles):", pErr.message, pErr.details, pErr.hint);
-        return;
-      }
-  
-      // 3) Merge
-      const byId = new Map(profiles.map((p) => [p.id, p]));
-      const merged = memberRows.map((m) => ({
-        ...m,
-        profiles: byId.get(m.user_id) || null,
-      }));
-  
-      setMembers(merged);
-    } catch (e) {
-      console.error("loadMembers failed (exception):", e);
-    }
-  }
-  
-  // realtime refresh when membership changes
   const ch = supabase
     .channel(`members:${club.id}`)
     .on(
       "postgres_changes",
       { event: "*", schema: "public", table: "club_members", filter: `club_id=eq.${club.id}` },
-      loadMembers
+      () => {
+        // just re-use existing loader
+        loadMembers();
+      }
     )
     .subscribe();
 
   return () => {
-    cancelled = true;
     supabase.removeChannel(ch);
   };
-}, [club?.id]);
+}, [club?.id, loadMembers]);
+
 
 
   
@@ -1047,6 +1216,74 @@ return;
     return () => { cancelled = true; };
   }, [idParam]);
 
+  // Load featured films from the table (new source) and hydrate the UI shape
+useEffect(() => {
+  let alive = true;
+  (async () => {
+    if (!club?.id) return;
+
+    try {
+      const { data: rows, error } = await supabase
+        .from("club_featured_films")
+        .select("tmdb_id, title, poster_path, added_at")
+        .eq("club_id", club.id)
+        .order("added_at", { ascending: false });
+
+              // table might not exist yet → 404/42P01
+      if (error && (error.code === "42P01" || error.message?.includes("relation") || error.status === 404)) {
+        // keep using clubs.featured_posters fallback silently
+        return;
+      }
+
+
+      if (error) throw error;
+      if (!alive) return;
+
+      // If table is empty, keep whatever is already in clubs.featured_posters
+      if (!rows || rows.length === 0) return;
+
+      // Build URLs + map that your <FeaturedFilms> expects
+      const TMDB = "https://image.tmdb.org/t/p/w500";
+      const urls = [];
+      const map = {};
+
+      for (const r of rows) {
+        // Prefer poster_path from table; if missing, leave empty (your component can backfill via TMDB)
+        const url = r?.poster_path ? `${TMDB}${r.poster_path}` : null;
+        if (url) {
+          urls.push(url);
+          map[url] = { id: r.tmdb_id, title: r.title || null };
+        }
+      }
+
+      // Only update if we actually produced URLs
+      if (urls.length) {
+        setClub((prev) =>
+          prev
+            ? {
+                ...prev,
+                featuredFilms: urls,
+                featuredMap: map,
+              }
+            : prev
+        );
+
+        // cache the map like the rest of your code already does
+        try {
+          localStorage.setItem(`sf_featured_map_${club.id}`, JSON.stringify(map));
+        } catch {}
+      }
+    } catch (e) {
+      console.warn("[featured] load from club_featured_films failed:", e?.message || e);
+    }
+  })();
+
+  return () => {
+    alive = false;
+  };
+}, [club?.id]);
+
+
   // Normalize to pretty slug when available
   useEffect(() => {
     if (club?.slug && clubParam && club.slug !== clubParam) {
@@ -1109,30 +1346,42 @@ return;
       setMembersLoading(true);
       setMembersErr("");
       try {
-        const { data, error } = await supabase
-          .from("club_members")
-          .select(`
-            user_id,
-            role,
-            profiles:profiles!club_members_user_id_fkey (
-              id, slug, display_name, avatar_url
-            )
-          `)
-          .eq("club_id", club.id);
-  
-        if (error) throw error;
-  
-        const priority = { president: 0, vice_president: 1, editor_in_chief: 2, member: 3 };
-        const sorted = (data || []).slice().sort((a, b) => {
-          const pa = priority[a.role] ?? 9;
-          const pb = priority[b.role] ?? 9;
-          if (pa !== pb) return pa - pb;
-          const an = (a.profiles?.display_name || "").toLowerCase();
-          const bn = (b.profiles?.display_name || "").toLowerCase();
-          return an.localeCompare(bn);
-        });
-  
-        if (active) setMembers(sorted);
+              // 1) raw
+      const { data: memRows, error: memErr } = await supabase
+      .from("club_members")
+      .select("user_id, role")
+      .eq("club_id", club.id);
+    if (memErr) throw memErr;
+
+    // 2) profiles
+    const ids = (memRows || []).map(r => r.user_id).filter(Boolean);
+    let profilesMap = {};
+    if (ids.length) {
+      const { data: profRows, error: profErr } = await supabase
+        .from("profiles")
+        .select("id, slug, display_name, avatar_url")
+        .in("id", ids);
+      if (!profErr) {
+        profilesMap = Object.fromEntries((profRows || []).map(p => [p.id, p]));
+      }
+    }
+
+    const priority = { president: 0, vice_president: 1, editor_in_chief: 2, member: 3 };
+    const sorted = (memRows || []).map(r => ({
+      user_id: r.user_id,
+      role: r.role || "member",
+      profiles: profilesMap[r.user_id] || null,
+    })).sort((a, b) => {
+      const pa = priority[a.role] ?? 9;
+      const pb = priority[b.role] ?? 9;
+      if (pa !== pb) return pa - pb;
+      const an = (a.profiles?.display_name || "").toLowerCase();
+      const bn = (b.profiles?.display_name || "").toLowerCase();
+      return an.localeCompare(bn);
+    });
+
+    if (active) setMembers(sorted);
+
       } catch (e) {
         if (active) setMembersErr(e.message || String(e));
       } finally {
@@ -1148,18 +1397,28 @@ return;
     () => (club?.membersList || []).find((m) => m.id === currentUserId),
     [club, currentUserId]
   );
-  const isPresident = viewerMember?.role === ROLE.PRESIDENT;
+ 
   const isVice = viewerMember?.role === ROLE.VICE;
-  const hasRole = (role) => Array.isArray(user?.roles) && user.roles.includes(role);
+  
   const isMemberByContext =
     Array.isArray(user?.joinedClubs) && (club?.id ? user.joinedClubs.some((c) => String(c) === String(club.id)) : false);
+
+    // ── Step 1: Detect if the current user is the club president ───────────────
+const isPresident = members?.some(
+  (m) => m.user_id === user?.id && m.role === "president"
+);
+
+    
     
   // Robust gate for member-only sections
+// TMDB numeric ID for rating & takes
+
 
   const nextEvent = club?.nextEvent || {};
-const nextFilmId =nextEvent.movieId ?? nextEvent.movie_id ?? nextEvent.tmdb_id ?? null;
+  const nextFilmId = club?.nextEvent?.movieId || null;
 const nextPoster = nextEvent.poster || nextEvent.poster_url || null;
 const nextTitle  = nextEvent.title  || nextEvent.movieTitle || null;
+
 
 
   const canEdit =
@@ -1191,9 +1450,16 @@ useEffect(() => {
 }, [club?.id, user?.id, isPresident, isVice, isStaff]);
 
 const canSeeMembersOnly =
-!!user?.id &&
-(canEdit || isPresident || isVice || isStaff || (typeof hasRole === "function" && hasRole("editor_in_chief")) || isMember);
-
+  !!user?.id &&
+  (
+    isPartner || // ← SuperFilm staff override
+    canEdit ||
+    isPresident ||
+    isVice ||
+    isStaff ||
+    (typeof hasRole === "function" && hasRole("editor_in_chief")) ||
+    isMember
+  );
 
 
 
@@ -1281,7 +1547,7 @@ useEffect(() => {
       .from("film_ratings")
       .select("rating")
       .eq("club_id", club.id)
-      .eq("film_id", club.nextEvent.movieId);
+      .eq("movie_id", nextFilmId)
     if (error) { console.warn("avg rating error:", error.message); setNextAvg(null); return; }
     const arr = data || [];
     const avg = arr.length ? (arr.reduce((s, r) => s + r.rating, 0) / arr.length).toFixed(1) : null;
@@ -1301,7 +1567,7 @@ useEffect(() => {
         .from("film_ratings")
         .select("rating")
         .eq("club_id", club.id)
-        .eq("film_id", club.nextEvent.movieId);
+        .eq("movie_id", nextFilmId)
       const arr = data || [];
       const avg = arr.length ? (arr.reduce((s, r) => s + r.rating, 0) / arr.length).toFixed(1) : null;
       setNextAvg(avg);
@@ -1555,11 +1821,40 @@ function onFeaturedKeyDown(e) {
     reader.readAsDataURL(file);
   };
 
-  const handleBannerCropComplete = (croppedDataUrl) => {
-    setClub((prev) => ({ ...prev, banner: croppedDataUrl }));
-    setShowBannerCropper(false);
-    setRawBannerImage(null);
+  const handleBannerCropComplete = async (result /* Blob or dataURL string */) => {
+    try {
+      if (!club?.id) return;
+  
+      // 1) Upload cropped result to Storage
+      const path = `${club.id}/banner.jpg`;
+      const publicUrl = await uploadToBucket({
+        bucket: "club-avatars",           // reuse existing bucket
+        path,
+        file: result,
+        contentType: "image/jpeg",
+      });
+      
+  
+      // 2) Persist to DB
+      if (publicUrl) {
+        const { error: updErr } = await supabase
+          .from("clubs")
+          .update({ banner_url: publicUrl })
+          .eq("id", club.id);
+        if (updErr) throw updErr;
+  
+        // 3) Update local UI (instant refresh with cache-busted URL)
+        setClub((prev) => ({ ...prev, banner: publicUrl }));
+        await postActivity("updated the banner image");
+      }
+    } catch (e) {
+      alert(e?.message || "Failed to save cropped banner.");
+    } finally {
+      setShowBannerCropper(false);
+      setRawBannerImage(null);
+    }
   };
+  
   const openReCrop = () => {
     if (!club?.banner) return;
     setRawBannerImage(club.banner);
@@ -1765,6 +2060,41 @@ const handleNextEventSearch = useCallback(async () => {
     }
   };
 
+  const handleAvatarCropComplete = async (result /* Blob or dataURL */) => {
+    try {
+      if (!club?.id) return;
+  
+      // 1) Upload cropped avatar
+      const path = `${club.id}/avatar.jpg`;
+      const publicUrl = await uploadToBucket({
+        bucket: "club-avatars",        // you already use this bucket
+        path,
+        file: result,
+        contentType: "image/jpeg",
+      });
+  
+      // 2) Update DB
+      if (publicUrl) {
+        const { error: updErr } = await supabase
+          .from("clubs")
+          .update({ profile_image_url: publicUrl })
+          .eq("id", club.id);
+        if (updErr) throw updErr;
+  
+        // 3) Local UI
+        setClub((p) => ({ ...p, profileImageUrl: publicUrl }));
+        setRenameOk("Club picture updated.");
+        await postActivity("updated the club picture");
+      }
+    } catch (err) {
+      setRenameError(err?.message || "Failed to save cropped avatar.");
+    } finally {
+      setShowAvatarCropper(false);
+      setRawAvatarImage(null);
+    }
+  };
+  
+
   
 
   // NEW: rename handler (trigger enforces 90-day cooldown)
@@ -1841,6 +2171,20 @@ const postActivity = async (summary) => {
         .eq("id", club.id);
   
       if (updErr) throw updErr;
+
+          // ✅ Archive old takes when film changes (via SQL function)
+    if (oldFilmId && oldFilmId !== (club.nextEvent.movieId || null)) {
+      try {
+        await supabase.rpc("archive_old_takes", {
+          p_club: club.id,
+          p_current_film: String(club.nextEvent.movieId || ""),
+        });
+        console.log("Old takes archived successfully");
+      } catch (rpcErr) {
+        console.warn("archive_old_takes failed:", rpcErr.message);
+      }
+    }
+
   
       // if the film actually changed, archive old takes
       if (oldFilmId && oldFilmId !== (club.nextEvent.movieId || null)) {
@@ -1848,9 +2192,10 @@ const postActivity = async (summary) => {
           .from("club_film_takes")
           .update({ is_archived: true })
           .eq("club_id", club.id)
-          .eq("film_id", oldFilmId)
+          .eq("movie_id", nextFilmId)
           .eq("is_archived", false);
       }
+      
   
       // update our local tracker to the new persisted film id
       setPersistedFilmId(club.nextEvent.movieId || null);
@@ -1908,6 +2253,9 @@ const postActivity = async (summary) => {
   
   // Countdown
   const countdown = club?.nextEvent?.date ? getCountdown(club.nextEvent.date) : null;
+  // --- derived variables for Film Takes component (safe and correct)
+
+
   
   // Compute next allowed rename date (client hint only)
   const nextRenameDate = club?.nameLastChangedAt
@@ -1934,15 +2282,23 @@ const postActivity = async (summary) => {
                 <label className="absolute bottom-0 right-0 mb-1 mr-1 inline-flex items-center justify-center rounded-full bg-black/70 hover:bg-black/90 w-8 h-8 cursor-pointer ring-1 ring-zinc-700">
                   <ImagePlus className="w-4 h-4" />
                   <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) handleAvatarUpload(f);
-                      e.currentTarget.value = "";
-                    }}
-                  />
+  type="file"
+  accept="image/*"
+  className="hidden"
+  onChange={(e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    // preview in cropper first
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setRawAvatarImage(reader.result);    // dataURL to feed cropper
+      setShowAvatarCropper(true);
+    };
+    reader.readAsDataURL(f);
+    e.currentTarget.value = "";
+  }}
+/>
+
                 </label>
               )}
             </div>
@@ -2020,10 +2376,13 @@ const postActivity = async (summary) => {
 
   {/* Ellipsis / Leave club */}
   <LeaveClubMenu
-    clubId={club.id}
-    isMember={isMember}
-    onLeft={() => navigate("/clubs")}
-  />
+  clubId={club.id}
+  isMember={isMember}
+  isPresident={isPresident}   // <-- add this
+  members={members}           // <-- so we can choose successor
+/>
+
+
 
   {/* Edit toggle */}
   {canEdit && (
@@ -2040,11 +2399,15 @@ const postActivity = async (summary) => {
         </div>
         {/* end banner */}
     
-        {/* Notice Board — now global, under the banner */}
-        <div className="mt-6">
-          <ClubNoticeBoard clubId={club.id} />
-        </div>
-    
+       {/* Notice Board — now global, under the banner */}
+<div className="mt-6">
+  <Suspense fallback={<div className="text-xs text-zinc-500 px-6">Loading board…</div>}>
+    <ClubNoticeBoard clubId={club.id} />
+  </Suspense>
+</div>
+
+{/* Partner-only moderation UI; old PointsReviewPanel is deprecated */}
+
         {isClubAdmin && (
           <Link
             to={`/clubs/${club.slug || club.id}/requests`}
@@ -2054,26 +2417,41 @@ const postActivity = async (summary) => {
           </Link>
         )}
     
-        {isStaff && (
-          <div className="mt-6">
-            <PointsReviewPanel
-              clubId={club.id}
-              onChange={() => {
-                // optional: toast; wide card & leaderboard auto-refresh via event
-              }}
-            />
-          </div>
-        )}
-    
+{/* Partner-only moderation UI; old PointsReviewPanel.jsx is now a no-op */}
+{isPartner && (
+  <Suspense fallback={null}>
+    <PartnerPointsReviewPanel clubId={club.id} />
+  </Suspense>
+)}
+
+
+{isPartner && (
+  <Suspense fallback={null}>
+    <PartnerChatAuditPanel clubId={club.id} />
+  </Suspense>
+)}
+
+
+{isPartner && (
+  <div className="mx-6 mt-3 inline-flex items-center gap-2 rounded-full bg-amber-500/10 border border-amber-400/40 px-3 py-1 text-xs text-amber-100">
+    <span className="w-2 h-2 rounded-full bg-amber-300" aria-hidden />
+    Signed in as SuperFilm Partner
+  </div>
+)}
         {/* DEBUG — remove after confirming */}
         <div className="mt-2 text-[11px] text-zinc-400 px-6">
           staff: {String(isStaff)} • clubId: {club?.id || "—"}
         </div>
+
+ 
     
         {/* Transparency: recent point awards */}
         <div className="mt-4 px-6">
-          <RecentPointAwards clubId={club.id} />
-        </div>
+  <Suspense fallback={<div className="text-xs text-zinc-500">Loading awards…</div>}>
+  {isPartner ? <RecentPointAwards clubId={club.id} /> : null}
+  </Suspense>
+</div>
+
     
         {/* Banner cropper modal */}
         {showBannerCropper && rawBannerImage && (
@@ -2087,6 +2465,20 @@ const postActivity = async (summary) => {
             onCropComplete={handleBannerCropComplete}
           />
         )}
+
+
+{showAvatarCropper && rawAvatarImage && (
+  <AvatarCropper
+    imageSrc={rawAvatarImage}
+    aspect={1}
+    onCancel={() => {
+      setShowAvatarCropper(false);
+      setRawAvatarImage(null);
+    }}
+    onCropComplete={handleAvatarCropComplete}
+  />
+)}
+
     
         {countdown && (
           <div
@@ -2175,6 +2567,8 @@ const postActivity = async (summary) => {
           if (m.role === "president") roleLabel = "President";
           if (m.role === "vice_president") roleLabel = "Vice President";
           if (m.role === "editor_in_chief") roleLabel = "Editor-in-Chief";
+          if (m.role === "partner") roleLabel = "SuperFilm Partner";
+
 
           return (
             <div key={m.id ?? `member-${i}`} className="flex flex-col items-center w-20">
@@ -2337,24 +2731,20 @@ const postActivity = async (summary) => {
 
           {/* Date & time */}
           <label className="block text-xs uppercase tracking-wide text-zinc-400">Date &amp; time</label>
+          <Suspense fallback={<div className="text-xs text-zinc-500">Date picker…</div>}>
           <DatePicker
-            selected={new Date(club.nextEvent.date)}
-            onChange={(date) => updateField("nextEvent", "date", date.toISOString())}
-            showTimeSelect
-            dateFormat="Pp"
-            className="bg-zinc-800 text-white p-2 rounded w-full"
-          />
+  selected={new Date(club.nextEvent.date)}
+  onChange={(date) => updateField("nextEvent", "date", date.toISOString())}
+  showTimeSelect
+  dateFormat="Pp"
+  className="bg-zinc-800 text-white p-2 rounded w-full"
+/>
+
+</Suspense>
+
 
           {/* Save */}
-          <div className="pt-2">
-            <button
-              type="button"
-              onClick={saveNextScreening}
-              className="inline-flex items-center gap-2 rounded bg-yellow-500 px-3 py-1.5 text-black text-sm font-semibold hover:bg-yellow-400"
-            >
-              Save Next Screening
-            </button>
-          </div>
+          
         </div>
       ) : canSeeMembersOnly ? (
         <TicketCard
@@ -2405,6 +2795,16 @@ const postActivity = async (summary) => {
         )}
       </div>
 
+     
+
+      {/* Quick personal take (posts to profiles.film_takes) */}
+      <div className="mt-3">
+            <ClubAddTake
+              movie={{ id: nextFilmId, title: nextTitle, poster: nextPoster }}
+              club={{ id: club.id, name: club.name, slug: club.slug }}
+            />
+          </div>
+
       {/* Film Takes */}
       {!nextFilmId ? (
         <div className="rounded-xl border border-zinc-800 bg-black/40 p-3 text-sm text-zinc-300 mt-3">
@@ -2437,85 +2837,28 @@ const postActivity = async (summary) => {
           canSeeMembersOnly={canSeeMembersOnly}
         />
       )}
+      
 
-      {/* Club rating + submissions */}
-      {nextFilmId ? (
-        <div className="mt-4">
-          <div className="text-xs uppercase tracking-wide text-zinc-400 flex items-center gap-2">
-            Club rating
-            <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] lowercase tracking-normal text-zinc-300">
-              {openReview ? "open" : "—"}
-            </span>
-          </div>
+   {/* Club rating + submissions */}
+{nextFilmId ? (
+  <div className="mt-4">
+    <div className="text-xs uppercase tracking-wide text-zinc-400 flex items-center gap-2">
+      Club rating
+    </div>
 
-          <div className="mt-1 text-2xl font-semibold">
-            <FilmAverageCell clubId={club.id} filmId={nextFilmId} average={nextAvg} />
-          </div>
+    <div className="mt-1 text-2xl font-semibold">
+    <FilmAverageCell
+  average={null}                 // for now we just show "—" and let the modal handle details
+  clubId={club.id}
+  filmId={nextFilmId}
+  movieTitle={nextTitle}
+  posterPath={nextPoster}
+/>
 
-          {/* Quick personal take (posts to profiles.film_takes) */}
-          <div className="mt-3">
-            <ClubAddTake
-              movie={{ id: nextFilmId, title: nextTitle, poster: nextPoster }}
-              club={{ id: club.id, name: club.name, slug: club.slug }}
-            />
-          </div>
+    </div>
+  </div>
+) : null}
 
-          {/* Collective review submission */}
-          {openReview && canSeeMembersOnly && (
-            <div className="mt-4 rounded-xl border border-zinc-800 bg-black/40 p-3">
-              <label className="block text-xs uppercase tracking-wide text-zinc-400">
-                Which craft shone brightest?
-              </label>
-              <AspectPicker value={aspect} onChange={setAspect} className="mt-1" />
-
-              <label className="mt-3 block text-xs uppercase tracking-wide text-zinc-400">
-                Rating
-              </label>
-              <input
-                type="number"
-                min="0.5"
-                max="5"
-                step="0.5"
-                value={rating ?? ""}
-                onChange={(e) => setRating(e.target.value ? Number(e.target.value) : null)}
-                className="mt-1 w-24 bg-zinc-800 p-2 rounded text-white"
-              />
-
-              <label className="mt-3 block text-xs uppercase tracking-wide text-zinc-400">
-                Your blurb
-              </label>
-              <textarea
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                rows={3}
-                className="mt-1 w-full bg-zinc-800 p-2 rounded text-white"
-                placeholder="A few words about the film…"
-              />
-
-              <div className="mt-3 flex justify-end">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (!openReview?.id) return;
-                    await handleSubmitClubReview(openReview.id, {
-                      rating_5: rating,
-                      blurb: text,
-                      aspect_key: aspect || null,
-                    });
-                    setText("");
-                    setRating(null);
-                    setAspect(null);
-                  }}
-                  disabled={rating == null}
-                  className="rounded-lg bg-yellow-500 px-3 py-1.5 text-sm font-semibold text-black disabled:opacity-50"
-                >
-                  Submit
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      ) : null}
     </div>
   </div>
 </div>
@@ -2532,28 +2875,36 @@ const postActivity = async (summary) => {
     canEdit={canEdit}
     onSaved={(patch) => setClub((p)=> p ? { ...p, ...patch } : p)}
   />
-  <FeaturedFilms
-    club={club}
-    canEdit={canEdit}
-    showSearch={isEditing && canEdit}
-    onChange={(next) => setClub((p)=> p ? { ...p, featuredFilms: next } : p)}
-  />
+  <Suspense fallback={<div className="text-xs text-zinc-500">Loading featured films…</div>}>
+    <FeaturedFilms
+      club={club}
+      canEdit={canEdit}
+      showSearch={isEditing && canEdit}
+      onChange={(next) => setClub((p)=> p ? { ...p, featuredFilms: next } : p)}
+    />
+  </Suspense>
 </div>
+
 
 {/* Nominations full-width band */}
 {/* Nominations full-width band */}
-<NominationsCarousel
-  clubId={club.id}
-  canEdit={canEdit}
-  isEditing={isEditing}
-  nominations={nominations}
-  onRemove={removeNomination}
-/>
+<Suspense fallback={null}>
+  <NominationsCarousel
+    clubId={club.id}
+    canEdit={canEdit}
+    isEditing={isEditing}
+    nominations={nominations}
+    onRemove={removeNomination}
+  />
+</Suspense>
+
 
 
 
 <div className="mt-6">
-  <ClubYearInReview clubId={club.id} />
+  <Suspense fallback={<div className="text-xs text-zinc-500 px-6">Loading year in review…</div>}>
+    <ClubYearInReview clubId={club.id} />
+  </Suspense>
 </div>
 
 {/* Full Members Dialog */}

@@ -112,30 +112,22 @@ useEffect(() => {
     setErr("");
     try {
       // a) add to club_members (ignore duplicate)
-      const { error: insErr } = await supabase
-        .from("club_members")
-        .insert({ club_id: club.id, user_id: r.user_id, role: "member" });
-      if (insErr && insErr.code !== "23505") throw insErr;
+     // A) approve via RPC (adds member + sends welcome message if set)
+const { error: rpcErr } = await supabase.rpc("approve_membership", {
+  p_club_id: club.id,
+  p_user_id: r.user_id,
+});
+if (rpcErr) throw rpcErr;
 
-      // b) mark request approved
-      const { error: updErr } = await supabase
-        .from("membership_requests")
-        .update({ status: "approved", decided_at: new Date().toISOString() })
-        .eq("id", r.id);
-      if (updErr) throw updErr;
+// B) mark the original request as approved
+const { error: updErr } = await supabase
+  .from("membership_requests")
+  .update({ status: "approved", decided_at: new Date().toISOString() })
+  .eq("id", r.id);
+if (updErr) throw updErr;
 
-      // c) notify the requester
-      await supabase.from("notifications").insert({
-        user_id: r.user_id,
-        club_id: club.id,
-        type: "club.membership.approved",
-        data: {
-          club_name: club.name,
-          slug: club.slug,
-          href: `/clubs/${club.slug || club.id}`,
-          message: `Your request to join ${club.name} was approved.`,
-        },
-      });
+// (no extra notification here — the RPC already sent the welcome message)
+
 
       // remove from list
       setRows((prev) => prev.filter((x) => x.id !== r.id));

@@ -1,13 +1,11 @@
 // src/pages/UserProfile.jsx
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import supabase from "../supabaseClient";
 import { fetchActiveScheme } from "../lib/ratingSchemes";
 import RatingSchemeView from "../components/RatingSchemeView";
 import DirectorsCutBadge from "../components/DirectorsCutBadge";
-
-
 
 import { useUser } from "../context/UserContext";
 import StatsAndWatchlist from "../components/StatsAndWatchlist";
@@ -18,6 +16,42 @@ import Moodboard from "../components/Moodboard.jsx";
 import EditProfilePanel from "../components/EditProfilePanel";
 import { getThemeVars } from "../theme/profileThemes";
 import ProfileTasteCards from "../components/ProfileTasteCards";
+import { Link } from "react-router-dom";
+import FilmTakeCard from "../components/FilmTakeCard.jsx";
+
+
+
+// --- Local profile loader (slug or UUID) ---
+const UUID_RX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function loadAnyProfileLocal(identifier) {
+  if (!identifier) return null;
+
+  try {
+    if (UUID_RX.test(String(identifier))) {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", identifier)
+        .maybeSingle();
+      if (error) throw error;
+      return data || null;
+    }
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("slug", String(identifier))
+      .maybeSingle();
+    if (error) throw error;
+    return data || null;
+  } catch (e) {
+    console.error("[loadAnyProfileLocal] failed:", e);
+    return null;
+  }
+}
+
 
 /* ---------------- small helpers ---------------- */
 function timeAgo(iso) {
@@ -36,7 +70,12 @@ function Stars5({ value = 0, size = 14 }) {
   const empty = 5 - full - half;
 
   const Star = ({ filled }) => (
-    <svg width={size} height={size} viewBox="0 0 24 24" className={filled ? "text-yellow-400" : "text-zinc-600"}>
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      className={filled ? "text-yellow-400" : "text-zinc-600"}
+    >
       <path
         fill="currentColor"
         d="M12 17.3l-6.16 3.6 1.64-6.98L2 8.9l7.04-.6L12 1.8l2.96 6.5 7.04.6-5.48 5.02 1.64 6.98z"
@@ -61,9 +100,13 @@ function Stars5({ value = 0, size = 14 }) {
 
   return (
     <div className="flex items-center gap-1">
-      {Array.from({ length: full }).map((_, i) => <Star key={`f${i}`} filled />)}
+      {Array.from({ length: full }).map((_, i) => (
+        <Star key={`f${i}`} filled />
+      ))}
       {half ? <Half key="h" /> : null}
-      {Array.from({ length: empty }).map((_, i) => <Star key={`e${i}`} filled={false} />)}
+      {Array.from({ length: empty }).map((_, i) => (
+        <Star key={`e${i}`} filled={false} />
+      ))}
     </div>
   );
 }
@@ -139,7 +182,9 @@ function ClubTakeItem({ t, showUser = false, canEdit = false, onRemove }) {
             </span>
           </div>
 
-          {t.blurb ? <p className="mt-2 text-sm text-zinc-200 line-clamp-3">{t.blurb}</p> : null}
+          {t.blurb ? (
+            <p className="mt-2 text-sm text-zinc-200 line-clamp-3">{t.blurb}</p>
+          ) : null}
 
           {canEdit && (
             <div className="mt-2 flex justify-end">
@@ -158,7 +203,19 @@ function ClubTakeItem({ t, showUser = false, canEdit = false, onRemove }) {
 const UserProfile = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, profile, setAvatar, saveProfilePatch, loading } = useUser();
+  const { slug: routeSlug, id: routeId } = useParams();
+  const {
+    user,
+    profile,
+    setAvatar,
+    saveProfilePatch,
+    loading,
+  } = useUser();
+  
+
+  // this is the profile we actually render (could be me, could be someone else)
+  const [viewProfile, setViewProfile] = useState(null);
+  const [viewLoading, setViewLoading] = useState(true);
 
   // View vs edit
   const [editMode, setEditMode] = useState(false);
@@ -172,39 +229,99 @@ const UserProfile = () => {
   const [bannerOverride, setBannerOverride] = useState(null);
   const [bannerGradientOverride, setBannerGradientOverride] = useState(null);
 
-  // Derived profile fields (safe fallbacks if profile null)
-  const displayName = profile?.display_name || "Your Name";
-  const isPremiumProfile =
-  profile?.plan === "directors_cut" || profile?.is_premium === true;
+  // Taste cards live state
+  const [liveTasteCards, setLiveTasteCards] = useState(
+    Array.isArray(profile?.taste_cards) ? profile.taste_cards : []
+  );
+  const [liveGlobalGlow, setLiveGlobalGlow] = useState(
+    profile?.taste_card_style_global ?? null
+  );
 
-  const username = profile?.slug || "username";
-  const bio = profile?.bio || "";
-  const clubName = profile?.club_tag || "";
-  const avatarUrl = profile?.avatar_url || "/avatars/default.jpg";
+  // Premium rating scheme (view mode)
+  const [viewScheme, setViewScheme] = useState(null);
 
-  const bannerUrl = bannerOverride ?? profile?.banner_url ?? profile?.banner_image ?? "";
-  const bannerGradient = bannerGradientOverride ?? profile?.banner_gradient ?? "";
+  // Editing buffer
+  const [editingTasteCards, setEditingTasteCards] = useState([]);
 
-  const themeId = profile?.theme_preset || "classic";
-  const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
+  // role / club / followers
+  const [roleBadge, setRoleBadge] = useState(null);
+  const [roleClub, setRoleClub] = useState(null);
+  const [counts, setCounts] = useState({ followers: 0, following: 0 });
 
-  // Taste Cards — live view state (stays in sync with panel)
- // Taste Cards — live view state (stays in sync with panel)
-const [liveTasteCards, setLiveTasteCards] = useState(
-  Array.isArray(profile?.taste_cards) ? profile.taste_cards : []
-);
-const [liveGlobalGlow, setLiveGlobalGlow] = useState(
-  profile?.taste_card_style_global ?? null
-);
+    // Film takes (from Supabase table)
+    
+    const [filmTakesLoading, setFilmTakesLoading] = useState(true);
+      // Film takes (loaded from Supabase)
+  const [filmTakes, setFilmTakes] = useState([]);
 
-useEffect(() => {
-  setLiveTasteCards(Array.isArray(profile?.taste_cards) ? profile.taste_cards : []);
-}, [profile?.taste_cards]);
+    // Editing a single take (owner only)
+    const [editingTake, setEditingTake] = useState(null);
+    const [editingTakeDraft, setEditingTakeDraft] = useState({
+      rating_5: 0,
+      take: "",
+    });
+    const [editingTakeSaving, setEditingTakeSaving] = useState(false);
+  
 
-useEffect(() => {
-  setLiveGlobalGlow(profile?.taste_card_style_global ?? null);
-}, [profile?.taste_card_style_global]);
 
+  
+
+  // anchor for Moodboard
+  const moodboardAnchorRef = useRef(null);
+
+  /* =========================================================
+     1. Decide whose profile to show (me vs /u/:slug vs /profile/:id)
+     ========================================================= */
+  useEffect(() => {
+    let mounted = true;
+
+    (async () => {
+      setViewLoading(true);
+      const identifier = routeSlug || routeId || null;
+
+      // No identifier in URL → show my own profile
+      if (!identifier) {
+        setViewProfile(profile || null);
+        setViewLoading(false);
+        return;
+      }
+
+      // If identifier matches my own profile → also use current profile
+      if (
+        profile?.id === identifier ||
+        (profile?.slug && profile.slug === identifier)
+      ) {
+        setViewProfile(profile);
+        setViewLoading(false);
+        return;
+      }
+
+      // Otherwise fetch that user
+      const fetched = await loadAnyProfileLocal(identifier);
+      if (mounted) {
+        setViewProfile(fetched);
+        setViewLoading(false);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [routeSlug, routeId, profile?.id, profile?.slug]);
+
+
+  /* =========================================================
+     2. Keep live taste cards in sync when actual profile changes
+     ========================================================= */
+  useEffect(() => {
+    setLiveTasteCards(
+      Array.isArray(viewProfile?.taste_cards) ? viewProfile.taste_cards : []
+    );
+  }, [viewProfile?.taste_cards]);
+
+  useEffect(() => {
+    setLiveGlobalGlow(viewProfile?.taste_card_style_global ?? null);
+  }, [viewProfile?.taste_card_style_global]);
 
   useEffect(() => {
     function onTasteCardsUpdated(e) {
@@ -216,65 +333,61 @@ useEffect(() => {
     return () => window.removeEventListener("sf:tastecards:updated", onTasteCardsUpdated);
   }, []);
 
-  // Premium rating scheme (view mode)
-const [viewScheme, setViewScheme] = useState(null);
-
-useEffect(() => {
-  let mounted = true;
-  async function loadScheme() {
-    if (!profile?.id) {
-      if (mounted) setViewScheme(null);
-      return;
+  /* =========================================================
+     3. Premium rating scheme for viewed profile
+     ========================================================= */
+  useEffect(() => {
+    let mounted = true;
+    async function loadScheme() {
+      if (!viewProfile?.id) {
+        if (mounted) setViewScheme(null);
+        return;
+      }
+      try {
+        const sch = await fetchActiveScheme(viewProfile.id);
+        if (mounted) setViewScheme(sch);
+      } catch {
+        if (mounted) setViewScheme(null);
+      }
     }
-    try {
-      const sch = await fetchActiveScheme(profile.id);
-      if (mounted) setViewScheme(sch);
-    } catch {
-      if (mounted) setViewScheme(null);
+    loadScheme();
+    return () => {
+      mounted = false;
+    };
+  }, [viewProfile?.id]);
+
+  // listen for updates from edit panel to refetch scheme
+  useEffect(() => {
+    function onSchemeUpdated() {
+      if (!viewProfile?.id) return;
+      fetchActiveScheme(viewProfile.id)
+        .then((sch) => setViewScheme(sch))
+        .catch(() => {});
     }
-  }
-  loadScheme();
-  return () => { mounted = false; };
-}, [profile?.id]);
+    window.addEventListener("sf:ratingscheme:updated", onSchemeUpdated);
+    return () => window.removeEventListener("sf:ratingscheme:updated", onSchemeUpdated);
+  }, [viewProfile?.id]);
 
-// (optional) listen for panel updates to refresh scheme without reload
-useEffect(() => {
-  function onSchemeUpdated() {
-    if (!profile?.id) return;
-    fetchActiveScheme(profile.id).then((sch) => setViewScheme(sch)).catch(() => {});
-  }
-  window.addEventListener("sf:ratingscheme:updated", onSchemeUpdated);
-  return () => window.removeEventListener("sf:ratingscheme:updated", onSchemeUpdated);
-}, [profile?.id]);
-
-
-  // Editing buffer (not rendered here; panel handles UI)
-  const [editingTasteCards, setEditingTasteCards] = useState([]);
-
-  const viewingOwn = user?.id && profile?.id ? user.id === profile.id : true;
-
-  const [roleBadge, setRoleBadge] = useState(null);
-  const [roleClub, setRoleClub] = useState(null);
-  const [counts, setCounts] = useState({ followers: 0, following: 0 });
-
-  // anchor for Moodboard
-  const moodboardAnchorRef = useRef(null);
-
-  /* ---------------- effects ---------------- */
-  // Respect ?edit=true (open once, then clean URL)
+  /* =========================================================
+     4. Respect ?edit=true (open once, then clean URL)
+     ========================================================= */
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     if (params.get("edit") === "true") {
       setEditMode(true);
       setEditOpen(true);
-      setEditingTasteCards(Array.isArray(profile?.taste_cards) ? [...profile.taste_cards] : []);
+      setEditingTasteCards(
+        Array.isArray(viewProfile?.taste_cards) ? [...viewProfile.taste_cards] : []
+      );
       params.delete("edit");
       navigate({ search: params.toString() }, { replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.search]);
+  }, [location.search, viewProfile?.taste_cards]);
 
-  // Restore banner from localStorage (if present)
+  /* =========================================================
+     5. Restore banner from localStorage (for own profile)
+     ========================================================= */
   useEffect(() => {
     try {
       const ls = localStorage.getItem("userBanner");
@@ -282,7 +395,9 @@ useEffect(() => {
     } catch {}
   }, [bannerOverride]);
 
-  // Exit edit mode when panel broadcasts close
+  /* =========================================================
+     6. Exit edit mode when panel broadcasts close
+     ========================================================= */
   useEffect(() => {
     function handleExitEdit() {
       setEditOpen(false);
@@ -292,16 +407,18 @@ useEffect(() => {
     return () => window.removeEventListener("sf:editpanel:close", handleExitEdit);
   }, []);
 
-  // Role pill + follow counts
+  /* =========================================================
+     7. Role pill + follow counts (for viewed profile)
+     ========================================================= */
   useEffect(() => {
     let isMounted = true;
     (async () => {
-      if (!profile?.id) return;
+      if (!viewProfile?.id) return;
 
       const { data: rolesRow } = await supabase
         .from("profile_roles")
         .select("roles")
-        .eq("user_id", profile.id)
+        .eq("user_id", viewProfile.id)
         .maybeSingle();
 
       if (isMounted) {
@@ -318,7 +435,7 @@ useEffect(() => {
       const { data: fc } = await supabase
         .from("follow_counts")
         .select("followers, following")
-        .eq("user_id", profile.id)
+        .eq("user_id", viewProfile.id)
         .maybeSingle();
 
       if (isMounted && fc) setCounts(fc);
@@ -326,14 +443,66 @@ useEffect(() => {
     return () => {
       isMounted = false;
     };
-  }, [profile?.id]);
+  }, [viewProfile?.id]);
 
-  // Navigate to the profile view after the panel reports a successful save
+    /* =========================================================
+     7b. Load film takes from Supabase (public)
+     ========================================================= */
+     useEffect(() => {
+      let cancelled = false;
+  
+      async function loadTakes() {
+        if (!viewProfile?.id) {
+          if (!cancelled) {
+            setFilmTakes([]);
+            setFilmTakesLoading(false);
+          }
+          return;
+        }
+  
+        setFilmTakesLoading(true);
+        try {
+          const { data, error } = await supabase
+            .from("film_takes")
+            .select("*")
+            .eq("user_id", viewProfile.id)
+            .order("created_at", { ascending: false })
+
+
+  
+          if (cancelled) return;
+  
+          if (error) {
+            console.error("[film_takes] load error:", error);
+            setFilmTakes([]);
+          } else {
+            setFilmTakes(Array.isArray(data) ? data : []);
+          }
+        } catch (e) {
+          if (!cancelled) {
+            console.error("[film_takes] exception:", e);
+            setFilmTakes([]);
+          }
+        } finally {
+          if (!cancelled) setFilmTakesLoading(false);
+        }
+      }
+  
+      loadTakes();
+      return () => {
+        cancelled = true;
+      };
+    }, [viewProfile?.id]);
+  
+
+  /* =========================================================
+     8. Navigate back to this profile after save
+     ========================================================= */
   useEffect(() => {
     function onProfileSaved() {
       const path =
-        (profile?.slug && `/u/${profile.slug}`) ||
-        (profile?.id && `/profile/${profile.id}`) ||
+        (viewProfile?.slug && `/u/${viewProfile.slug}`) ||
+        (viewProfile?.id && `/profile/${viewProfile.id}`) ||
         "/myprofile";
 
       navigate(path, { replace: true });
@@ -343,9 +512,12 @@ useEffect(() => {
 
     window.addEventListener("sf:profile:saved", onProfileSaved);
     return () => window.removeEventListener("sf:profile:saved", onProfileSaved);
-  }, [navigate, profile?.slug, profile?.id]);
+  }, [navigate, viewProfile?.slug, viewProfile?.id]);
 
   /* ---------------- handlers ---------------- */
+  const viewingOwn =
+    user?.id && viewProfile?.id ? user.id === viewProfile.id : true;
+
   const handleUsernameChange = async (newUsername) => {
     const lastChange = localStorage.getItem("usernameLastChanged");
     const ninetyDays = 90 * 24 * 60 * 60 * 1000;
@@ -389,10 +561,14 @@ useEffect(() => {
 
     if (typeof patch.banner_url === "string" && patch.banner_url) {
       setBannerOverride(patch.banner_url);
-      try { localStorage.setItem("userBanner", patch.banner_url); } catch {}
+      try {
+        localStorage.setItem("userBanner", patch.banner_url);
+      } catch {}
     } else if (typeof patch.banner_image === "string" && patch.banner_image) {
       setBannerOverride(patch.banner_image);
-      try { localStorage.setItem("userBanner", patch.banner_image); } catch {}
+      try {
+        localStorage.setItem("userBanner", patch.banner_image);
+      } catch {}
     }
     if (typeof patch.banner_gradient === "string") {
       setBannerGradientOverride(patch.banner_gradient);
@@ -407,12 +583,9 @@ useEffect(() => {
       } catch {}
     }
 
-    // reflect global glow immediately in view mode
-if (Object.prototype.hasOwnProperty.call(patch, "taste_card_style_global")) {
-  setLiveGlobalGlow(patch.taste_card_style_global ?? null);
-}
-
-
+    if (Object.prototype.hasOwnProperty.call(patch, "taste_card_style_global")) {
+      setLiveGlobalGlow(patch.taste_card_style_global ?? null);
+    }
 
     const { banner_url, banner_image, banner_gradient, taste_cards, ...rest } = patch;
     if (Object.keys(rest).length) {
@@ -428,16 +601,101 @@ if (Object.prototype.hasOwnProperty.call(patch, "taste_card_style_global")) {
     if (!id) return;
     if (typeof window !== "undefined" && !window.confirm("Remove this take?")) return;
 
-    const current = Array.isArray(profile?.film_takes) ? profile.film_takes : [];
-    const next = current.filter((t) => t.id !== id);
     try {
-      await saveProfilePatch({ film_takes: next });
+      const { error } = await supabase
+        .from("film_takes")
+        .delete()
+        .eq("id", id)
+        .eq("user_id", viewProfile?.id);
+
+      if (error) throw error;
+
+      // Update local state
+      setFilmTakes((prev) => prev.filter((t) => t.id !== id));
     } catch (e) {
       console.error("Failed to remove take:", e);
     }
   };
 
-  /* ---------------- banner ---------------- */
+  const handleOpenEditTake = (take) => {
+    if (!take) return;
+    setEditingTake(take);
+    setEditingTakeDraft({
+      rating_5:
+        typeof take.rating_5 === "number" ? take.rating_5 : 0,
+      take: take.take || "",
+    });
+  };
+
+  const handleCloseEditTake = () => {
+    if (editingTakeSaving) return;
+    setEditingTake(null);
+  };
+
+  const handleSaveEditTake = async () => {
+    if (!editingTake || !viewProfile?.id) return;
+
+    setEditingTakeSaving(true);
+    try {
+      const newRating = Number(editingTakeDraft.rating_5) || null;
+      const newText =
+        editingTakeDraft.take && editingTakeDraft.take.trim()
+          ? editingTakeDraft.take.trim()
+          : null;
+
+      const { data, error } = await supabase
+        .from("film_takes")
+        .update({
+          rating_5: newRating,
+          take: newText,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", editingTake.id)
+        .eq("user_id", viewProfile.id)
+        .select("*")
+        .maybeSingle();
+
+      if (error) throw error;
+
+      // Update local state with fresh row
+      setFilmTakes((prev) =>
+        prev.map((t) =>
+          t.id === editingTake.id ? { ...t, ...data } : t
+        )
+      );
+
+      setEditingTake(null);
+    } catch (e) {
+      console.error("Failed to save edited take:", e);
+      alert("Couldn't save that take. Please try again.");
+    } finally {
+      setEditingTakeSaving(false);
+    }
+  };
+
+
+  /* ---------------- derived display from viewed profile ---------------- */
+  const displayName = viewProfile?.display_name || "Your Name";
+  const isPremiumProfile =
+    viewProfile?.plan === "directors_cut" || viewProfile?.is_premium === true;
+
+  const username = viewProfile?.slug || "username";
+  const bio = viewProfile?.bio || "";
+  const clubName = viewProfile?.club_tag || "";
+  const avatarUrl = viewProfile?.avatar_url || "/avatars/default.jpg";
+
+  const bannerUrl =
+    bannerOverride ?? viewProfile?.banner_url ?? viewProfile?.banner_image ?? "";
+  const bannerGradient =
+    bannerGradientOverride ?? viewProfile?.banner_gradient ?? "";
+
+ // allow null (default/base look) when no theme is selected
+const themeId = viewProfile?.theme_preset ?? null;
+const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
+
+  
+
+  /* ---------------- banner component ---------------- */
   const Banner = () => {
     const style = bannerUrl
       ? {
@@ -471,7 +729,7 @@ if (Object.prototype.hasOwnProperty.call(patch, "taste_card_style_global")) {
               Edit Profile
             </button>
           ) : (
-            <FollowButton profileId={profile?.id} />
+            <FollowButton profileId={viewProfile?.id} />
           )}
         </div>
 
@@ -531,10 +789,9 @@ if (Object.prototype.hasOwnProperty.call(patch, "taste_card_style_global")) {
                 />
               ) : (
                 <p className="text-sm text-gray-300 mt-1 flex items-center">
-  <span>@{username}</span>
-  {isPremiumProfile && <DirectorsCutBadge className="ml-2" size="xs" />}
-</p>
-
+                  <span>@{username}</span>
+                  {isPremiumProfile && <DirectorsCutBadge className="ml-2" size="xs" />}
+                </p>
               )}
 
               <div className="mt-1 flex items-center flex-wrap gap-2">
@@ -562,15 +819,13 @@ if (Object.prototype.hasOwnProperty.call(patch, "taste_card_style_global")) {
   };
 
   /* ---------------- loading ---------------- */
-  if (loading) {
+  if (loading || viewLoading) {
     return (
       <div className="w-full text-white py-16 px-4 bg-black grid place-items-center">
-        <div className="text-sm text-zinc-400">Loading your profile…</div>
+        <div className="text-sm text-zinc-400">Loading profile…</div>
       </div>
     );
   }
-
-  const filmTakes = Array.isArray(profile?.film_takes) ? profile.film_takes : [];
 
   /* ---------------- render ---------------- */
   return (
@@ -588,9 +843,10 @@ if (Object.prototype.hasOwnProperty.call(patch, "taste_card_style_global")) {
             following: counts.following,
             role: roleBadge,
             roleClub,
-            className: "themed-card themed-outline forge",
+            isPremium: isPremiumProfile,    // NEW
           }}
-          userId={profile?.id}
+          
+          userId={viewProfile?.id}
           movieRoute="/movie"
         />
 
@@ -605,7 +861,7 @@ if (Object.prototype.hasOwnProperty.call(patch, "taste_card_style_global")) {
         <div className="px-6 pt-6">
           <div ref={moodboardAnchorRef} id="moodboard">
             <Moodboard
-              profileId={profile?.id}
+              profileId={viewProfile?.id}
               isOwner={viewingOwn}
               className="themed-card themed-outline forge w-full"
             />
@@ -619,51 +875,156 @@ if (Object.prototype.hasOwnProperty.call(patch, "taste_card_style_global")) {
               <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
                 <h3 className="text-sm font-semibold text-white">Taste Cards</h3>
               </div>
-              <ProfileTasteCards
-                cards={liveTasteCards}
-                globalGlow={liveGlobalGlow}
-              />
+              <ProfileTasteCards cards={liveTasteCards} globalGlow={liveGlobalGlow} />
             </div>
           </section>
         )}
 
         {/* Rating language — view (premium users' phrase groups) */}
-{!editMode && viewScheme?.tags?.length > 0 && (
-  <section className="mt-6 px-6">
-    <div className="themed-card themed-outline forge rounded-2xl border bg-black/40">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
-        <h3 className="text-sm font-semibold text-white">Rating Language</h3>
-      </div>
-      <RatingSchemeView scheme={viewScheme} />
-    </div>
-  </section>
-)}
+        {!editMode && viewScheme?.tags?.length > 0 && (
+          <section className="mt-6 px-6">
+            <div className="themed-card themed-outline forge rounded-2xl border bg-black/40">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+                <h3 className="text-sm font-semibold text-white">Rating Language</h3>
+              </div>
+              <RatingSchemeView scheme={viewScheme} />
+            </div>
+          </section>
+        )}
 
-
-        {/* Film Takes */}
-        <section className="mt-6 px-6">
-          <div className="themed-card themed-outline forge rounded-2xl border bg-black/40">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+           {/* FILM TAKES — Preview (first 3 only) */}
+           <section className="mt-8 px-6">
+          <div className="themed-card themed-outline forge rounded-2xl border border-zinc-800 bg-black/30 p-4">
+            <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-white">Film Takes</h3>
+
+              {filmTakes.length > 3 && (
+                <Link
+                  to={`/u/${viewProfile?.slug || username}/takes`}
+                  className="text-xs text-yellow-400 hover:text-yellow-300 transition"
+                >
+                  View all takes →
+                </Link>
+              )}
             </div>
 
-            {filmTakes.length === 0 ? (
-              <div className="px-4 py-6 text-sm text-zinc-400">No takes yet.</div>
-            ) : (
-              <ul className="px-2 py-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-3">
-                {filmTakes.map((t, idx) => (
-                  <ClubTakeItem
-                    key={t.id || idx}
-                    t={t}
-                    showUser={false}
-                    canEdit={viewingOwn && editMode}
-                    onRemove={() => handleRemoveTake(t.id)}
+            {filmTakesLoading ? (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="h-20 rounded-xl border border-zinc-800 bg-zinc-900 animate-pulse"
                   />
                 ))}
-              </ul>
+              </div>
+            ) : filmTakes.length === 0 ? (
+              <p className="text-xs text-zinc-500">No takes yet.</p>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {filmTakes.slice(0, 3).map((take) => (
+                <div
+                  key={take.id}
+                  className={viewingOwn ? "cursor-pointer" : ""}
+                  onClick={
+                    viewingOwn ? () => handleOpenEditTake(take) : undefined
+                  }
+                >
+                  <FilmTakeCard take={take} />
+                </div>
+              ))}
+            </div>
+
             )}
           </div>
         </section>
+
+
+                {/* Edit Film Take modal (owner only) */}
+                {viewingOwn && editingTake && (
+          <div className="fixed inset-0 z-40 flex items-center justify-center">
+            <div
+              className="absolute inset-0 bg-black/60"
+              onClick={handleCloseEditTake}
+            />
+            <div className="relative z-50 w-full max-w-md rounded-2xl border border-zinc-800 bg-black/90 p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-white">
+                  Edit Film Take
+                </h3>
+                <button
+                  type="button"
+                  onClick={handleCloseEditTake}
+                  className="text-xs text-zinc-400 hover:text-zinc-200"
+                  disabled={editingTakeSaving}
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <div className="text-xs text-zinc-400 mb-1">
+                    Rating (out of 5)
+                  </div>
+                  <input
+                    type="number"
+                    min="0"
+                    max="5"
+                    step="0.5"
+                    value={editingTakeDraft.rating_5}
+                    onChange={(e) =>
+                      setEditingTakeDraft((prev) => ({
+                        ...prev,
+                        rating_5: e.target.value,
+                      }))
+                    }
+                    className="w-24 rounded-lg border border-zinc-700 bg-black/70 px-2 py-1 text-sm text-white"
+                  />
+                </div>
+
+                <div>
+                  <div className="text-xs text-zinc-400 mb-1">
+                    Your take
+                  </div>
+                  <textarea
+                    rows={5}
+                    value={editingTakeDraft.take}
+                    onChange={(e) =>
+                      setEditingTakeDraft((prev) => ({
+                        ...prev,
+                        take: e.target.value,
+                      }))
+                    }
+                    className="w-full rounded-xl border border-zinc-700 bg-black/70 p-2 text-sm text-white"
+                    placeholder="Rewrite or polish your thoughts…"
+                  />
+                </div>
+
+                <div className="flex justify-between items-center pt-1">
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveTake(editingTake.id)}
+                    className="text-xs text-red-400 hover:text-red-300"
+                    disabled={editingTakeSaving}
+                  >
+                    Delete take
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveEditTake}
+                    disabled={editingTakeSaving}
+                    className="rounded-lg bg-yellow-500 px-4 py-1.5 text-xs font-medium text-black hover:bg-yellow-400 disabled:opacity-60"
+                  >
+                    {editingTakeSaving ? "Saving…" : "Save changes"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+
+
 
         {/* Edit panel in a PORTAL — mount only when open */}
         {editOpen &&
@@ -676,8 +1037,8 @@ if (Object.prototype.hasOwnProperty.call(patch, "taste_card_style_global")) {
                 setEditMode(false);
               }}
               onUpdated={handlePanelUpdated}
-              profile={profile}
-              profileId={profile?.id}
+              profile={viewProfile}
+              profileId={viewProfile?.id}
               isOwner={viewingOwn}
             />,
             document.body

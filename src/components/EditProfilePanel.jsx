@@ -18,6 +18,10 @@ import { searchStills } from "../lib/stills";
 import { toast } from "react-hot-toast";
 import useEntitlements from "../hooks/useEntitlements";
 import { PROFILE_THEMES } from "../theme/profileThemes";
+// --- PREMIUM FLAGS (define early!) ---
+
+
+
 
 
 
@@ -121,6 +125,20 @@ export default function EditProfilePanel({
 const { user, profile: ctxProfile, saveProfilePatch, refreshProfile } = useUser();
 const effectiveProfile = profile || ctxProfile;
 const moodProfileId = profileId || effectiveProfile?.id || user?.id || null;
+// --- PREMIUM FLAGS (must be inside the component) ---
+const { limits } = useEntitlements(); // ✅ safe: inside component
+
+// Decide premium from profile + server entitlements
+const isPremium =
+  (effectiveProfile?.plan === "directors_cut") ||
+  (effectiveProfile?.is_premium === true) ||
+  (limits?.plan === "directors_cut") ||
+  (limits?.isPremium === true);
+
+const premiumFlag = !!isPremium;
+
+
+
 
 
 
@@ -163,15 +181,138 @@ function getProfileViewPath() {
   }
 
   /* ───────────────────────────── Banner & Gradient (+TMDB) ───────────────────────────── */
-  const [bannerInput, setBannerInput] = useState("");
+  
   const [gradient, setGradient] = useState(profile?.banner_gradient || "");
   const [tmdbQuery, setTmdbQuery] = useState("");
   const [tmdbSearching, setTmdbSearching] = useState(false);
-  const [themePreset, setThemePreset] = useState(profile?.theme_preset || "classic");
-useEffect(() => {
-  if (!open) return;
-  setThemePreset(profile?.theme_preset || "classic");
-}, [open, profile?.theme_preset]);
+  const [themePreset, setThemePreset] = useState(profile?.theme_preset ?? null);
+  useEffect(() => {
+    if (!open) return;
+    setThemePreset(profile?.theme_preset ?? null);
+  }, [open, profile?.theme_preset]);
+// Premium Deep Stills
+const [deepQ, setDeepQ] = useState("");
+const [deepSearching, setDeepSearching] = useState(false);
+const [deepTitles, setDeepTitles] = useState([]);       // [{id, kind, title, year, poster, backdrop}]
+const [deepPicked, setDeepPicked] = useState(null);     // { id, kind, title }
+const [deepLoadingImgs, setDeepLoadingImgs] = useState(false);
+const [deepImages, setDeepImages] = useState([]);       // [{url, w, h, aspect}]
+
+// helper: premium flag from existing limits/isPremium you already compute:
+ // or whatever you derived earlier
+async function getAccessToken() {
+  try {
+    const { data } = await supabase.auth.getSession();
+    return data?.session?.access_token || "";
+  } catch {
+    return "";
+  }
+}
+
+
+// ——— Helpers used below ———
+function getFnBase() {
+  const raw = _env("VITE_SUPABASE_FUNCTIONS_URL") || "";
+  return raw.replace(/\/+$/, ""); // strip trailing slash
+}
+async function authHeader() {
+  // uses your getAccessToken() helper you added earlier
+  const tok = (await getAccessToken()) || "";
+  return { Authorization: `Bearer ${tok}` };
+}
+
+// ============== REPLACE YOUR deepSearchTitles WITH THIS ==============
+async function deepSearchTitles() {
+  if (!premiumFlag) return;
+  const q = (deepQ || "").trim();
+  if (!q) return;
+
+  setDeepSearching(true);
+  setDeepTitles([]);
+
+  const base = getFnBase();
+  const url = `${base}/search-titles`;
+
+  // 12s timeout guard
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 12000);
+
+  try {
+    const resp = await fetch(url, {
+      method: "POST",
+      signal: ctrl.signal,
+      headers: {
+        "Content-Type": "application/json",
+        ...(await authHeader()),
+      },
+      body: JSON.stringify({ query: q }),
+    });
+
+    // CORS/proxy issues can return non-OK or empty (204). Make it explicit:
+    if (!resp.ok) {
+      const txt = await resp.text().catch(() => "");
+      throw new Error(`search-titles failed (${resp.status}): ${txt || "No body"}`);
+    }
+
+    const data = await resp.json().catch(() => []);
+    const arr = Array.isArray(data) ? data : (Array.isArray(data?.results) ? data.results : []);
+
+    setDeepTitles(arr);
+  } catch (e) {
+    console.error("[deep titles] error:", e);
+    setDeepTitles([]); // fail safe
+  } finally {
+    clearTimeout(t);
+    setDeepSearching(false);
+  }
+}
+
+// ============== REPLACE YOUR deepFetchImages WITH THIS ==============
+async function deepFetchImages(pick) {
+  if (!premiumFlag || !pick?.id || !pick?.kind) return;
+
+  setDeepLoadingImgs(true);
+  setDeepImages([]);
+
+  const base = getFnBase();
+  const url = `${base}/title-stills`;
+
+  // 15s timeout guard (image lists can be larger)
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 15000);
+
+  try {
+    const resp = await fetch(url, {
+      method: "POST",
+      signal: ctrl.signal,
+      headers: {
+        "Content-Type": "application/json",
+        ...(await authHeader()),
+      },
+      body: JSON.stringify({ id: pick.id, kind: pick.kind }),
+    });
+
+    if (!resp.ok) {
+      const txt = await resp.text().catch(() => "");
+      throw new Error(`title-stills failed (${resp.status}): ${txt || "No body"}`);
+    }
+
+    const data = await resp.json().catch(() => []);
+    // Normalize: expect an array of { url, width?, height?, source? }
+    const arr = Array.isArray(data) ? data : (Array.isArray(data?.images) ? data.images : []);
+    setDeepImages(arr);
+  } catch (e) {
+    console.error("[deep images] error:", e);
+    setDeepImages([]); // fail safe
+  } finally {
+    clearTimeout(t);
+    setDeepLoadingImgs(false);
+  }
+}
+
+
+  const savingRef = useRef(false);
+
 
   const [tmdbResults, setTmdbResults] = useState([]);
   const gradientPresets = [
@@ -203,16 +344,25 @@ useEffect(() => {
       setTmdbSearching(false);
     }
   }
-  
+
+
+ 
   
 
-  function applyBanner(url) {
-    const clean = (url || "").trim();
-    if (!/^https?:\/\//.test(clean)) return;            // must be http(s)
-    if (!/\.\w{2,4}($|\?)/.test(clean)) return;         // must look like an image file-ish
-    onUpdated?.({ banner_url: clean });
+  
+  function applyGradient(preset) {
+    setGradient(preset); // ✅ stage only; final Save will persist
   }
-  function applyGradient(preset) { setGradient(preset); onUpdated?.({ banner_gradient: preset }); }
+  
+  // Only allow TMDB-hosted images for banners
+function applyBanner(url) {
+  const u = String(url || "").trim();
+  // accept TMDB image hosts only
+  const ok = /^https?:\/\/(image\.tmdb\.org|media\.themoviedb\.org)\//i.test(u);
+  if (!ok) return; // silently ignore anything else
+  onUpdated?.({ banner_url: u });
+}
+
 
   /* ───────────────────────────────── Moodboard ───────────────────────────────── */
   const [items, setItems] = useState([]);
@@ -224,12 +374,13 @@ useEffect(() => {
   const [cropSrc, setCropSrc] = useState(null);
   const [cropAspect, setCropAspect] = useState(16 / 9);
   const [expandedOpen, setExpandedOpen] = useState(false);
-  const { limits } = useEntitlements();
-  const isPremium = limits?.plan === "directors_cut" || limits?.isPremium;
+
   const originalRef = useRef([]);
   const bannerSave = useSaveFeedback();   // reserved
   const gradientSave = useSaveFeedback(); // reserved
   const avatarSave = useSaveFeedback();   // reserved
+  const [pendingBannerUrl, setPendingBannerUrl] = useState(null);
+
   
 
 
@@ -543,12 +694,7 @@ useEffect(() => {
       : []
   );
 
-// Taste cards UI save state
-const [tasteSave, setTasteSave] = useState({
-  saving: false,
-  success: false,
-  error: "",
-});
+
 
 
   useEffect(() => {
@@ -637,44 +783,7 @@ setGlobalGlow(effectiveProfile?.taste_card_style_global || "glow-blue");
     return { normalized, derivedGlobal };
   }
   
-  async function handleSaveTasteCards() {
-    if (!user?.id) return;
   
-    try {
-      setTasteSave({ saving: true, success: false, error: "" });
-  
-      const { normalized, derivedGlobal } = normalizeCards(tasteCards, {
-        isPremium,
-        globalGlow,
-        effectiveProfile,
-      });
-  
-      const patch = { taste_cards: normalized };
-      if (derivedGlobal && derivedGlobal !== effectiveProfile?.taste_card_style_global) {
-        patch.taste_card_style_global = derivedGlobal;
-      }
-  
-      // Optimistic update in parent (updates UserProfile immediately)
-      onUpdated?.(patch);
-  
-      // Persist to Supabase
-      await saveProfilePatch(patch);
-      await refreshProfile?.();
-  
-      // Notify any live listeners
-      try {
-        window.dispatchEvent(
-          new CustomEvent("sf:tastecards:updated", { detail: { cards: normalized } })
-        );
-      } catch {}
-  
-      setTasteSave({ saving: false, success: true, error: "" });
-      setTimeout(() => setTasteSave((p) => ({ ...p, success: false })), 1800);
-    } catch (err) {
-      console.error("[taste_cards] save error:", err);
-      setTasteSave({ saving: false, success: false, error: err?.message || "Failed to save" });
-    }
-  }
   
   
   
@@ -691,120 +800,118 @@ function emitTasteCardsUpdated(cards) {
   } catch {}
 }
 const allSave = useSaveFeedback();
-// ✅ Replace your existing handleSaveAll with this version
+
 async function handleSaveAll() {
-  await allSave.withFeedback(async () => {
-    const patch = {};
+  if (savingRef.current) return;        // ✅ re-entry guard
+  savingRef.current = true;
 
-    // --- basics ---
-    if ((displayName || "") !== (profile?.display_name || "")) {
-      patch.display_name = (displayName || "").trim();
-    }
-    if ((slug || "") !== (profile?.slug || "")) {
-      patch.slug = (slug || "").trim();
-    }
-    if ((bio || "") !== (profile?.bio || "")) {
-      patch.bio = bio || "";
-    }
+  try {
+    await allSave.withFeedback(async () => {
+      const patch = {};
 
-    // --- gradient ---
-    if ((gradient || "") !== (profile?.banner_gradient || "")) {
-      patch.banner_gradient = gradient || "";
-    }
-
-    // --- theme preset ---
-    if ((themePreset || "classic") !== (profile?.theme_preset || "classic")) {
-      patch.theme_preset = themePreset || "classic";
-    }
-
-    // --- banner from input if user typed but didn’t click Apply ---
-    const candidate = (bannerInput || "").trim();
-    if (
-      candidate &&
-      /^https?:\/\//.test(candidate) &&
-      candidate !== (profile?.banner_url || profile?.banner_image || "")
-    ) {
-      patch.banner_url = candidate;
-    }
-
-    // --- global glow (one setting applied to all cards by default) ---
-    const currentGlobalGlow = effectiveProfile?.taste_card_style_global || null;
-    if (globalGlow && currentGlobalGlow !== globalGlow) {
-      patch.taste_card_style_global = globalGlow;
-    }
-
-    // --- commit profile patch if needed (defer to parent via onUpdated) ---
-    if (Object.keys(patch).length) {
-      await onUpdated?.(patch);
-    }
-
-    // --- taste cards (plan-aware save) ---
-    const limit = isPremium ? 8 : 4;
-    const nextTC = (Array.isArray(tasteCards) ? tasteCards : []).slice(0, limit);
-
-    const normalizedTC = nextTC.map((c) => {
-      const style = c?.style || {};
-      const hex = style.glow || style.outline || globalGlow || "#f59e0b";
-      return {
-        id: c.id,
-        source: isPremium ? (c.source || "preset") : "preset",
-        presetId: c.presetId,
-        question: c.question,
-        answer: c.answer,
-        style: {
-          mode: style.mode === "outline" ? "outline" : "glow",
-          glow: hex,
-          outline: hex,
-        },
-      };
-    });
-
-    const currentTC = Array.isArray(effectiveProfile?.taste_cards)
-      ? effectiveProfile.taste_cards.slice(0, limit)
-      : [];
-
-    if (JSON.stringify(normalizedTC) !== JSON.stringify(currentTC)) {
-      await saveProfilePatch({ taste_cards: normalizedTC });
-      // notify view immediately
-      emitTasteCardsUpdated(normalizedTC);
-      if (refreshProfile) await refreshProfile();
-    }
-
-    // --- moodboard if dirty (SAVE + NOTIFY VIEW TO RELOAD) ---
-    if (dirty) {
-      if (moodProfileId) {
-        await supabase
-          .from("profiles")
-          .update({ moodboard: items })
-          .eq("id", moodProfileId);
-      } else if (typeof localStorage !== "undefined") {
-        localStorage.setItem("sf_moodboard_preview", JSON.stringify(items));
+      // --- basics ---
+      if ((displayName || "") !== (profile?.display_name || "")) {
+        patch.display_name = (displayName || "").trim();
+      }
+      if ((slug || "") !== (profile?.slug || "")) {
+        patch.slug = (slug || "").trim();
+      }
+      if ((bio || "") !== (profile?.bio || "")) {
+        patch.bio = bio || "";
       }
 
-      originalRef.current = items;
+      // --- gradient ---
+      if ((gradient || "") !== (profile?.banner_gradient || "")) {
+        patch.banner_gradient = gradient || "";
+      }
 
-      try {
-        window.dispatchEvent(
-          new CustomEvent("sf:moodboard:updated", {
-            detail: { profileId: moodProfileId },
-          })
-        );
-      } catch {}
-    }
-  });
+      // --- theme (allow null to mean default) ---
+      const prevTheme = profile?.theme_preset ?? null;
+      const nextTheme = themePreset ?? null;
+      if (nextTheme !== prevTheme) {
+        patch.theme_preset = nextTheme;
+      }
 
-  // ✅ Tell parent to redirect to view mode
-  try {
-    window.dispatchEvent(
-      new CustomEvent("sf:profile:saved", {
-        detail: { profileId: moodProfileId || user?.id || null },
-      })
-    );
-  } catch {}
+      // --- banner (we removed free-text URL support already) ---
+      // (No bannerInput writes here)
 
-  // ✅ Close the panel UI
-  handlePanelClose();
+      // --- global glow ---
+      const currentGlobalGlow = effectiveProfile?.taste_card_style_global || null;
+      if (globalGlow && currentGlobalGlow !== globalGlow) {
+        patch.taste_card_style_global = globalGlow;
+      }
+
+      // --- write once (if needed) ---
+      if (Object.keys(patch).length) {
+        await onUpdated?.(patch);
+      }
+
+      // --- taste cards (plan-aware) ---
+      const limit = isPremium ? 8 : 4;
+      const nextTC = (Array.isArray(tasteCards) ? tasteCards : []).slice(0, limit);
+      const normalizedTC = nextTC.map((c) => {
+        const style = c?.style || {};
+        const hex = style.glow || style.outline || globalGlow || "#f59e0b";
+        return {
+          id: c.id,
+          source: isPremium ? (c.source || "preset") : "preset",
+          presetId: c.presetId,
+          question: c.question,
+          answer: c.answer,
+          style: {
+            mode: style.mode === "outline" ? "outline" : "glow",
+            glow: hex,
+            outline: hex,
+          },
+        };
+      });
+
+      const currentTC = Array.isArray(effectiveProfile?.taste_cards)
+        ? effectiveProfile.taste_cards.slice(0, limit)
+        : [];
+
+      if (JSON.stringify(normalizedTC) !== JSON.stringify(currentTC)) {
+        await saveProfilePatch({ taste_cards: normalizedTC });
+        try {
+          window.dispatchEvent(
+            new CustomEvent("sf:tastecards:updated", { detail: { cards: normalizedTC } })
+          );
+        } catch {}
+        await refreshProfile?.();
+      }
+
+      // --- moodboard only if dirty ---
+      if (dirty) {
+        if (moodProfileId) {
+          await supabase.from("profiles").update({ moodboard: items }).eq("id", moodProfileId);
+        } else if (typeof localStorage !== "undefined") {
+          localStorage.setItem("sf_moodboard_preview", JSON.stringify(items));
+        }
+        originalRef.current = items;
+
+        try {
+          window.dispatchEvent(
+            new CustomEvent("sf:moodboard:updated", { detail: { profileId: moodProfileId } })
+          );
+        } catch {}
+      }
+    });
+
+    // announce + close once
+    try {
+      window.dispatchEvent(
+        new CustomEvent("sf:profile:saved", {
+          detail: { profileId: moodProfileId || user?.id || null },
+        })
+      );
+    } catch {}
+
+    handlePanelClose();
+  } finally {
+    savingRef.current = false;
+  }
 }
+
 
 
 
@@ -893,15 +1000,7 @@ async function handleSaveAll() {
                   </div>
                 </div>
 
-                <div className="mt-3 flex justify-end">
-                  <button
-                    type="button"
-                    onClick={saveProfileBasics}
-                    className="rounded-md bg-yellow-500 px-3 py-1.5 text-sm font-medium text-black hover:bg-yellow-400"
-                  >
-                    Save Profile
-                  </button>
-                </div>
+                
               </section>
             )}
 
@@ -935,145 +1034,163 @@ async function handleSaveAll() {
               </section>
             )}
 
-            {/* BANNER & GRADIENT */}
-            {active === "banner" && (
-              <section>
-                <h3 className="mb-3 text-sm font-semibold text-zinc-300">Banner & Gradient</h3>
+           {/* BANNER & GRADIENT */}
+{active === "banner" && (
+  <section>
+    <h3 className="mb-3 text-sm font-semibold text-zinc-300">Banner & Gradient</h3>
 
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="space-y-3">
-                    <label className="block text-xs text-zinc-400">Banner image URL</label>
-                    <input
-                      className="w-full rounded-md border border-zinc-700 bg-black/40 p-2 text-sm text-white outline-none"
-                      placeholder="https://…"
-                      value={bannerInput}
-                      onChange={(e) => setBannerInput(e.target.value)}
-                    />
-                    <div className="flex justify-end">
-                      <button
-                        type="button"
-                        onClick={() => applyBanner(bannerInput)}
-                        className="rounded-md border border-zinc-700 px-3 py-1.5 text-sm text-white hover:bg-zinc-900"
-                      >
-                        Apply URL
-                      </button>
-                    </div>
+    <div className="grid gap-4 sm:grid-cols-2">
+      {/* Left column — TMDB Search only */}
+      <div className="space-y-3">
+        <label className="block text-xs text-zinc-400">Find a film still (TMDB)</label>
 
-                    <label className="block text-xs text-zinc-400">TMDB search</label>
-                    <div className="flex gap-2">
-                      <input
-                        className="flex-1 rounded-md border border-zinc-700 bg-black/40 p-2 text-sm text-white outline-none"
-                        placeholder="Search films…"
-                        value={tmdbQuery}
-                        onChange={(e) => setTmdbQuery(e.target.value)}
-                      />
-                      <button
-                        type="button"
-                        onClick={searchTMDB}
-                        className="rounded-md border border-zinc-700 px-3 py-1.5 text-sm text-white hover:bg-zinc-900"
-                        title="Search"
-                      >
-                        <Search className="h-4 w-4" />
-                      </button>
-                    </div>
+        <div className="flex gap-2">
+          <input
+            className="flex-1 rounded-md border border-zinc-700 bg-black/40 p-2 text-sm text-white outline-none"
+            placeholder="Search films…"
+            value={tmdbQuery}
+            onChange={(e) => setTmdbQuery(e.target.value)}
+          />
+          <button
+            type="button"
+            onClick={searchTMDB}
+            className="rounded-md border border-zinc-700 px-3 py-1.5 text-sm text-white hover:bg-zinc-900"
+            title="Search"
+          >
+            <Search className="h-4 w-4" />
+          </button>
+        </div>
 
-                    <div className="grid grid-cols-3 gap-2">
-                      {tmdbSearching ? (
-                        <div className="col-span-3 h-24 animate-pulse rounded-md bg-zinc-900" />
-                      ) : (
-                        tmdbResults.map((m) => {
-                          const poster = m?.backdropUrl || m?.posterUrl || "";
-                          if (!poster) return null;
-                          return (
-                            <button
-                              key={m.id}
-                              type="button"
-                              onClick={() => applyBanner(poster)}
-                              className="aspect-[2/3] overflow-hidden rounded-md border border-zinc-800 hover:ring-2 hover:ring-yellow-500"
-                              title="Use this image"
-                            >
-                              <img src={poster} alt="TMDB result" className="h-full w-full object-cover" loading="lazy" />
-                            </button>
-                          );
-                        })
-                      )}
-                    </div>
-                  </div>
+        <div className="grid grid-cols-3 gap-2">
+          {tmdbSearching ? (
+            <div className="col-span-3 h-24 animate-pulse rounded-md bg-zinc-900" />
+          ) : (
+            tmdbResults.map((m) => {
+              const poster = m?.backdropUrl || m?.posterUrl || "";
+              if (!poster) return null;
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => onUpdated?.({ banner_url: poster })}
+                  className="aspect-[2/3] overflow-hidden rounded-md border border-zinc-800 hover:ring-2 hover:ring-yellow-500 transition"
+                  title="Use this image"
+                >
+                  <img
+                    src={poster}
+                    alt="TMDB result"
+                    className="h-full w-full object-cover"
+                    loading="lazy"
+                  />
+                </button>
+              );
+            })
+          )}
+        </div>
+      </div>
 
-                  <div className="space-y-3">
-                    <label className="block text-xs text-zinc-400">Gradient overlay</label>
-                    <div className="grid grid-cols-2 gap-2">
-                      {gradientPresets.map((g, i) => (
-                        <button
-                          key={i}
-                          type="button"
-                          onClick={() => applyGradient(g)}
-                          className="h-16 rounded-md border border-zinc-700"
-                          style={{
-                            backgroundImage: g || undefined,
-                            backgroundColor: g ? undefined : "transparent",
-                          }}
-                          title={g || "No gradient"}
-                        />
-                      ))}
-                    </div>
-
-                    <label className="block text-xs text-zinc-400">Custom CSS gradient</label>
-                    <input
-                      className="w-full rounded-md border border-zinc-700 bg-black/40 p-2 text-sm text-white outline-none"
-                      placeholder="linear-gradient(...)"
-                      value={gradient}
-                      onChange={(e) => setGradient(e.target.value)}
-                    />
-                    <div className="flex justify-end">
-                      <button
-                        type="button"
-                        onClick={() => applyGradient(gradient)}
-                        className="rounded-md border border-zinc-700 px-3 py-1.5 text-sm text-white hover:bg-zinc-900"
-                      >
-                        Apply Gradient
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </section>
-            )}
-
+      {/* Right column — gradient presets only */}
+      <div className="space-y-3">
+        <label className="block text-xs text-zinc-400">Gradient overlay</label>
+        <div className="grid grid-cols-2 gap-2">
+          {gradientPresets.map((g, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => applyGradient(g)}
+              className="h-16 rounded-md border border-zinc-700"
+              style={{
+                backgroundImage: g || undefined,
+                backgroundColor: g ? undefined : "transparent",
+              }}
+              title={g || "No gradient"}
+            />
+          ))}
+        </div>
+        
+        <p className="text-xs text-zinc-500">
+          Only official gradients and TMDB images can be used.  
+          Premium users can unlock advanced overlays in Director’s Cut.
+        </p>
+      </div>
+    </div>
+  </section>
+)}
 
 {active === "theme" && (
   <section>
     <h3 className="mb-3 text-sm font-semibold text-zinc-300">Profile Theme</h3>
 
+    {/* top controls */}
+    <div className="mb-3 flex items-center justify-between">
+      <p className="text-xs text-zinc-500">
+        {isPremium
+          ? "Pick any theme below, or use the default look."
+          : "Director’s Cut required to unlock themes. You can still use the default look."}
+      </p>
+
+      {/* ✅ Always enabled: clears theme to NULL */}
+      <button
+        type="button"
+        onClick={() => {
+          setThemePreset(null);      // ✅ local only; Save button will persist
+        }}
+        
+        className={[
+          "rounded-md px-3 py-1.5 text-sm font-medium transition border",
+          themePreset == null
+            ? "border-yellow-500 text-yellow-400"
+            : "border-zinc-700 text-white hover:bg-zinc-900"
+        ].join(" ")}
+        title="Use default (no theme)"
+      >
+        Use default look
+      </button>
+    </div>
+
     <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
       {PROFILE_THEMES.map((t) => {
+        // ⛔️ LOCK all themes for free users (including “Classic”)
+        const locked = !isPremium;
         const isActive = themePreset === t.id;
+
         return (
           <button
             key={t.id}
             type="button"
+            disabled={locked}
             onClick={() => {
-              const selectedId = t.id;
-              setThemePreset(selectedId);
-              onUpdated?.({ theme_preset: selectedId }); // ← this is the line you asked about
+              if (locked) return;
+              setThemePreset(t.id);      // ✅ local only; Save button will persist
             }}
-            className={`rounded-md border px-3 py-2 text-left transition ${
+            
+            className={[
+              "rounded-md border px-3 py-2 text-left transition relative",
               isActive
                 ? "border-yellow-500 ring-1 ring-yellow-500/40"
-                : "border-zinc-800 hover:bg-zinc-900"
-            }`}
+                : "border-zinc-800 hover:bg-zinc-900",
+              locked ? "opacity-50 cursor-not-allowed" : ""
+            ].join(" ")}
+            title={locked ? "Director’s Cut required" : "Select theme"}
           >
+            {/* lock badge */}
+            {locked && (
+              <span className="absolute right-2 top-2 text-[10px] bg-white/10 px-2 py-[2px] rounded">
+                Locked
+              </span>
+            )}
+
             <div className="text-sm font-medium text-white">{t.name}</div>
-            {/* tiny swatch preview */}
             <div className="mt-2 h-6 w-full rounded" style={t.vars} />
-            <div className="mt-2 text-[11px] text-zinc-400">
-              {t.premium ? "Director’s Cut" : "Free"}
-            </div>
+            <div className="mt-2 text-[11px] text-zinc-400">Director’s Cut</div>
           </button>
         );
       })}
     </div>
   </section>
 )}
+
+
 
 
             {/* MOODBOARD (compact) */}
@@ -1112,55 +1229,10 @@ async function handleSaveAll() {
 
            {/* TASTE CARDS (single, de-duplicated) */}
 <div className="mt-6 rounded-2xl border border-zinc-800 bg-black/40 p-4">
-  <div className="mb-3 flex items-center justify-between">
-    <h3 className="text-lg font-semibold text-white">Taste Cards</h3>
-
-    <div className="flex items-center gap-3">
-      {tasteSave.success && (
-        <span className="text-sm font-medium text-emerald-400">
-          Edit saved!
-        </span>
-      )}
-
-      <button
-        type="button"
-        onClick={handleSaveTasteCards}
-        disabled={tasteSave.saving}
-        aria-busy={tasteSave.saving ? "true" : "false"}
-        className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-sm font-semibold transition ${
-          tasteSave.saving
-            ? "bg-yellow-500/70 text-black cursor-wait"
-            : "bg-yellow-500 text-black hover:bg-yellow-400"
-        }`}
-      >
-        {tasteSave.saving ? (
-          <svg
-            className="h-4 w-4 animate-spin"
-            viewBox="0 0 24 24"
-            fill="none"
-            aria-hidden="true"
-          >
-            <circle
-              className="opacity-25"
-              cx="12"
-              cy="12"
-              r="10"
-              stroke="currentColor"
-              strokeWidth="4"
-            />
-            <path
-              className="opacity-75"
-              d="M4 12a8 8 0 018-8"
-              stroke="currentColor"
-              strokeWidth="4"
-              strokeLinecap="round"
-            />
-          </svg>
-        ) : null}
-        {tasteSave.saving ? "Saving…" : "Save"}
-      </button>
-    </div>
-  </div>
+<div className="mb-3 flex items-center justify-between">
+  <h3 className="text-lg font-semibold text-white">Taste Cards</h3>
+  {/* Changes are staged; use the sticky Save at the bottom */}
+</div>
 
 
   {/* Custom Taste Cards Picker */}
@@ -1312,18 +1384,20 @@ async function handleSaveAll() {
                   Cancel
                 </button>
                 <button
-                  type="button"
-                  onClick={handleSaveAll}
-                  disabled={allSave.saving}
-                  aria-busy={allSave.saving ? "true" : "false"}
-                  className={`rounded-lg px-3 py-1.5 text-sm font-semibold ${
-                    allSave.saving
-                      ? "bg-yellow-500/70 text-black cursor-wait"
-                      : "bg-yellow-500 text-black hover:bg-yellow-400"
-                  }`}
-                >
-                  {allSave.saving ? "Saving…" : "Save changes"}
-                </button>
+  type="button"
+  onClick={handleSaveAll}
+  disabled={allSave.saving || savingRef.current}
+  aria-busy={(allSave.saving || savingRef.current) ? "true" : "false"}
+  className={[
+    "rounded-lg px-3 py-1.5 text-sm font-semibold",
+    (allSave.saving || savingRef.current)
+      ? "bg-yellow-500/70 text-black cursor-wait pointer-events-none"
+      : "bg-yellow-500 text-black hover:bg-yellow-400"
+  ].join(" ")}
+>
+  {(allSave.saving || savingRef.current) ? "Saving…" : "Save changes"}
+</button>
+                
               </div>
             </div>
           </div>

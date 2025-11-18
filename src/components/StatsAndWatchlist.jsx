@@ -5,6 +5,9 @@ import RolePill from "./RolePill.jsx";
 import useWatchlist from "../hooks/useWatchlist";
 
 export default function StatsAndWatchlist({ statsData, userId, movieRoute = "/movies" }) {
+    // premium check (passed implicitly via theme)
+    const isPremium = Boolean(statsData?.isPremium);
+
   const navigate = useNavigate();
 
   // ---- Stats inputs ----
@@ -44,7 +47,12 @@ export default function StatsAndWatchlist({ statsData, userId, movieRoute = "/mo
     <div className="px-6 pt-6">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* LEFT: Stats (centered) */}
-        <div className="rounded-2xl border border-zinc-800 bg-black/50 p-5">
+        <div className={
+  isPremium 
+    ? "themed-card themed-outline forge rounded-2xl p-5"
+    : "rounded-2xl border border-zinc-800 bg-black/50 p-5"
+}>
+
           <div className="flex flex-col items-center gap-2">
             {/* Clickable role pill (only if present) */}
             {role ? (
@@ -76,7 +84,12 @@ export default function StatsAndWatchlist({ statsData, userId, movieRoute = "/mo
         </div>
 
         {/* RIGHT: Watchlist */}
-        <div className="rounded-2xl border border-zinc-800 bg-black/50 p-5">
+        <div className={
+  isPremium 
+    ? "themed-card themed-outline forge rounded-2xl p-5"
+    : "rounded-2xl border border-zinc-800 bg-black/50 p-5"
+}>
+
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold text-white/90">Watchlist</h3>
             <span className="text-xs text-zinc-400">{watchlist.length}</span>

@@ -2,10 +2,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import supabase from "../supabaseClient";
 
+const CLAPS_TABLE = "club_take_claps"; // ← use the actual table you created
+
 export default function ClubFilmTakesSection({
   clubId,
   filmId,
   canSeeMembersOnly,
+  userId,           // ← pass viewer id in
   rotateMs = 8000,
 }) {
   const [takes, setTakes] = useState([]);
@@ -14,7 +17,6 @@ export default function ClubFilmTakesSection({
   const [index, setIndex] = useState(0);
   const timerRef = useRef(null);
 
-  // --- fetcher lives INSIDE the component so we can reference it from effects
   async function fetchTakes() {
     if (!clubId || !filmId) {
       setTakes([]);
@@ -23,21 +25,65 @@ export default function ClubFilmTakesSection({
     }
     setLoading(true);
     setErr(null);
+
     try {
-      const { data, error } = await supabase
+      // 1) Load takes (no embedding)
+      const { data: base, error: e1 } = await supabase
         .from("club_film_takes")
         .select(`
-          id, rating, take, created_at,
+          id, user_id, rating, take, created_at, is_archived,
           profiles:profiles!user_id ( display_name, avatar_url )
         `)
         .eq("club_id", clubId)
-        .eq("film_id", filmId)
+        .eq("film_id", Number(filmId))
         .eq("is_archived", false)
         .order("created_at", { ascending: true });
 
-      if (error) throw error;
-      setTakes(Array.isArray(data) ? data : []);
-      setIndex(0); // reset spotlight to first whenever list changes
+      if (e1) throw e1;
+
+      const rows = Array.isArray(base) ? base : [];
+      if (rows.length === 0) {
+        setTakes([]);
+        setIndex(0);
+        setLoading(false);
+        return;
+      }
+
+      const ids = rows.map((r) => r.id);
+
+      // 2) Counts per take
+      const { data: counts, error: e2 } = await supabase
+        .from(CLAPS_TABLE)
+        .select("take_id")
+        .in("take_id", ids);
+
+      if (e2) throw e2;
+
+      const byTake = (counts || []).reduce((acc, r) => {
+        acc[r.take_id] = (acc[r.take_id] || 0) + 1;
+        return acc;
+      }, {});
+
+      // 3) Has the viewer clapped any of these?
+      let mySet = new Set();
+      if (userId) {
+        const { data: mine } = await supabase
+          .from(CLAPS_TABLE)
+          .select("take_id")
+          .eq("user_id", userId)
+          .in("take_id", ids);
+        mySet = new Set((mine || []).map((m) => m.take_id));
+      }
+
+      // 4) Merge
+      const merged = rows.map((r) => ({
+        ...r,
+        clap_count: byTake[r.id] || 0,
+        clapped_by_me: mySet.has(r.id),
+      }));
+
+      setTakes(merged);
+      setIndex(0);
     } catch (e) {
       setErr(e?.message || "Failed to load film takes");
     } finally {
@@ -45,16 +91,17 @@ export default function ClubFilmTakesSection({
     }
   }
 
-  // initial + whenever inputs change
   useEffect(() => {
     fetchTakes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clubId, filmId]);
+  }, [clubId, filmId, userId]);
 
-  // refresh when someone posts a take (from ClubAddTake)
   useEffect(() => {
     function onUpdated(e) {
-      if (e?.detail?.clubId === clubId && e?.detail?.filmId === filmId) {
+      if (
+        e?.detail?.clubId === clubId &&
+        Number(e?.detail?.filmId) === Number(filmId)
+      ) {
         fetchTakes();
       }
     }
@@ -62,8 +109,8 @@ export default function ClubFilmTakesSection({
     return () => window.removeEventListener("club-film-takes-updated", onUpdated);
   }, [clubId, filmId]);
 
-  // auto-rotate spotlight
   const safeTakes = useMemo(() => takes.filter(Boolean), [takes]);
+
   useEffect(() => {
     clearInterval(timerRef.current);
     if (!safeTakes.length) return;
@@ -82,9 +129,32 @@ export default function ClubFilmTakesSection({
     );
   }
 
+  // detect if viewer already has a take for "Edit your take" link
+  const myTake = userId ? safeTakes.find((t) => t.user_id === userId) : null;
+
   return (
     <div className="mt-3">
-      <h3 className="text-sm font-semibold text-yellow-400 mb-2">Film Takes</h3>
+      <div className="mb-1 flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-yellow-400">Film Takes</h3>
+        {myTake ? (
+          <button
+            type="button"
+            onClick={() =>
+              window.dispatchEvent(
+                new CustomEvent("open-take-editor", {
+                  detail: {
+                    preset: myTake?.take ?? "",
+                    rating: myTake?.rating ?? null,
+                  },
+                })
+              )
+            }
+            className="text-xs text-yellow-400 hover:underline"
+          >
+            Edit your take
+          </button>
+        ) : null}
+      </div>
 
       {loading ? (
         <div className="rounded-2xl border border-white/10 bg-black/30 p-4 animate-pulse text-sm text-zinc-400">
@@ -99,13 +169,69 @@ export default function ClubFilmTakesSection({
           No takes yet — be the first to share your thoughts.
         </div>
       ) : (
-        <SpotlightCard take={safeTakes[index]} count={safeTakes.length} index={index} />
+        <SpotlightCard
+          take={safeTakes[index]}
+          count={safeTakes.length}
+          index={index}
+          onToggleClap={async (takeId, clapped) => {
+            if (!userId) {
+              alert("Sign in to clap.");
+              return;
+            }
+
+            // optimistic update
+            setTakes((prev) =>
+              prev.map((t) =>
+                t.id === takeId
+                  ? {
+                      ...t,
+                      clapped_by_me: !clapped,
+                      clap_count: (t.clap_count || 0) + (clapped ? -1 : 1),
+                    }
+                  : t
+              )
+            );
+
+            try {
+              if (clapped) {
+                // remove clap
+                const { error } = await supabase
+                  .from(CLAPS_TABLE)
+                  .delete()
+                  .eq("take_id", takeId)
+                  .eq("user_id", userId);
+                if (error) throw error;
+              } else {
+                // add clap (include club_id for RLS)
+                const { error } = await supabase
+                  .from(CLAPS_TABLE)
+                  .insert({ club_id: clubId, take_id: takeId, user_id: userId });
+                // ignore unique-violation from double clicks
+                if (error && error.code !== "23505") throw error;
+              }
+            } catch (e) {
+              // rollback UI on failure
+              setTakes((prev) =>
+                prev.map((t) =>
+                  t.id === takeId
+                    ? {
+                        ...t,
+                        clapped_by_me: clapped,
+                        clap_count: (t.clap_count || 0) + (clapped ? 1 : -1),
+                      }
+                    : t
+                )
+              );
+              alert(e?.message || "Could not update clap.");
+            }
+          }}
+        />
       )}
     </div>
   );
 }
 
-function SpotlightCard({ take, count, index }) {
+function SpotlightCard({ take, count, index, onToggleClap }) {
   const name = take?.profiles?.display_name || "Member";
   const avatar = take?.profiles?.avatar_url || "/avatar_placeholder.png";
   const rating =
@@ -113,8 +239,9 @@ function SpotlightCard({ take, count, index }) {
       ? take.rating.toFixed(1)
       : null;
 
+  // SuperFilm outlined container
   return (
-    <div className="group relative overflow-hidden rounded-2xl border border-white/10 bg-black/30 p-5 transition-colors">
+    <div className="group relative overflow-hidden rounded-2xl border-[4px] border-yellow-500/35 bg-black/30 p-5 shadow-[0_0_20px_rgba(234,179,8,0.1)]">
       <div className="flex items-start gap-3">
         <img
           src={avatar}
@@ -128,13 +255,31 @@ function SpotlightCard({ take, count, index }) {
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-3">
             <div className="truncate font-semibold text-white">{name}</div>
-            {rating && (
-              <div className="shrink-0 rounded-full border border-yellow-500/30 px-2 py-0.5 text-xs text-yellow-400">
-                ⭐ {rating}/10
-              </div>
-            )}
+            <div className="flex items-center gap-2">
+              {/* Clap pill (no emoji) */}
+              <button
+                type="button"
+                onClick={() => onToggleClap?.(take.id, !!take.clapped_by_me)}
+                className={[
+                  "h-7 px-2 rounded-full border text-xs font-semibold transition",
+                  take.clapped_by_me
+                    ? "border-yellow-400 text-yellow-300 bg-yellow-400/10"
+                    : "border-yellow-500/40 text-yellow-300 hover:bg-yellow-500/10",
+                ].join(" ")}
+                aria-pressed={take.clapped_by_me ? "true" : "false"}
+                aria-label={take.clapped_by_me ? "Remove clap" : "Clap this take"}
+              >
+                Clap • {take.clap_count ?? 0}
+              </button>
+
+              {rating && (
+                <div className="shrink-0 rounded-full border border-yellow-500/30 px-2 py-0.5 text-xs text-yellow-400">
+                  {rating}/10
+                </div>
+              )}
+            </div>
           </div>
-          <p className="mt-2 line-clamp-5 text-zinc-200">{take?.take || "—"}</p>
+          <p className="mt-2 text-zinc-200">{take?.take || "—"}</p>
         </div>
       </div>
 

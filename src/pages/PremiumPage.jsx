@@ -1,4 +1,3 @@
-/// src/pages/PremiumPage.jsx
 import { useEffect } from "react";
 import { Link, useSearchParams, useNavigate } from "react-router-dom";
 import { useUser } from "../context/UserContext";
@@ -9,11 +8,10 @@ export default function PremiumPage() {
   const [sp] = useSearchParams();
   const navigate = useNavigate();
 
-  // Refresh profile on mount (useful after returning from Stripe)
-  useEffect(() => { refreshProfile?.(); }, [refreshProfile]);
+  useEffect(() => {
+    refreshProfile?.();
+  }, [refreshProfile]);
 
-  // If the user just subscribed elsewhere and lands here while already premium,
-  // bounce them back to where they came from (if ?from= is present)
   useEffect(() => {
     if (!isPremium) return;
     const from = sp.get("from");
@@ -49,12 +47,7 @@ export default function PremiumPage() {
             >
               Subscribe £3 per month
             </button>
-            <Link
-              to="#subscribe"
-              className="rounded-xl px-4 py-2 bg-zinc-800/70 hover:bg-zinc-700/70 text-zinc-200 ring-1 ring-white/10 transition"
-            >
-              See what’s included
-            </Link>
+            {/* Removed the “See what’s included” button */}
           </div>
         </div>
       </section>
@@ -86,6 +79,9 @@ export default function PremiumPage() {
         title="Club and Community Features"
         subtitle="Tools that help your community flourish."
       >
+        <Feature tone="teal" title="Extra Clubs">
+          Free users can create one club — Director’s Cut members can create and manage up to five. Perfect for film societies, subclubs, and spin-offs.
+        </Feature>
         <Feature tone="indigo" title="Private Clubs">
           Presidents can switch clubs to invite only for a more intimate space.
         </Feature>
@@ -151,7 +147,7 @@ export default function PremiumPage() {
           <p className="mt-3 text-zinc-300 leading-relaxed">
             SuperFilm is built by an independent grassroots collective made up of a couple of film lovers with big dreams for this platform.
             Every subscription directly fuels new features, helps us grow, and keeps SuperFilm bold, imaginative, and independent.
-            We truly appreciate every time someone opens SuperFilm, invites a friend or recommends us — without you, we can’t transform SuperFilm into the platform we know it can be. Thank you.
+            We truly appreciate every time someone opens SuperFilm, invites a friend or recommends us. Thank you.
           </p>
         </div>
       </section>

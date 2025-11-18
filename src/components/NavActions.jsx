@@ -9,11 +9,18 @@ export default function NavActions({ className = "" }) {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const isAuthPage = useMemo(() => location.pathname.startsWith("/auth"), [location.pathname]);
+  const isAuthPage = useMemo(
+    () => location.pathname.startsWith("/auth"),
+    [location.pathname]
+  );
 
   if (user) {
     // Already signed in → show your existing account menu
-    return <div className={`flex items-center gap-2 ${className}`}><AccountMenu /></div>;
+    return (
+      <div className={`flex items-center gap-2 ${className}`}>
+        <AccountMenu />
+      </div>
+    );
   }
 
   // Signed out → show SuperFilm-styled buttons
@@ -23,7 +30,8 @@ export default function NavActions({ className = "" }) {
         <>
           <Link
             to="/auth?mode=signin"
-            className="px-3 h-9 inline-flex items-center rounded-full border border-white/10 bg-white/5 hover:bg-white/10 text-sm text-white transition"
+            className="no-underline px-3 h-9 inline-flex items-center rounded-full border border-white/10 bg-white/5 hover:bg-white/10 text-sm text-white transition"
+            style={{ textDecoration: "none" }}
           >
             Sign in
           </Link>
@@ -38,3 +46,4 @@ export default function NavActions({ className = "" }) {
     </div>
   );
 }
+

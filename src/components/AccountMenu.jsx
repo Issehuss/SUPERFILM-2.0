@@ -13,12 +13,13 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useUser } from "../context/UserContext";
+import PartnerBadge from "./PartnerBadge.jsx";
 import useEntitlements from "../hooks/useEntitlements";
 import DirectorsCutBadge from "./DirectorsCutBadge";
 
 export default function AccountMenu({ className = "" }) {
-  // Pull isPremium directly from UserContext for a single source of truth
-  const { user, profile, avatar, logout, isPremium } = useUser();
+  // get auth + profile from context
+  const { user, profile, avatar, logout, isPremium, isPartner } = useUser();
   const { presidentsClubs } = useEntitlements();
 
   const navigate = useNavigate();
@@ -44,9 +45,17 @@ export default function AccountMenu({ className = "" }) {
         (activeClubId && String(c.id) === String(activeClubId))
     ) || presidentsClubs[0] || null;
 
+  // close on outside / esc
   useEffect(() => {
     function onDocClick(e) {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+      if (
+        ref.current &&
+        !ref.current.contains(e.target) &&
+        btnRef.current &&
+        !btnRef.current.contains(e.target)
+      ) {
+        setOpen(false);
+      }
     }
     function onKey(e) {
       if (e.key === "Escape") setOpen(false);
@@ -59,9 +68,10 @@ export default function AccountMenu({ className = "" }) {
     };
   }, []);
 
+  // if no user, don't show menu
   if (!user) return null;
 
-  /* ------- Actions ------- */
+  /* ------- actions ------- */
   const goProfile = () => {
     setOpen(false);
     const slug = profile?.slug || user?.id;
@@ -94,7 +104,7 @@ export default function AccountMenu({ className = "" }) {
 
   const goAnalytics = () => {
     const enabled = isPremium && !!presidentClub;
-    if (!enabled) return; // keep unclickable for non-eligible users
+    if (!enabled) return;
     setOpen(false);
     const path = presidentClub.slug
       ? `/clubs/${presidentClub.slug}/analytics`
@@ -107,13 +117,15 @@ export default function AccountMenu({ className = "" }) {
     navigate(isPremium ? "/settings/premium" : "/premium");
   };
 
+  // ✅ REAL sign-out handler
   const handleSignOut = async () => {
-    setOpen(false);
     try {
       await logout();
-      navigate("/");
-    } catch (e) {
-      console.error(e);
+    } catch (err) {
+      console.error("Sign out failed:", err);
+    } finally {
+      setOpen(false);
+      window.location.href = "/";
     }
   };
 
@@ -145,15 +157,16 @@ export default function AccountMenu({ className = "" }) {
           className="absolute right-0 mt-2 w-64 rounded-2xl bg-black/90 backdrop-blur ring-1 ring-white/10 shadow-2xl origin-top-right"
           style={{ transformOrigin: "top right" }}
         >
-          {/* header with username + Director’s Cut badge */}
+          {/* header */}
           <div className="px-3 py-2">
-            <div className="text-sm font-semibold truncate flex items-center">
+            <div className="text-sm font-semibold truncate flex items-center gap-2">
               <span className="truncate">{displayName}</span>
-              {isPremium && <DirectorsCutBadge className="ml-2" size="xs" />}
+              {isPremium && <DirectorsCutBadge className="ml-0" size="xs" />}
             </div>
             <div className="text-xs text-zinc-400 truncate">
               {profile?.slug ? `@${profile.slug}` : user?.email}
             </div>
+            {isPartner && <PartnerBadge className="mt-1" />}
           </div>
 
           <div className="h-px bg-white/10" />
@@ -169,7 +182,7 @@ export default function AccountMenu({ className = "" }) {
             <span>My Profile</span>
           </button>
 
-          {/* --- Premium entry (Step 5.3) --- */}
+          {/* Premium entry */}
           <button
             type="button"
             onClick={goPremiumManage}
@@ -195,9 +208,9 @@ export default function AccountMenu({ className = "" }) {
             )}
           </button>
 
-          {/* Premium president tools */}
           <div className="h-px bg-white/10 my-1" />
 
+          {/* President tools */}
           <button
             type="button"
             onClick={goClubSettings}
@@ -232,7 +245,7 @@ export default function AccountMenu({ className = "" }) {
             <span>Manage Invites</span>
           </button>
 
-          {/* Analytics (Director’s Cut) — disabled for non-premium or non-president */}
+          {/* Analytics */}
           <button
             type="button"
             onClick={goAnalytics}
@@ -256,6 +269,7 @@ export default function AccountMenu({ className = "" }) {
 
           <div className="h-px bg-white/10 my-1" />
 
+          {/* ✅ Sign out */}
           <button
             type="button"
             onClick={handleSignOut}

@@ -46,10 +46,14 @@ export default function TakesPanel({
 
   return (
     <ReviewCards
-      open={!!open}
-      onClose={onClose}
-      clubId={clubId}
-      filmId={normalizedFilmId} // UUID or TMDB number — ReviewCards chooses film_id vs movie_id
-    />
+    open={!!open}
+    onClose={onClose}
+    clubId={clubId}
+    filmId={club.nextEvent.movieId}  // numeric TMDB id
+    movieTitle={club.nextEvent.title}
+    posterPath={club.nextEvent.poster}
+  />
+  
+
   );
 }

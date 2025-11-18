@@ -14,25 +14,22 @@ const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 function isTempMessage(m) {
   const id = String(m?.id || "");
-  return id.startsWith("temp_") || !UUID_RX.test(id) || m._optimistic === true;
+  return id.startsWith("temp_") || !UUID_RX.test(id) || m?._optimistic === true;
 }
 
 export default function ClubChat() {
   // Route params (support legacy id and new slug forms)
-  const { clubId: legacyClubId } = useParams();
-  const { clubParam } = useParams();
+  const { clubId: legacyClubId, clubParam } = useParams();
   const navigate = useNavigate();
   const { user } = useUser();
 
   // Resolved club data
-  const [clubId, setClubId] = useState(null);      // raw param if UUID
-  const [clubRow, setClubRow] = useState(null);    // row from clubs (id, slug, name)
-  const clubKey = (clubId || clubParam || "").trim();
+  const [clubRow, setClubRow] = useState(null);
 
   // Chat state
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(true);
+  
   const [sending, setSending] = useState(false);
   const [online, setOnline] = useState(0);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -46,149 +43,130 @@ export default function ClubChat() {
   const [showPollComposer, setShowPollComposer] = useState(false);
 
   // Reporting UI state (banner/spinner)
-  const [reporting, setReporting] = useState(false);
-  const [reportError, setReportError] = useState(null);
+  const [reporting] = useState(false);
+  const [reportError] = useState(null);
 
   // Refs
   const listRef = useRef(null);
   const composerRef = useRef(null);
   const presenceRef = useRef(null);
 
-  
-
   const me = user?.id || null;
-
-  // put this inside the ClubChat component (near other helpers/state)
-const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function isTempMessage(m) {
-  const id = String(m?.id || "");
-  return id.startsWith("temp_") || !UUID_RX.test(id) || m._optimistic === true;
-}
+  // NEW loading flags
+const [resolvingClub, setResolvingClub] = useState(true); // slug/id → club row
+const [loadingMsgs, setLoadingMsgs] = useState(true);     // message fetch
 
 
-  /** Resolve initial route param into a UUID (handles slug or id) */
-  useEffect(() => {
-    const routeId = (clubParam ?? legacyClubId) || "";
-    if (!routeId) return;
+useEffect(() => {
+  let cancelled = false;
+  const routeKey = ((clubParam ?? legacyClubId) || "").trim();
 
-    const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    if (UUID_RX.test(routeId)) {
-      setClubId(routeId);
-      return;
+  if (!routeKey) {
+    setResolvingClub(false);
+    return;
+  }
+
+  setResolvingClub(true);
+  (async () => {
+    const isUuid = UUID_RX.test(routeKey);
+    const { data, error } = await supabase
+      .from("clubs")
+      .select("id, slug, name")
+      .eq(isUuid ? "id" : "slug", routeKey)
+      .maybeSingle();
+
+    if (cancelled) return;
+
+    if (data?.id) {
+      setClubRow(data);
+      // Normalize URL if user used /clubs/:id/chat instead of /clubs/:slug/chat
+      if (!isUuid && clubParam && data.slug && clubParam !== data.slug) {
+        navigate(`/clubs/${data.slug}/chat`, { replace: true });
+      }
+    } else {
+      console.warn("[Chat] resolve club failed:", error?.message || error);
     }
 
-    let cancelled = false;
-    (async () => {
-      const { data, error } = await supabase
-        .from("clubs")
-        .select("id, slug, name")
-        .eq("slug", routeId)
-        .maybeSingle();
-      if (cancelled) return;
-      if (error) {
-        console.error("Failed to load club by slug", error);
-        return;
-      }
-      if (data?.id) setClubId(data.id);
-    })();
+    setResolvingClub(false);
+  })();
 
-    return () => {
-      cancelled = true;
-    };
-  }, [clubParam, legacyClubId]);
+  return () => { cancelled = true; };
+}, [clubParam, legacyClubId, navigate]);
+ 
+
+
+ 
 
   /** Fetch normalized club row by id or slug and normalize URL */
+ 
+
+  const resolvedClubId = clubRow?.id || null;
+
+
   useEffect(() => {
+    if (!resolvedClubId) {
+      setLoadingMsgs(false); // nothing to load yet
+      return;
+    }
+  
     let cancelled = false;
+    setLoadingMsgs(true);
+  
     (async () => {
-      if (!clubKey) return;
-      setLoading(true);
-
-      const isUuid = /^[0-9a-f-]{10,}$/i.test(clubKey);
-      const { data, error } = await (isUuid
-        ? supabase.from("clubs").select("id, slug, name").eq("id", clubKey).maybeSingle()
-        : supabase.from("clubs").select("id, slug, name").eq("slug", clubKey).maybeSingle());
-
-      if (cancelled) return;
-
-      if (error) console.error("Failed to resolve club:", error);
-      if (data) {
-        setClubRow(data);
-        // If user hit /clubs/:id/chat instead of /clubs/:slug/chat, normalize:
-        if (clubParam && data.slug && clubParam !== data.slug) {
-          navigate(`/clubs/${data.slug}/chat`, { replace: true });
-        }
-      }
-      setLoading(false);
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clubKey]);
-
-  const resolvedClubId = clubRow?.id || clubId || null;
-
-  /** Load messages (base) + hydrate profiles; subscribe to realtime insert/update */
-  useEffect(() => {
-    if (!resolvedClubId) return;
-    let cancelled = false;
-
-    (async () => {
-      setLoading(true);
-
-      // 1) Base fetch (no joins): avoids RLS surprises
+      // 1) Base fetch
       const { data: rows, error: err1 } = await supabase
         .from("club_messages")
         .select("id, club_id, user_id, body, image_url, is_deleted, created_at, type, metadata")
         .eq("club_id", resolvedClubId)
         .order("created_at", { ascending: true })
         .limit(PAGE_SIZE);
-
+  
       if (cancelled) return;
-
+  
       if (err1) {
         console.error("[Chat] fetch messages error:", err1);
         setMessages([]);
-        setLoading(false);
+        setLoadingMsgs(false);
         return;
       }
-
-      // 2) Hydrate sender profiles (best-effort)
+  
+      // 2) Hydrate sender profiles (best effort)
       const uniqueUserIds = [...new Set((rows || []).map(r => r.user_id).filter(Boolean))];
       let profileMap = {};
       if (uniqueUserIds.length) {
-        const { data: profs, error: err2 } = await supabase
+        const { data: profs } = await supabase
           .from("profiles")
           .select("id, avatar_url, display_name, username")
           .in("id", uniqueUserIds);
-        if (!err2 && profs) {
-          profileMap = Object.fromEntries(profs.map(p => [p.id, p]));
-        } else if (err2) {
-          console.warn("[Chat] profiles fetch warning (check RLS):", err2);
-        }
+        if (profs) profileMap = Object.fromEntries(profs.map(p => [p.id, p]));
       }
-
+  
       const hydrated = (rows || []).map(r => ({ ...r, profiles: profileMap[r.user_id] || null }));
       if (!cancelled) {
         setMessages(hydrated);
         requestAnimationFrame(scrollToBottom);
-        setLoading(false);
+        setLoadingMsgs(false);
       }
+  
+      // 3) Mark read (non-blocking)
+      // 3) Mark read (non-blocking but awaited safely)
+if (!cancelled && me) {
+  try {
+    await supabase
+      .from("club_message_reads")
+      .upsert({
+        club_id: resolvedClubId,
+        user_id: me,
+        last_read_at: new Date().toISOString(),
+      });
+  } catch (_) {
+    /* ignore */
+  }
+}
 
-      // 3) Mark read
-      if (!cancelled && me) {
-        await supabase.from("club_message_reads").upsert({
-          club_id: resolvedClubId,
-          user_id: me,
-          last_read_at: new Date().toISOString(),
-        });
-      }
     })();
-
-    // 4) Realtime subscribe (INSERT + UPDATE)
+  
+    // 4) Realtime subscribe after initial load
     const channel = supabase
       .channel(`club-chat:${resolvedClubId}`)
       .on(
@@ -197,7 +175,6 @@ function isTempMessage(m) {
         async (payload) => {
           if (cancelled) return;
           const msg = payload.new;
-          // hydrate profile best-effort
           const { data: profile } = await supabase
             .from("profiles")
             .select("id, avatar_url, display_name, slug")
@@ -217,13 +194,13 @@ function isTempMessage(m) {
         }
       )
       .subscribe();
-
+  
     return () => {
       cancelled = true;
       supabase.removeChannel(channel);
     };
   }, [resolvedClubId, me]);
-
+  
   /** Presence (separate from chat changes) */
   useEffect(() => {
     if (!resolvedClubId) return;
@@ -261,7 +238,7 @@ function isTempMessage(m) {
         .maybeSingle();
       if (!cancelled) {
         const role = data?.role || "";
-        setIsAdmin(["president", "admin", "moderator"].includes(role));
+        setIsAdmin(["president", "admin", "moderator", "vice_president"].includes(role));
       }
     })();
     return () => {
@@ -293,7 +270,6 @@ function isTempMessage(m) {
       await new Promise(r => setTimeout(r, 300)); // brief retry
     }
   }
-  
 
   async function handleReportMessage({ message, clubId, reason = "abuse" }) {
     if (!message?.id || isTempMessage(message)) {
@@ -304,30 +280,20 @@ function isTempMessage(m) {
       toast.error("Club isn’t ready yet. Try again.");
       return;
     }
-  
-    // Show a success toast immediately (optimistic UX)
     const tid = toast.success("Report sent. We’ll review it.");
-  
-    // Fire the network request without blocking the UI
-    const started = Date.now();
-    const MIN_SPINNER_MS = 120;
-  
-    supabase.functions.invoke("notify-message2", {
-      body: { messageId: message.id, clubId, reason },
-    })
-    .then(({ error, data }) => {
-      // Keep toast; if duplicate or soft warnings, you can tweak here
-      if (error) {
+    supabase.functions.invoke("notify-message2", { body: { messageId: message.id, clubId, reason } })
+      .then(({ error }) => {
+        if (error) {
+          toast.dismiss(tid);
+          toast.error("Couldn’t send report.");
+          console.error("report error:", error);
+        }
+      })
+      .catch((e) => {
         toast.dismiss(tid);
         toast.error("Couldn’t send report.");
-        console.error("report error:", error);
-      }
-    })
-    .catch((e) => {
-      toast.dismiss(tid);
-      toast.error("Couldn’t send report.");
-      console.error("report exception:", e);
-    });
+        console.error("report exception:", e);
+      });
   }
 
   /** Input helpers */
@@ -351,104 +317,103 @@ function isTempMessage(m) {
     setImageFile(null);
   };
 
- // --------- sending (text + optional image)
-const send = async () => {
-  if (!resolvedClubId || !me || sending) return;
+  // --------- sending (text + optional image)
+  const send = async () => {
+    if (!resolvedClubId || !me || sending) return;
 
-  const body = (input || "").trim();
-  const hasImage = !!imageFile;
-  if (!body && !hasImage) return;
+    const body = (input || "").trim();
+    const hasImage = !!imageFile;
+    if (!body && !hasImage) return;
 
-  setSending(true);
+    setSending(true);
 
-  // Client-side banned-words warning (server trigger still blocks)
-  try {
-    if (body && (await messageViolatesFilter(body))) {
-      alert("Your message appears to include banned language. Please edit it.");
-      setSending(false);
-      return;
-    }
-  } catch {
-    // ignore client check failures; server enforces anyway
-  }
-
-  // Clear input now (snappier UI)
-  setInput("");
-
-  // ✅ Optimistic UI — mark as _optimistic so we can tell it's not persisted yet
-  const tempId = `temp_${Date.now()}`;
-  const optimistic = {
-    id: tempId,
-    _optimistic: true,                 // ← add this flag
-    club_id: resolvedClubId,
-    user_id: me,
-    body: body || null,
-    image_url: imageObjectUrl || null, // preview immediately
-    created_at: new Date().toISOString(),
-    profiles: {
-      id: me,
-      avatar_url: user?.profileAvatarUrl || null,
-      display_name: user?.name || null,
-      username: user?.username || null,
-    },
-  };
-  setMessages((prev) => [...prev, optimistic]);
-  scrollToBottom();
-
-  let uploadedImageUrl = null;
-  try {
-    // Upload image first (if any)
-    if (hasImage) {
-      uploadedImageUrl = await uploadChatImage(imageFile, resolvedClubId, me);
+    // Client-side banned-words warning (server trigger still blocks)
+    try {
+      if (body && (await messageViolatesFilter(body))) {
+        alert("Your message appears to include banned language. Please edit it.");
+        setSending(false);
+        return;
+      }
+    } catch {
+      // ignore client check failures; server enforces anyway
     }
 
-    // Insert the real row
-    const { data, error } = await supabase
-      .from("club_messages")
-      .insert([
-        {
-          club_id: resolvedClubId,
-          user_id: me,
-          body: body || null,
-          image_url: uploadedImageUrl,
-        },
-      ])
-      .select("id, created_at")
-      .single();
+    // Clear input now (snappier UI)
+    setInput("");
 
-    if (error) throw error;
-
-    // ✅ Replace optimistic with real id/timestamp and clear the flag
-    setMessages((prev) =>
-      prev.map((m) =>
-        m.id === tempId
-          ? { ...m, id: data.id, created_at: data.created_at, _optimistic: false }
-          : m
-      )
-    );
-
-    // Mark as read
-    await supabase.from("club_message_reads").upsert({
+    // Optimistic UI
+    const tempId = `temp_${Date.now()}`;
+    const optimistic = {
+      id: tempId,
+      _optimistic: true,
       club_id: resolvedClubId,
       user_id: me,
-      last_read_at: new Date().toISOString(),
-    });
-  } catch (err) {
-    console.error("Send failed:", err?.message || err);
-    // rollback optimistic
-    setMessages((prev) => prev.filter((m) => m.id !== tempId));
-    // restore input so user can edit/retry
-    setInput(body);
-    alert(err?.message || "Message failed to send.");
-  } finally {
-    // Cleanup image selection
-    if (imageObjectUrl) URL.revokeObjectURL(imageObjectUrl);
-    setImageObjectUrl("");
-    setImageFile(null);
-    setSending(false);
-  }
-};
+      body: body || null,
+      image_url: imageObjectUrl || null,
+      created_at: new Date().toISOString(),
+      profiles: {
+        id: me,
+        avatar_url: user?.profileAvatarUrl || null,
+        display_name: user?.name || null,
+        username: user?.username || null,
+      },
+    };
+    setMessages((prev) => [...prev, optimistic]);
+    scrollToBottom();
 
+    let uploadedImageUrl = null;
+    try {
+      // Upload image first (if any)
+      if (hasImage) {
+        uploadedImageUrl = await uploadChatImage(imageFile, resolvedClubId, me);
+      }
+
+      // Insert the real row
+      const { data, error } = await supabase
+        .from("club_messages")
+        .insert([
+          {
+            club_id: resolvedClubId,
+            user_id: me,
+            body: body || null,
+            image_url: uploadedImageUrl,
+          },
+        ])
+        .select("id, created_at")
+        .single();
+
+      if (error) throw error;
+
+      // Replace optimistic with real id/timestamp and clear the flag
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === tempId
+            ? { ...m, id: data.id, created_at: data.created_at, _optimistic: false }
+            : m
+        )
+      );
+
+      // Mark as read
+      await supabase.from("club_message_reads").upsert({
+        club_id: resolvedClubId,
+        user_id: me,
+        last_read_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.error("Send failed:", err?.message || err);
+      // rollback optimistic
+      setMessages((prev) => prev.filter((m) => m.id !== tempId));
+      // restore input so user can edit/retry
+      setInput(body);
+      alert(err?.message || "Message failed to send.");
+    } finally {
+      // Cleanup image selection
+      if (imageObjectUrl) URL.revokeObjectURL(imageObjectUrl);
+      setImageObjectUrl("");
+      setImageFile(null);
+      setSending(false);
+    }
+  };
 
   /** Scroll helper */
   const scrollToBottom = () => {
@@ -460,39 +425,65 @@ const send = async () => {
     } catch {}
   };
 
-  /** Delete message (soft) */
-  async function handleDeleteMessage(msg) {
-    if (!msg?.id) return;
+  /** DELETE (hard) — optimistic UI + RPC + optional storage cleanup */
+ // inside ClubChat.jsx
+async function handleDeleteMessage(arg) {
+  const msg = typeof arg === "string" ? messages.find(m => m.id === arg) : arg;
+  const id = typeof arg === "string" ? arg : arg?.id;
+  if (!id) return;
 
-    // Optimistic UI
-    const previous = msg;
-    setMessages((prev) => prev.map((m) => (m.id === msg.id ? { ...m, is_deleted: true, body: null, image_url: null } : m)));
+  // Optimistic: remove from UI
+  setMessages((prev) => prev.filter((m) => m.id !== id));
 
-    try {
-      if (msg.image_url) {
-        const path = extractStoragePathFromPublicUrl(msg.image_url);
-        if (path) await supabase.storage.from(CHAT_BUCKET).remove([path]);
+  try {
+    // Try to remove image from storage (best effort)
+    if (msg?.image_url) {
+      const path = extractStoragePathFromPublicUrl(msg.image_url);
+      if (path) {
+        await supabase.storage.from(CHAT_BUCKET).remove([path]).catch(() => {});
       }
-
-      const { error } = await supabase
-        .from("club_messages")
-        .update({
-          is_deleted: true,
-          deleted_at: new Date().toISOString(),
-          deleted_by: me || null,
-          body: null,
-          image_url: null,
-        })
-        .eq("id", msg.id);
-
-      if (error) throw error;
-    } catch (e) {
-      console.error(e);
-      // rollback
-      setMessages((prev) => prev.map((m) => (m.id === msg.id ? { ...m, ...previous } : m)));
-      alert("Couldn’t delete message.");
     }
+
+    // Hard delete via RPC
+    const { data, error } = await supabase.rpc("delete_club_message_hard", {
+      p_message: id,
+    });
+
+    if (error || !data?.ok) {
+      throw new Error(error?.message || data?.code || "RPC failed");
+    }
+  } catch (e) {
+    // ✅ Soft-recover: if it’s already gone on the server, keep UI silent
+    try {
+      const { count, error: headErr } = await supabase
+        .from("club_messages")
+        .select("id", { count: "exact", head: true })
+        .eq("id", id);
+
+      if (!headErr && (count === 0 || count == null)) {
+        // Already deleted server-side; do nothing
+        return;
+      }
+    } catch {
+      // fall through to alert below
+    }
+
+    // Couldn’t delete; refetch the page and notify
+    try {
+      const { data: rows } = await supabase
+        .from("club_messages")
+        .select("id, club_id, user_id, body, image_url, is_deleted, created_at, type, metadata")
+        .eq("club_id", clubRow?.id)
+        .order("created_at", { ascending: true })
+        .limit(50);
+
+      const filtered = (rows || []).filter(r => r.is_deleted !== true);
+      setMessages(filtered);
+    } catch {}
+    alert(e?.message || "Couldn't delete message.");
   }
+}
+
 
   return (
     <div className="min-h-[calc(100vh-88px)] bg-gradient-to-b from-black via-zinc-950 to-black">
@@ -519,14 +510,18 @@ const send = async () => {
 
       {/* Messages list */}
       <div ref={listRef} className="mx-auto max-w-3xl px-4 pb-[168px] pt-4">
-        {loading && <div className="text-center text-zinc-400 py-12">Loading…</div>}
+      {(resolvingClub || loadingMsgs) && (
+  <div className="text-center text-zinc-400 py-12">Loading…</div>
+)}
 
-        {!loading && messages.length === 0 && (
-          <div className="text-center text-zinc-400 py-12">Be the first to say hello 👋</div>
-        )}
 
-        {!loading &&
-          grouped.map((m) =>
+{!resolvingClub && !loadingMsgs && messages.length === 0 && (
+  <div className="text-center text-zinc-400 py-12">Be the first to say hello 👋</div>
+)}
+
+
+{!resolvingClub && !loadingMsgs &&
+  grouped.map((m) =>
             m._type === "day" ? (
               <div key={m.id} className="sticky top-2 z-0 my-4 flex items-center justify-center">
                 <span className="px-3 py-1 rounded-full text-xs bg-zinc-900 text-zinc-400 border border-zinc-800">
@@ -534,19 +529,15 @@ const send = async () => {
                 </span>
               </div>
             ) : (
-             // When rendering MessageItem in ClubChat.jsx
-<MessageItem
-  key={m.id}
-  msg={m}
-  isMe={m.user_id === me}
-  isAdmin={isAdmin}
-  onDelete={handleDeleteMessage}
-  onReport={(reason) => handleReportMessage({ message: m, clubId: m.club_id, reason })}
-  reportDisabled={isTempMessage(m)}   // <- new prop
-/>
-
-            
-
+              <MessageItem
+                key={m.id}
+                msg={m}
+                isMe={m.user_id === me}
+                isAdmin={isAdmin}
+                onDelete={() => handleDeleteMessage(m)}   // pass the whole message
+                onReport={(reason) => handleReportMessage({ message: m, clubId: m.club_id, reason })}
+                reportDisabled={isTempMessage(m)}
+              />
             )
           )}
       </div>
@@ -691,8 +682,6 @@ const send = async () => {
 
             <div className="text-[11px] text-zinc-500 mt-1 ml-1">
               Press <b>Enter</b> to send • <b>Shift+Enter</b> for a new line
-              {reporting && <span className="ml-3">• Sending report…</span>}
-              {reportError && <span className="ml-2 text-red-400">{reportError}</span>}
             </div>
           </div>
         </div>
@@ -743,5 +732,3 @@ function extractStoragePathFromPublicUrl(publicUrl) {
   const firstSlash = after.indexOf("/");
   return firstSlash === -1 ? null : after.slice(firstSlash + 1);
 }
-
-

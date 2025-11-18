@@ -46,7 +46,8 @@ export default function MembershipRequestsPanel({ clubId }) {
       {rows.map((r) => (
         <li key={r.id} className="flex items-center gap-3">
           <img
-            src={r.profiles?.avatar_url || "/avatar_placeholder.png"}
+            src={r.profiles?.avatar_url || "/default-avatar.svg"}
+            onError={(e) => { e.currentTarget.src = "/default-avatar.svg"; }}            
             alt=""
             className="h-8 w-8 rounded-full"
           />

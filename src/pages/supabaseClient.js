@@ -27,6 +27,7 @@ if (env.SUPABASE_FUNCTIONS_URL) {
   options.functions = { url: env.SUPABASE_FUNCTIONS_URL };
 }
 
+
 const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, options);
 
 export default supabase;

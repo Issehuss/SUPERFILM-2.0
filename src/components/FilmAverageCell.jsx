@@ -1,11 +1,29 @@
 // src/components/FilmAverageCell.jsx
 import { useState, useMemo } from "react";
-import ReviewCards from "./ReviewCards"; // ⬅️ switch from TakesPanel to ReviewCards
+import ReviewCards from "./ReviewCards";
 
-export default function FilmAverageCell({ clubId, filmId, average }) {
+/**
+ * FilmAverageCell
+ * Displays the club’s average rating (passed from parent),
+ * and opens the ReviewCards modal when clicked.
+ *
+ * Props:
+ * - average: number | null
+ * - clubId: uuid
+ * - filmId: string | number (TMDB id)
+ * - movieTitle: string
+ * - posterPath: string
+ */
+export default function FilmAverageCell({
+  average,
+  clubId,
+  filmId,
+  movieTitle,
+  posterPath,
+}) {
   const [open, setOpen] = useState(false);
 
-  // pretty number or em dash
+  // Format average nicely
   const avgText = useMemo(() => {
     if (average == null) return "—";
     const n = Number(average);
@@ -14,20 +32,24 @@ export default function FilmAverageCell({ clubId, filmId, average }) {
 
   return (
     <>
+      {/* Average label */}
       <button
         type="button"
         onClick={() => setOpen(true)}
         className="underline decoration-zinc-600 underline-offset-4 text-white hover:decoration-zinc-300"
-        title="Open takes & ratings"
+        title="Open reviews"
       >
         {avgText}
       </button>
 
+      {/* Modal */}
       <ReviewCards
         open={open}
         onClose={() => setOpen(false)}
-        clubId={clubId}   // UUID
-        filmId={filmId}   // UUID *or* TMDB number; ReviewCards auto-detects
+        clubId={clubId}
+        filmId={filmId}
+        movieTitle={movieTitle}
+        posterPath={posterPath}
       />
     </>
   );

@@ -12,262 +12,225 @@ import supabase from "../supabaseClient.js";
 const UserContext = createContext(null);
 export const useUser = () => useContext(UserContext);
 
-/**
- * This provider:
- * - Loads auth user and profile on bootstrap and auth changes
- * - Ensures a profiles row exists (inserts a skeleton if missing)
- * - Subscribes to realtime updates for the current user's profile
- * - Exposes saveProfilePatch with optimistic UI + server reconciliation
- */
 function UserProvider({ children }) {
-  const [user, setUser] = useState(null);          // Supabase auth user
-  const [profile, setProfile] = useState(null);    // Row from public.profiles
-  const [avatar, setAvatar] = useState(null);
+  const [user, setUser] = useState(null);        // auth user (null if signed out)
+  const [profile, setProfile] = useState(null);  // row from public.profiles
+  const [avatar, setAvatar] = useState(null);    // convenience
   const [loading, setLoading] = useState(true);
 
-  /* ───────────────────────────── Derived flags ───────────────────────────── */
-  const isPremium =
-    profile?.plan === "directors_cut" || profile?.is_premium === true;
-
-  /* ─────────────────────── Ensure profile row exists ─────────────────────── */
-  const ensureProfileExists = useCallback(
-    async (uid) => {
-      if (!uid) return null;
-
-      // Try to fetch first
-      const { data: existing, error: selErr } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq("id", uid)
-        .maybeSingle();
-
-      if (selErr) {
-        console.error("[UserContext] ensureProfileExists (select) error:", selErr);
-        // don’t throw; continue to try upsert below
-      }
-
-      if (existing?.id) return existing;
-
-      // Create a minimal row (RLS must allow INSERT with check id = auth.uid())
-      const now = new Date().toISOString();
-      const { data: inserted, error: insErr } = await supabase
-        .from("profiles")
-        .upsert(
-          [{ id: uid, updated_at: now }],
-          { onConflict: "id" }
-        )
-        .select("id")
-        .maybeSingle();
-
-      if (insErr) {
-        console.error("[UserContext] ensureProfileExists (upsert) error:", insErr);
-        return null;
-      }
-      return inserted;
-    },
-    []
-  );
-
-  /* ───────────────────────────── Load profile ────────────────────────────── */
-  const loadProfile = useCallback(
-    async (uid) => {
-      if (!uid) return null;
-
-      // Make sure there is a row to read (prevents "blank until save")
-      await ensureProfileExists(uid);
-
-      const { data: prof, error } = await supabase
-        .from("profiles")
-        .select(`
-          id,
-          display_name,
-          slug,
-          avatar_url,
-          banner_url,
-          banner_gradient,
-          theme_preset,
-          favorite_films,
-          joined_clubs,
-          is_partner,
-          plan,
-          is_premium,
-          premium_started_at,
-          premium_expires_at,
-          cancel_at_period_end,
-          taste_cards,
-          taste_card_style_global,
-          film_takes,
-          moodboard
-        `)
-        .eq("id", uid)
-        .maybeSingle();
-
-      if (error) {
-        console.error("[UserContext] loadProfile error:", error);
-        return null;
-      }
-
-      // Keep previous UI if nothing returned (shouldn’t happen after ensure)
-      if (prof) {
-        setProfile(prof);
-        setAvatar(prof.avatar_url || null);
-      }
-      return prof;
-    },
-    [ensureProfileExists]
-  );
-
-  /* ─────────────────────────── Public refresh API ────────────────────────── */
-  const refreshProfile = useCallback(async () => {
-    if (!user?.id) return;
-    await loadProfile(user.id);
-  }, [user?.id, loadProfile]);
-
-  /* ─────────────────────────────── Logout API ────────────────────────────── */
-  const logout = useCallback(async () => {
-    try {
-      await supabase.auth.signOut();
-    } finally {
-      setUser(null);
-      setProfile(null);
-      setAvatar(null);
-    }
-  }, []);
-
-  /* ───────────────────────────── Bootstrap auth ──────────────────────────── */
+  // ─────────────────────────────
+  // 1) fetch session on mount
+  // ─────────────────────────────
   useEffect(() => {
-    let mounted = true;
+    let cancelled = false;
 
     (async () => {
       try {
-        setLoading(true);
-        const { data: sessionData } = await supabase.auth.getSession();
-        const authUser = sessionData?.session?.user ?? null;
-        if (!mounted) return;
+        const {
+          data: { session },
+          error,
+        } = await supabase.auth.getSession();
+        if (error) throw error;
 
-        setUser(authUser || null);
+        const authUser = session?.user ?? null;
+        if (!cancelled) {
+          setUser(authUser);
+        }
 
         if (authUser?.id) {
-          await loadProfile(authUser.id);
+          const { data: prof, error: pErr } = await supabase
+            .from("profiles")
+            .select("*")
+            .eq("id", authUser.id)
+            .maybeSingle();
+
+          if (!cancelled) {
+            if (pErr) {
+              console.warn("[UserContext] profile fetch failed:", pErr.message);
+              setProfile(null);
+              setAvatar(null);
+            } else {
+              setProfile(prof);
+              setAvatar(prof?.avatar_url || null);
+            }
+          }
         } else {
+          // no auth user
+          if (!cancelled) {
+            setProfile(null);
+            setAvatar(null);
+          }
+        }
+      } catch (e) {
+        console.warn("[UserContext] init error:", e?.message);
+        if (!cancelled) {
+          setUser(null);
           setProfile(null);
           setAvatar(null);
         }
       } finally {
-        if (mounted) setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
 
-    const { data: sub } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        const authUser = session?.user ?? null;
-        setUser(authUser || null);
+    // listen to auth changes
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      const authUser = session?.user ?? null;
+      setUser(authUser);
 
-        if (authUser?.id) {
-          setLoading(true);
-          try {
-            await loadProfile(authUser.id);
-          } finally {
-            setLoading(false);
-          }
-        } else {
+      if (authUser?.id) {
+        const { data: prof, error: pErr } = await supabase
+          .from("profiles")
+          .select("*")
+          .eq("id", authUser.id)
+          .maybeSingle();
+
+        if (pErr) {
+          console.warn("[UserContext] profile fetch (auth change) failed:", pErr.message);
           setProfile(null);
           setAvatar(null);
+        } else {
+          setProfile(prof);
+          setAvatar(prof?.avatar_url || null);
         }
+      } else {
+        setProfile(null);
+        setAvatar(null);
       }
+    });
+
+    return () => {
+      cancelled = true;
+      subscription?.unsubscribe?.();
+    };
+  }, []);
+
+  // ─────────────────────────────
+  // 2) normalise roles
+  // ─────────────────────────────
+  const roles = useMemo(() => {
+    const arr = [];
+
+    // from profile table
+    if (profile?.roles && Array.isArray(profile.roles)) {
+      arr.push(...profile.roles);
+    }
+
+    // sometimes we store as app_roles
+    if (profile?.app_roles && Array.isArray(profile.app_roles)) {
+      arr.push(...profile.app_roles);
+    }
+
+    // from auth JWT user_metadata
+    if (user?.user_metadata?.roles && Array.isArray(user.user_metadata.roles)) {
+      arr.push(...user.user_metadata.roles);
+    }
+
+    // dedupe, trim
+    return Array.from(
+      new Set(
+        arr
+          .filter(Boolean)
+          .map((r) => String(r).trim())
+          .filter(Boolean)
+      )
+    );
+  }, [profile?.roles, profile?.app_roles, user?.user_metadata?.roles]);
+
+  const hasRole = useCallback(
+    (role) => {
+      if (!role) return false;
+      return roles.some((r) => r.toLowerCase() === role.toLowerCase());
+    },
+    [roles]
+  );
+
+  const isPartner = hasRole("partner");
+
+  // ─────────────────────────────
+  // 3) Premium flag (dev override + real checks)
+  //    Remove DEV_PREMIUM_EMAILS before production.
+  // ─────────────────────────────
+  const DEV_PREMIUM_EMAILS = ["husseinisse632@gmail.com"]; // dev-only override
+
+  const isPremium = useMemo(() => {
+    // 1) Local dev override by email
+    const emailHit = DEV_PREMIUM_EMAILS.includes(user?.email || "");
+
+    // 2) Role-based (if you add "premium" or "directors_cut" to roles)
+    const roleHit = (roles || []).some((r) =>
+      /^(premium|directors_cut)$/i.test(String(r || ""))
     );
 
-    return () => {
-      mounted = false;
-      sub?.subscription?.unsubscribe?.();
-    };
-  }, [loadProfile]);
+    // 3) Plan field on profile or on auth user_metadata
+    const plan = String(profile?.plan || "").toLowerCase();
+    const metaPlan = String(user?.user_metadata?.plan || "").toLowerCase();
+    const planHit =
+      plan === "directors_cut" ||
+      plan === "premium" ||
+      metaPlan === "directors_cut" ||
+      metaPlan === "premium";
 
-  /* ─────────────────────────── Realtime sync (self) ──────────────────────── */
-  useEffect(() => {
-    if (!user?.id) return;
+    return emailHit || roleHit || planHit;
+  }, [user?.email, roles, profile?.plan, user?.user_metadata?.plan]);
 
-    const channel = supabase
-      .channel(`profiles:uid=${user.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "profiles",
-          filter: `id=eq.${user.id}`,
-        },
-        (payload) => {
-          const row = payload.new || payload.old;
-          if (!row) return;
-
-          // Merge without nuking unknown fields
-          setProfile((prev) => ({ ...(prev || {}), ...row }));
-          if (row.avatar_url !== undefined) setAvatar(row.avatar_url || null);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [user?.id]);
-
-  /* ────────────────────────── Save (optimistic, safe) ────────────────────── */
+  // ─────────────────────────────
+  // 4) helper to PATCH profile
+  // ─────────────────────────────
   const saveProfilePatch = useCallback(
     async (patch) => {
-      if (!user?.id) throw new Error("Not signed in");
-      if (!patch || typeof patch !== "object") return null;
-
-      // Optimistic UI
-      setProfile((prev) => ({ ...(prev || {}), ...patch }));
-      if (Object.prototype.hasOwnProperty.call(patch, "avatar_url")) {
-        setAvatar(patch.avatar_url || null);
-      }
-
+      if (!user?.id) return;
       const { data, error } = await supabase
         .from("profiles")
-        .update({ ...patch, updated_at: new Date().toISOString() })
+        .update(patch)
         .eq("id", user.id)
         .select()
         .maybeSingle();
-
       if (error) {
-        console.error("[UserContext] saveProfilePatch error:", error);
-        // Reconcile with server truth to avoid stale optimistic state
-        await loadProfile(user.id);
-        throw error;
+        console.warn("[UserContext] saveProfilePatch failed:", error.message);
+        return;
       }
-
-      // Ensure local matches canonical row
-      if (data) {
-        setProfile((prev) => ({ ...(prev || {}), ...data }));
-        if (Object.prototype.hasOwnProperty.call(data, "avatar_url")) {
-          setAvatar(data.avatar_url || null);
-        }
+      setProfile((prev) => ({ ...(prev || {}), ...(data || patch) }));
+      if (data?.avatar_url) {
+        setAvatar(data.avatar_url);
       }
-      return data;
     },
-    [user?.id, loadProfile]
+    [user?.id]
   );
 
-  /* ─────────────────────────────── Context value ─────────────────────────── */
-  const value = useMemo(
-    () => ({
-      user,
-      profile,
-      loading,
-      avatar,
-      setAvatar,          // expose if callers want to pre-preview avatar
-      saveProfilePatch,   // persist partial updates
-      refreshProfile,     // manual refetch
-      isPremium,
-      logout,
-    }),
-    [user, profile, loading, avatar, saveProfilePatch, refreshProfile, isPremium, logout]
-  );
+  // ─────────────────────────────
+  // 5) logout
+  // ─────────────────────────────
+  const logout = useCallback(async () => {
+    await supabase.auth.signOut();
+    setUser(null);
+    setProfile(null);
+    setAvatar(null);
+  }, []);
 
-  return <UserContext.Provider value={value}>{children}</UserContext.Provider>;
+  // ─────────────────────────────
+  // 6) provider value
+  // ─────────────────────────────
+  return (
+    <UserContext.Provider
+      value={{
+        user,          // supabase auth user
+        profile,       // public.profiles row
+        avatar,        // convenience
+        loading,       // initial hydration
+        roles,         // normalised array
+        hasRole,       // helper
+        isPartner,     // partner flag
+        isPremium,     // ★ premium flag (dev override + real checks)
+        saveProfilePatch,
+        logout,
+      }}
+    >
+      {children}
+    </UserContext.Provider>
+  );
 }
 
 export { UserProvider };

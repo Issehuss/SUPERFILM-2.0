@@ -2,7 +2,7 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useMemo } from "react";
 import { useUser } from "../context/UserContext";
-import AccountMenu from "./AccountMenu"; // if you prefer the avatar+menu when signed in
+import AccountMenu from "./AccountMenu"; // avatar+menu when signed in
 
 export default function NavBar() {
   const { user } = useUser();
@@ -18,21 +18,22 @@ export default function NavBar() {
   return (
     <header className="sticky top-0 z-40 bg-black/70 backdrop-blur border-b border-zinc-900/80">
       <nav className="mx-auto max-w-6xl px-4 py-3 flex items-center gap-4 text-white">
-        <Link to="/" className="font-semibold tracking-wide text-lg">
+        <Link to="/" className="font-semibold tracking-wide text-lg no-underline">
           SuperFilm
         </Link>
 
         <div className="ml-auto flex items-center gap-3">
           {user ? (
-            // Signed in → show your account menu
+            // Signed in → show account menu
             <AccountMenu />
           ) : (
-            // Signed out → SuperFilm-styled actions
+            // Signed out → actions
             !isAuthPage && (
               <>
                 <Link
                   to="/auth?mode=signin"
-                  className="px-3 h-9 inline-flex items-center rounded-full border border-white/10 bg-white/5 hover:bg-white/10 text-sm transition"
+                  className="no-underline px-3 h-9 inline-flex items-center rounded-full border border-white/10 bg-white/5 hover:bg-white/10 text-sm transition"
+                  style={{ textDecoration: "none" }}
                 >
                   Sign in
                 </Link>

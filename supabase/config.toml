@@ -360,3 +360,14 @@ entrypoint = "./functions/notify-message2/index.ts"
 verify_jwt = false
 import_map = "./functions/tmdb-search/deno.json"   # or remove if you don't use it
 entrypoint = "./functions/tmdb-search/index.ts"
+
+[functions.event-reminders]
+enabled = true
+verify_jwt = true
+import_map = "./functions/event-reminders/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/event-reminders/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/event-reminders/*.html" ]

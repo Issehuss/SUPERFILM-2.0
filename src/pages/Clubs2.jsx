@@ -11,6 +11,8 @@ import { Navigation, Mousewheel, Keyboard } from 'swiper/modules';
 import supabase from '../supabaseClient.js';
 import '../App.css';
 import './Clubs2.css';
+import { useUser } from "../context/UserContext";
+
 
 /* ---------- Filter metadata ---------- */
 const SIZES = ['Small (≤50)', 'Medium (50–150)', 'Large (150+)'];
@@ -178,15 +180,25 @@ function mapRowToClub(row) {
           members: typeof row.members === 'number' ? row.members : undefined,
           isNew: typeof row.is_new === 'boolean' ? row.is_new : undefined,
           activeThisWeek:
-            typeof row.active_this_week === 'boolean' ? row.active_this_week : undefined,
-          liveSoon: typeof row.live_soon === 'boolean' ? row.live_soon : undefined,
+            typeof row.active_this_week === 'boolean'
+              ? row.active_this_week
+              : undefined,
+          liveSoon:
+            typeof row.live_soon === 'boolean' ? row.live_soon : undefined,
         };
 
   return {
-    id: `db-${String(row.id)}`, // used in URLs
-    rawId: row.id, // real DB id for joins (events)
+    id: `db-${String(row.id)}`,
+    rawId: row.id,
     name: row.name ?? 'Untitled Club',
-    image: row.image_url ?? row.image ?? 'https://via.placeholder.com/300x160?text=Club',
+
+    // 👇 FIXED HERE — USES YOUR REAL COLUMN
+    image:
+      row.profile_image_url ??
+      row.image_url ??
+      row.image ??
+      'https://via.placeholder.com/300x160?text=Club',
+
     meta: metaFromRow,
   };
 }
@@ -276,6 +288,9 @@ export default function Clubs2() {
   /* Upcoming events (real data) */
   const [upcomingEvents, setUpcomingEvents] = useState([]);
   const [loadingEvents, setLoadingEvents] = useState(true);
+  const { profile } = useUser();
+const userHasClub = !!profile?.club_id;
+
 
   // Load clubs on mount
   useEffect(() => {
@@ -557,11 +572,14 @@ export default function Clubs2() {
                 My Club
               </Link>
             </li>
-            <li>
-              <Link to="/create-club" className="text-white hover:text-zinc-300">
-                Create Club
-              </Link>
-            </li>
+            {/* Only show Create Club if user has no club */}
+{!userHasClub && (
+  <li>
+    <Link to="/create-club" className="text-white hover:text-zinc-300">
+      Create Club
+    </Link>
+  </li>
+)}
             <li>
               <Link to="/leaderboard" className="text-white hover:text-zinc-300">
                 Leaderboard
