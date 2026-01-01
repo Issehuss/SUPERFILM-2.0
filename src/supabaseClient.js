@@ -55,7 +55,7 @@ if (functionsUrl) {
 /*                         CREATE THE SUPABASE CLIENT                          */
 /* -------------------------------------------------------------------------- */
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, options);
+const supabase = createClient(supabaseUrl, supabaseAnonKey, options);
 export default supabase;
 
 /* -------------------------------------------------------------------------- */
