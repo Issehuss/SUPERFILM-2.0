@@ -13,12 +13,57 @@ import {
 } from "lucide-react";
 import { useUser } from "../context/UserContext";
 import supabase from "../supabaseClient.js";
-import useMyClubs from "../hooks/useMyClubs";
 import useWatchlist from "../hooks/useWatchlist";
 import LeaderboardWideCard from "../components/LeaderboardWideCard.jsx";
 import { env as ENV } from "../lib/env";
+import TmdbImage from "../components/TmdbImage";
+
+/* ------------ skeletons ------------ */
+function HomeSkeleton() {
+  return (
+    <div className="mx-auto w-full max-w-7xl px-4 md:px-6 py-8 text-white space-y-6">
+      <div className="flex items-center justify-between gap-4">
+        <div className="space-y-2">
+          <div className="h-3 w-24 rounded bg-white/10 animate-pulse" />
+          <div className="h-6 w-40 rounded bg-white/10 animate-pulse" />
+        </div>
+        <div className="flex gap-2">
+          <div className="h-10 w-32 rounded-full bg-white/10 animate-pulse" />
+          <div className="h-10 w-32 rounded-full bg-white/10 animate-pulse" />
+        </div>
+      </div>
+
+      <div className="h-[38vh] min-h-[300px] rounded-2xl bg-white/10 animate-pulse" />
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="col-span-1 lg:col-span-2 space-y-4">
+          <div className="h-14 rounded-xl bg-white/10 animate-pulse" />
+          <div className="h-[260px] rounded-2xl bg-white/10 animate-pulse" />
+        </div>
+        <div className="col-span-1 h-[420px] rounded-2xl bg-white/10 animate-pulse" />
+      </div>
+
+      <div className="h-48 rounded-2xl bg-white/10 animate-pulse" />
+    </div>
+  );
+}
 
 /* ------------ small helpers ------------ */
+const CLUB_PLACEHOLDER =
+  "data:image/svg+xml;utf8," +
+  encodeURIComponent(
+    `<svg xmlns='http://www.w3.org/2000/svg' width='300' height='300'><rect width='100%' height='100%' fill='%232a2a2a'/><text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' fill='%23999' font-family='Arial' font-size='14'>Club</text></svg>`
+  );
+
+const sanitizeClubImage = (url) => {
+  if (!url || typeof url !== "string") return CLUB_PLACEHOLDER;
+  if (/^https?:\/\//i.test(url)) return url;
+  const base = ENV.SUPABASE_URL ? ENV.SUPABASE_URL.replace(/\/$/, "") : "";
+  const path = url.replace(/^\/+/, "");
+  if (base) return `${base}/storage/v1/object/public/${path}`;
+  return CLUB_PLACEHOLDER;
+};
+
 function formatDateTime(iso) {
   try {
     return new Date(iso).toLocaleString();
@@ -30,13 +75,24 @@ function formatDateTime(iso) {
 /* ------------ TMDB proxy (unchanged) ------------ */
 async function tmdbProxy(path, query = {}) {
   const cleanPath = String(path || "").startsWith("/") ? path : `/${path || ""}`;
+  const isSearch = cleanPath.includes("/search");
+  if (
+    isSearch &&
+    (!query ||
+      typeof query.query !== "string" ||
+      query.query.trim().length < 2)
+  ) {
+    return {};
+  }
   try {
-    const { data, error } = await supabase.functions.invoke("tmdb-search", {
-      body: { path: cleanPath, query },
-      headers: { "Content-Type": "application/json" },
-    });
-    if (!error && data) return data;
-    if (error) console.warn("[tmdbProxy] invoke error:", error.message || error);
+    if (isSearch) {
+      const { data, error } = await supabase.functions.invoke("tmdb-search", {
+        body: { path: cleanPath, query },
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!error && data) return data;
+      if (error) console.warn("[tmdbProxy] invoke error:", error.message || error);
+    }
   } catch (e) {
     console.warn("[tmdbProxy] invoke threw:", e?.message || e);
   }
@@ -85,7 +141,9 @@ async function tmdbProxy(path, query = {}) {
 }
 
 /* ------------ activity helper ------------ */
-async function fetchClubActivity(clubId, limit = 3) {
+const ACTIVITY_LIMIT = 3;
+
+async function fetchClubActivity(clubId, limit = ACTIVITY_LIMIT) {
   const { data, error } = await supabase
     .from("recent_activity_v")
     .select("id, club_id, created_at, summary, actor_name, actor_avatar")
@@ -96,6 +154,63 @@ async function fetchClubActivity(clubId, limit = 3) {
   return data || [];
 }
 
+const ACTIVITY_CACHE_KEY = "cache:clubActivity:v1";
+const ACTIVITY_TTL_MS = 3 * 60 * 1000; // 3 minutes
+const NEXT_SCREENING_CACHE_KEY = "cache:clubNextScreening:v1";
+const NEXT_SCREENING_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+function readActivityCache(clubId) {
+  if (!clubId) return null;
+  try {
+    const raw = sessionStorage.getItem(`${ACTIVITY_CACHE_KEY}:${clubId}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.at || !Array.isArray(parsed?.data)) return null;
+    if (Date.now() - parsed.at > ACTIVITY_TTL_MS) return null;
+    return parsed.data;
+  } catch {
+    return null;
+  }
+}
+
+function writeActivityCache(clubId, data) {
+  if (!clubId) return;
+  try {
+    sessionStorage.setItem(
+      `${ACTIVITY_CACHE_KEY}:${clubId}`,
+      JSON.stringify({ at: Date.now(), data })
+    );
+  } catch {
+    /* ignore cache errors */
+  }
+}
+
+function readNextScreeningCache(clubId) {
+  if (!clubId) return null;
+  try {
+    const raw = sessionStorage.getItem(`${NEXT_SCREENING_CACHE_KEY}:${clubId}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.at || !parsed?.title) return null;
+    if (Date.now() - parsed.at > NEXT_SCREENING_TTL_MS) return null;
+    return parsed.title;
+  } catch {
+    return null;
+  }
+}
+
+function writeNextScreeningCache(clubId, title) {
+  if (!clubId) return;
+  try {
+    sessionStorage.setItem(
+      `${NEXT_SCREENING_CACHE_KEY}:${clubId}`,
+      JSON.stringify({ at: Date.now(), title })
+    );
+  } catch {
+    /* ignore cache errors */
+  }
+}
+
 const ENABLE_CURATIONS =
   (typeof import.meta !== "undefined" &&
     import.meta.env?.VITE_ENABLE_CURATIONS === "true") ||
@@ -103,6 +218,8 @@ const ENABLE_CURATIONS =
 
 /* ------------ lightweight cache ------------ */
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
+const NOW_PLAYING_CACHE_KEY = "tmdb:nowPlaying:GB:v2";
+const DECK_ROTATE_MS = 2500; // rotation interval for "In Cinemas This Week"
 function readCache(key) {
   try {
     const raw = sessionStorage.getItem(key);
@@ -122,7 +239,7 @@ function writeCache(key, data) {
 }
 
 export default function HomeSignedIn() {
-  const { user, profile } = useUser();
+  const { user, profile, isReady } = useUser();
   const navigate = useNavigate();
 
   /* ============ refs for perf control ============ */
@@ -131,8 +248,11 @@ export default function HomeSignedIn() {
   const mountedRef = useRef(true);
   const deckVisibleRef = useRef(false);
   const hoverRef = useRef(false);
+  const leaderboardRef = useRef(null);
 
   /* ============ state ============ */
+  const [memberships, setMemberships] = useState([]);
+  const [membershipsLoading, setMembershipsLoading] = useState(true);
   const [club, setClub] = useState(null);
 
   const [activity, setActivity] = useState([]);
@@ -146,6 +266,17 @@ export default function HomeSignedIn() {
 
   const [leaderboard, setLeaderboard] = useState([]);
   const [loadingLeaderboard, setLoadingLeaderboard] = useState(true);
+  const clubImage = useMemo(() => {
+    if (!club) return CLUB_PLACEHOLDER;
+    const src =
+      club?.profile_image_url ||
+      club?.image ||
+      club?.banner_url ||
+      club?.avatar_url ||
+      club?.profile_image ||
+      null;
+    return sanitizeClubImage(src);
+  }, [club]);
 
   const {
     items: homeWatchlist,
@@ -153,12 +284,56 @@ export default function HomeSignedIn() {
     add,
     remove,
   } = useWatchlist(user?.id);
-  const { clubs: myClubs } = useMyClubs(user?.id);
 
   const [wlIndex, setWlIndex] = useState(0);
   const [wlMeta, setWlMeta] = useState({});
+  const [leaderboardReady, setLeaderboardReady] = useState(false);
 
-  /* ============ 1) pick active club fast ============ */
+  /* ============ memberships -> primary club ============ */
+  useEffect(() => {
+    if (!isReady) return;
+    if (!user?.id) {
+      setMemberships([]);
+      setMembershipsLoading(false);
+      setClub(null);
+      return;
+    }
+
+    let cancelled = false;
+    setMembershipsLoading(true);
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("club_members")
+          .select("club_id, clubs(*)")
+          .eq("user_id", user.id);
+
+        if (cancelled) return;
+        if (error) {
+          console.error("[HomeSignedIn] club_members fetch error:", error.message);
+          setMemberships([]);
+          return;
+        }
+
+        setMemberships(data || []);
+      } catch (e) {
+        if (!cancelled) console.error("[HomeSignedIn] club_members fetch threw:", e?.message || e);
+        setMemberships([]);
+      } finally {
+        if (!cancelled) setMembershipsLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isReady, user?.id]);
+
+  const myClubs = useMemo(
+    () => (memberships || []).map((m) => m?.clubs).filter(Boolean),
+    [memberships]
+  );
+
   useEffect(() => {
     setClub((prev) => {
       const next = myClubs?.[0] || null;
@@ -175,12 +350,21 @@ export default function HomeSignedIn() {
     }
     let cancelled = false;
     let channel;
+    const cached = readActivityCache(club.id);
+    if (cached?.length) {
+      setActivity(cached.slice(0, ACTIVITY_LIMIT));
+      setActivityLoading(false);
+    }
 
     (async () => {
-      setActivityLoading(true);
+      setActivityLoading((prev) => prev && !cached);
       try {
-        const rows = await fetchClubActivity(club.id, 5);
-        if (!cancelled) setActivity(rows);
+      const rows = await fetchClubActivity(club.id, ACTIVITY_LIMIT);
+      if (!cancelled) {
+        const limited = rows.slice(0, ACTIVITY_LIMIT);
+        setActivity(limited);
+        writeActivityCache(club.id, limited);
+      }
       } catch (e) {
         if (!cancelled) setActivity([]);
         console.warn("club activity (home) failed:", e);
@@ -196,17 +380,21 @@ export default function HomeSignedIn() {
           (payload) => {
             const row = payload.new;
             if (!row) return;
-            setActivity((prev) => [
-              {
-                id: row.id,
-                summary: row.summary,
-                created_at: row.created_at,
-                actor_name: row.actor_name,
-                actor_avatar: row.actor_avatar,
-                club_id: row.club_id,
-              },
-              ...prev.slice(0, 4),
-            ]);
+            setActivity((prev) => {
+              const next = [
+                {
+                  id: row.id,
+                  summary: row.summary,
+                  created_at: row.created_at,
+                  actor_name: row.actor_name,
+                  actor_avatar: row.actor_avatar,
+                  club_id: row.club_id,
+                },
+                ...prev.slice(0, ACTIVITY_LIMIT - 1),
+              ];
+              writeActivityCache(club.id, next);
+              return next;
+            });
           }
         )
         .subscribe();
@@ -220,24 +408,41 @@ export default function HomeSignedIn() {
   /* ============ 3) small club fetch ============ */
   useEffect(() => {
     let cancelled = false;
+
+    // Fast path from cache
+    const cachedNext = readNextScreeningCache(club?.id);
+    if (cachedNext) {
+      setNextFromClub(cachedNext);
+    }
+
     (async () => {
       try {
-        if (club?.id) {
-          const { data: cRow } = await supabase
-            .from("clubs")
-            .select("next_screening_title, slug, id")
-            .eq("id", club.id)
-            .maybeSingle();
-          if (!cancelled) setNextFromClub(cRow?.next_screening_title || null);
-        } else {
+        if (!club?.id) {
           if (!cancelled) setNextFromClub(null);
+          return;
         }
-      } catch {}
+
+        const { data: cRow, error } = await supabase
+          .from("club_next_screening_v")
+          .select("film_title")
+          .eq("club_id", club.id)
+          .maybeSingle();
+
+        if (!cancelled) {
+          const title = cRow?.film_title || null;
+          setNextFromClub(title);
+          if (title) writeNextScreeningCache(club.id, title);
+        }
+        if (error) console.warn("club next screening fetch failed:", error);
+      } catch (e) {
+        if (!cancelled) setNextFromClub(null);
+        console.warn("club next screening fetch failed:", e);
+      }
     })();
     return () => {
       cancelled = true;
     };
-  }, [club?.id]);
+  }, [club?.id, club?.next_screening?.film_title]);
 
   /* ============ 4) TMDB deck (fetch once + cache) ============ */
   useEffect(() => {
@@ -245,7 +450,7 @@ export default function HomeSignedIn() {
 
     const CACHE_KEY = ENABLE_CURATIONS
       ? "home:curations:GB:v1"
-      : "home:nowPlaying:GB:v1";
+      : NOW_PLAYING_CACHE_KEY;
 
     (async () => {
       setDeckLoading(true);
@@ -411,7 +616,7 @@ export default function HomeSignedIn() {
         rotateTimerRef.current = null;
       }
       if (deckVisibleRef.current && deckItems.length >= 3) {
-        rotateTimerRef.current = setInterval(() => nextDeck(), 6000); // slower, fewer paints
+        rotateTimerRef.current = setInterval(() => nextDeck(), DECK_ROTATE_MS);
       }
     }
 
@@ -523,6 +728,40 @@ export default function HomeSignedIn() {
     });
   }, [homeWatchlist?.length]);
 
+  // Only load leaderboard card once it scrolls into view (avoids heavy queries on page load)
+  useEffect(() => {
+    if (leaderboardReady) return;
+    const el = leaderboardRef.current;
+    if (!el) return;
+
+    const onVisible = (entries) => {
+      const entry = entries[0];
+      if (entry?.isIntersecting) {
+        setLeaderboardReady(true);
+      }
+    };
+
+    const obs = new IntersectionObserver(onVisible, { threshold: 0.25 });
+    obs.observe(el);
+
+    // Fallback: if idle for a while, just load
+    const idleId =
+      typeof window !== "undefined" && "requestIdleCallback" in window
+        ? window.requestIdleCallback(() => setLeaderboardReady(true), { timeout: 6000 })
+        : setTimeout(() => setLeaderboardReady(true), 6000);
+
+    return () => {
+      try {
+        obs.disconnect();
+      } catch {}
+      if (typeof idleId === "number") {
+        clearTimeout(idleId);
+      } else if (idleId && typeof window !== "undefined") {
+        window.cancelIdleCallback?.(idleId);
+      }
+    };
+  }, [leaderboardReady]);
+
   useEffect(() => {
     if (!homeWatchlist || homeWatchlist.length <= 1) return;
     const t = setInterval(() => {
@@ -594,8 +833,11 @@ export default function HomeSignedIn() {
     (profile?.display_name && profile.display_name.trim()) ||
     (user?.user_metadata?.full_name && user.user_metadata.full_name.trim()) ||
     (user?.user_metadata?.name && user.user_metadata.name.trim()) ||
-    (user?.email ? user.email.split("@")[0] : "") ||
-    "Filmmaker";
+    "Cinephile";
+
+  if (!isReady || !profile) {
+    return <HomeSkeleton />;
+  }
 
   /* ============ render ============ */
   return (
@@ -717,14 +959,15 @@ export default function HomeSignedIn() {
 
                 return (
                   <div
-                    key={`${m.id}-${role}`}
+                    key={m.id}
                     className={`group absolute top-1/2 left-1/2 ${widthClass} -translate-x-1/2 -translate-y-1/2 rounded-2xl overflow-hidden ring-1 ring-white/10 shadow-2xl backdrop-blur-sm bg-white/5`}
                     style={{
                       transform: baseTransform,
                       zIndex,
                       opacity,
                       filter: `blur(${blur}px)`,
-                      transition: "transform 350ms ease, opacity 250ms ease, filter 250ms ease",
+                      transition:
+                        "transform 500ms cubic-bezier(0.33, 1, 0.68, 1), opacity 400ms ease, filter 400ms ease",
                       cursor: "pointer",
                     }}
                     onClick={() => {
@@ -744,10 +987,11 @@ export default function HomeSignedIn() {
                   >
                     <div className="h-[38vh] min-h-[300px] w-full transition-transform duration-300 group-hover:scale-[1.03]">
                       {img ? (
-                        <img
+                        <TmdbImage
                           src={img}
                           alt={m.title}
-                          className="block h-full w-full object-cover"
+                          className="block h-full w-full"
+                          imgClassName="object-cover"
                           draggable={false}
                           loading="eager"
                           decoding="async"
@@ -811,9 +1055,14 @@ export default function HomeSignedIn() {
           <div className="p-5 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <Film className="text-yellow-400" />
-              <h2 className="text-xl font-semibold">
-                {club ? club.name : "Join a Club"}
-              </h2>
+              <div className="flex flex-col">
+                <h2 className="text-xl font-semibold">
+                  {membershipsLoading ? "Loading club..." : club?.name || "Join a Club"}
+                </h2>
+                {club?.slug && (
+                  <span className="text-xs text-zinc-400">ID: {club.slug || club.id}</span>
+                )}
+              </div>
             </div>
             {club ? (
               <Link
@@ -830,14 +1079,21 @@ export default function HomeSignedIn() {
           </div>
 
           <div className="relative w-full flex items-center justify-center py-10">
-            {club?.profile_image_url ? (
+            {membershipsLoading ? (
+              <div className="h-28 w-28 md:h-32 md:w-32 rounded-full bg-white/10 animate-pulse" />
+            ) : club ? (
               <img
-                src={club.profile_image_url}
-                alt={`${club.name} avatar`}
+                src={clubImage}
+                alt={club ? `${club.name} avatar` : "Club placeholder"}
                 className="h-28 w-28 md:h-32 md:w-32 rounded-full object-cover ring-2 ring-white/20"
+                onError={(e) => {
+                  e.currentTarget.src = CLUB_PLACEHOLDER;
+                }}
               />
             ) : (
-              <div className="h-28 w-28 md:h-32 md:w-32 rounded-full bg-white/10 ring-2 ring-white/10" />
+              <div className="h-28 w-28 md:h-32 md:w-32 rounded-full bg-white/5 ring-2 ring-white/10 grid place-items-center text-xs text-zinc-400">
+                No club yet
+              </div>
             )}
           </div>
 
@@ -845,10 +1101,10 @@ export default function HomeSignedIn() {
             <h3 className="font-medium mb-3 flex items-center gap-2">
               <CalendarClock size={18} /> Upcoming
             </h3>
-            {nextFromClub ? (
-              <p className="text-sm font-semibold text-yellow-400">
-                {nextFromClub}
-              </p>
+            {membershipsLoading ? (
+              <div className="h-4 w-32 rounded bg-white/10 animate-pulse" />
+            ) : nextFromClub ? (
+              <p className="text-sm font-semibold text-yellow-400">{nextFromClub}</p>
             ) : (
               <p className="text-sm text-zinc-400">No screenings scheduled yet.</p>
             )}
@@ -866,13 +1122,13 @@ export default function HomeSignedIn() {
 
           <div className="p-5 pt-0">
             {wlLoading ? (
-              <div className="h-[320px] md:h-[360px] rounded-xl bg-white/10 animate-pulse" />
+              <div className="h-[380px] md:h-[440px] rounded-xl bg-white/10 animate-pulse" />
             ) : !homeWatchlist?.length ? (
-              <div className="h-[320px] md:h-[360px] rounded-xl border border-white/10 bg-white/5 flex items-center justify-center text-sm text-zinc-400">
+              <div className="h-[380px] md:h-[440px] rounded-xl border border-white/10 bg-white/5 flex items-center justify-center text-sm text-zinc-400">
                 Add films to your watchlist.
               </div>
             ) : (
-              <div className="relative h-[320px] md:h-[360px] rounded-xl ring-1 ring-white/10 p-3">
+              <div className="relative h-[420px] md:h-[520px] rounded-xl ring-1 ring-white/10 p-3">
                 <Link
                   to={`/movie/${wlCurrent?.id ?? wlCurrent?.movie_id}`}
                   className="flex h-full w-full flex-col items-center justify-start"
@@ -880,20 +1136,21 @@ export default function HomeSignedIn() {
                   aria-label={wlCurrent?.title || "Watchlist item"}
                 >
                   <div className="flex-1 flex items-center justify-center w-full">
-                    <div className="aspect-[2/3] h-[85%]">
-                      {wlPoster ? (
-                        <img
-                          key={`${wlCurrent?.id || wlCurrent?.movie_id}-${wlIndex}`}
-                          src={wlPoster}
-                          alt={wlCurrent?.title || "Poster"}
-                          className="h-full w-auto object-contain rounded-lg shadow-lg transition-opacity duration-500 opacity-100"
-                          draggable={false}
-                        />
-                      ) : (
-                        <div className="h-full w-full bg-white/10 rounded-lg" />
-                      )}
-                    </div>
+                  <div className="aspect-[2/3] h-[86%] w-[78%] mx-auto">
+                    {wlPoster ? (
+                      <TmdbImage
+                        key={`${wlCurrent?.id || wlCurrent?.movie_id}-${wlIndex}`}
+                        src={wlPoster}
+                        alt={wlCurrent?.title || "Poster"}
+                        className="h-full w-full"
+                        imgClassName="h-full w-full object-contain rounded-lg shadow-lg transition-opacity duration-500 opacity-100"
+                        draggable={false}
+                      />
+                    ) : (
+                      <div className="h-full w-full bg-white/10 rounded-lg" />
+                    )}
                   </div>
+                </div>
 
                   <div className="mt-3 w-full text-center">
                     <div className="text-sm font-semibold line-clamp-1">
@@ -955,18 +1212,23 @@ export default function HomeSignedIn() {
           {!activityLoading && activity.length > 0 && (
             <ul className="divide-y divide-white/10">
               {activity.map((a) => (
-                <li key={a.id} className="p-5 flex items-center gap-3">
-                  <img
-                    src={a.actor_avatar || "/avatar_placeholder.png"}
-                    alt=""
-                    className="h-8 w-8 rounded-full object-cover"
-                  />
-                  <div className="flex-1">
-                    <div className="text-sm">{a.summary}</div>
-                    <div className="text-xs text-zinc-500">
-                      {formatDateTime(a.created_at)}
+                <li key={a.id}>
+                  <Link
+                    to={club ? `/clubs/${club.slug || club.id}` : "/clubs"}
+                    className="p-5 flex items-center gap-3 hover:bg-white/5 transition-colors"
+                  >
+                    <img
+                      src={club?.profile_image_url || a.actor_avatar || "/avatar_placeholder.png"}
+                      alt=""
+                      className="h-8 w-8 rounded-full object-cover"
+                    />
+                    <div className="flex-1 text-left">
+                      <div className="text-sm">{a.summary}</div>
+                      <div className="text-xs text-zinc-500">
+                        {formatDateTime(a.created_at)}
+                      </div>
                     </div>
-                  </div>
+                  </Link>
                 </li>
               ))}
             </ul>
@@ -975,8 +1237,8 @@ export default function HomeSignedIn() {
       </div>
 
       {/* Leaderboard */}
-      <div className="px-7 pt-7">
-        <LeaderboardWideCard />
+      <div className="px-7 pt-7" ref={leaderboardRef}>
+        <LeaderboardWideCard shouldLoad={leaderboardReady} />
       </div>
 
       {/* Bottom Quick actions */}

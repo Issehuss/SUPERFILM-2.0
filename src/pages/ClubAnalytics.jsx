@@ -7,7 +7,6 @@ import supabase from "../supabaseClient";
 import { useUser } from "../context/UserContext";
 import useClubAnalytics from "../hooks/useClubAnalytics";
 
-const RANGES = ["7d", "30d", "90d"];
 const isUuid = (s) => /^[0-9a-f-]{16,}$/i.test(String(s || ""));
 const fmtPct = (v) => (v == null ? "—" : `${Number(v).toFixed(2)}%`);
 const fmtNum = (v) => (v == null ? "—" : Number(v).toLocaleString());
@@ -16,7 +15,7 @@ export default function ClubAnalytics() {
   const { clubParam, slug } = useParams(); // supports /clubs/:clubParam/analytics OR /club/:slug/analytics
   const param = clubParam || slug;
   const navigate = useNavigate();
-  const { user } = useUser();
+  const { user, profile } = useUser();
 
   // local club/admin gate
   const [loadingGate, setLoadingGate] = useState(true);
@@ -24,8 +23,10 @@ export default function ClubAnalytics() {
   const [role, setRole] = useState(null); // president | vice | editor-in-chief | ...
   const [isPremiumClub, setIsPremiumClub] = useState(false);
 
-  // range + analytics hook
-  const [range, setRange] = useState("30d");
+  // ---- year state (annual analytics) ----
+  const currentYear = new Date().getFullYear();
+  const [year, setYear] = useState(currentYear);
+
   const {
     loading: dataLoading,
     error: dataError,
@@ -34,7 +35,7 @@ export default function ClubAnalytics() {
     funnel,
     heatmap,
     topContent,
-  } = useClubAnalytics({ clubParam: param, range });
+  } = useClubAnalytics({ clubParam: param, year });
 
   // ---------- Gate: resolve club, role, premium ----------
   useEffect(() => {
@@ -73,7 +74,6 @@ export default function ClubAnalytics() {
         });
         premium = !!prem;
       } catch (_) {
-        // If RPC not available for some reason, default to false
         premium = false;
       }
 
@@ -104,7 +104,7 @@ export default function ClubAnalytics() {
 
   const isAdmin = useMemo(
     () =>
-      ["president", "vice", "editor-in-chief", "editor_in_chief"].includes(
+      ["president", "vice", "vice_president"].includes(
         (role || "").toLowerCase()
       ),
     [role]
@@ -166,6 +166,11 @@ export default function ClubAnalytics() {
     { posts: 0, comments: 0, reactions: 0, rsvps: 0, attendees: 0 }
   );
 
+  // ---- year navigation helpers ----
+  const goPrevYear = () => setYear((y) => y - 1);
+  const goNextYear = () =>
+    setYear((y) => (y < currentYear ? y + 1 : y)); // don’t go into the future
+
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 text-white">
       {/* Header */}
@@ -176,24 +181,37 @@ export default function ClubAnalytics() {
             <span>Analytics</span>
           </div>
           <h1 className="text-2xl font-semibold">{clubDisplayName}</h1>
+          <p className="mt-1 text-xs text-zinc-400">
+            Annual view for <span className="text-yellow-300">{year}</span>
+          </p>
         </div>
 
-        {/* Date range selector */}
-        <div className="flex gap-2">
-          {RANGES.map((r) => (
-            <button
-              key={r}
-              onClick={() => setRange(r)}
-              className={[
-                "rounded-xl border px-3 py-1.5 text-sm transition",
-                range === r
-                  ? "border-yellow-400 bg-yellow-400/10"
-                  : "border-zinc-800 hover:bg-zinc-900",
-              ].join(" ")}
-            >
-              Last {r}
-            </button>
-          ))}
+        {/* Year selector with arrows (B) */}
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={goPrevYear}
+            className="rounded-full border border-zinc-700 px-2 py-1 text-sm hover:bg-zinc-900"
+            aria-label="Previous year"
+          >
+            ‹
+          </button>
+          <div className="min-w-[4rem] text-center text-sm font-medium">
+            {year}
+          </div>
+          <button
+            type="button"
+            onClick={goNextYear}
+            disabled={year >= currentYear}
+            className={`rounded-full border px-2 py-1 text-sm ${
+              year >= currentYear
+                ? "border-zinc-800 text-zinc-500 cursor-not-allowed"
+                : "border-zinc-700 hover:bg-zinc-900"
+            }`}
+            aria-label="Next year"
+          >
+            ›
+          </button>
         </div>
       </div>
 
@@ -212,7 +230,7 @@ export default function ClubAnalytics() {
             {fmtNum(kpis?.members_total)}
           </div>
           <div className="text-xs text-zinc-500">
-            +{fmtNum(kpis?.members_new)} in range
+            +{fmtNum(kpis?.members_new)} joined in {year}
           </div>
         </div>
         <div className="rounded-2xl border border-zinc-800 bg-black/40 p-4">
@@ -241,11 +259,13 @@ export default function ClubAnalytics() {
 
       {/* Main grid */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        {/* Engagement Over Time – quick totals row (charts can come later) */}
+        {/* Engagement Over Time – quick totals row */}
         <div className="rounded-2xl border border-zinc-800 bg-black/40 p-4 lg:col-span-2">
-          <div className="mb-2 text-sm text-zinc-400">Engagement Over Time</div>
+          <div className="mb-2 text-sm text-zinc-400">
+            Engagement Over Time <span className="text-xs text-zinc-500">({year})</span>
+          </div>
           <div className="text-xs text-zinc-500">
-            Days: {series?.length ?? 0}
+            Days with activity: {series?.length ?? 0}
           </div>
           <div className="mt-3 grid grid-cols-5 gap-2 text-center text-sm">
             <div>
@@ -276,42 +296,67 @@ export default function ClubAnalytics() {
 
         {/* Event Funnel – top 3 events */}
         <div className="rounded-2xl border border-zinc-800 bg-black/40 p-4">
-          <div className="mb-2 text-sm text-zinc-400">Event Funnel</div>
+          <div className="mb-2 text-sm text-zinc-400">
+            Event Funnel <span className="text-xs text-zinc-500">({year})</span>
+          </div>
           <div className="space-y-2">
             {(funnel ?? []).slice(0, 3).map((ev) => (
-              <div key={ev.event_id} className="flex items-center justify-between text-sm">
+              <div
+                key={ev.event_id}
+                className="flex items-center justify-between text-sm"
+              >
                 <div className="truncate pr-2">
-                  <div className="font-medium truncate">{ev.event_title || "Untitled"}</div>
+                  <div className="font-medium truncate">
+                    {ev.event_title || "Untitled"}
+                  </div>
                   <div className="text-xs text-zinc-500">
-                    {ev.starts_at ? new Date(ev.starts_at).toLocaleString() : "—"}
+                    {ev.starts_at
+                      ? new Date(ev.starts_at).toLocaleString()
+                      : "—"}
                   </div>
                 </div>
                 <div className="flex gap-2 text-xs">
-                  <span className="rounded border border-zinc-700 px-2 py-0.5">Inv {fmtNum(ev.invites)}</span>
-                  <span className="rounded border border-zinc-700 px-2 py-0.5">RSVP {fmtNum(ev.rsvps)}</span>
-                  <span className="rounded border border-zinc-700 px-2 py-0.5">Att {fmtNum(ev.attendees)}</span>
+                  <span className="rounded border border-zinc-700 px-2 py-0.5">
+                    Inv {fmtNum(ev.invites)}
+                  </span>
+                  <span className="rounded border border-zinc-700 px-2 py-0.5">
+                    RSVP {fmtNum(ev.rsvps)}
+                  </span>
+                  <span className="rounded border border-zinc-700 px-2 py-0.5">
+                    Att {fmtNum(ev.attendees)}
+                  </span>
                 </div>
               </div>
             ))}
             {(!funnel || funnel.length === 0) && (
-              <div className="text-xs text-zinc-500">No events in this range.</div>
+              <div className="text-xs text-zinc-500">
+                No events in {year}.
+              </div>
             )}
           </div>
         </div>
 
-        {/* Attendance Heatmap – lightweight placeholder until chart */}
+        {/* Attendance Heatmap */}
         <div className="rounded-2xl border border-zinc-800 bg-black/40 p-4">
-          <div className="mb-2 text-sm text-zinc-400">Attendance Heatmap</div>
+          <div className="mb-2 text-sm text-zinc-400">
+            Attendance Heatmap <span className="text-xs text-zinc-500">({year})</span>
+          </div>
           {(!heatmap || heatmap.length === 0) ? (
-            <div className="text-xs text-zinc-500">No attendance yet.</div>
+            <div className="text-xs text-zinc-500">
+              No attendance yet for {year}.
+            </div>
           ) : (
             <div className="grid grid-cols-7 gap-1 text-center text-xs">
-              {/* Collapse heatmap counts into simple DOW totals */}
-              {[1,2,3,4,5,6,7].map((dow) => {
-                const total = heatmap.filter(h => h.dow === dow).reduce((a,b)=>a+(b.attendees||0),0);
-                const label = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][dow-1];
+              {[1, 2, 3, 4, 5, 6, 7].map((dow) => {
+                const total = heatmap
+                  .filter((h) => h.dow === dow)
+                  .reduce((a, b) => a + (b.attendees || 0), 0);
+                const label = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][dow - 1];
                 return (
-                  <div key={dow} className="rounded-lg border border-zinc-800 p-2">
+                  <div
+                    key={dow}
+                    className="rounded-lg border border-zinc-800 p-2"
+                  >
                     <div className="text-zinc-400">{label}</div>
                     <div className="mt-1 font-semibold">{fmtNum(total)}</div>
                   </div>
@@ -323,25 +368,42 @@ export default function ClubAnalytics() {
 
         {/* Top Content – simple list */}
         <div className="rounded-2xl border border-zinc-800 bg-black/40 p-4 lg:col-span-2">
-          <div className="mb-2 text-sm text-zinc-400">Top Content</div>
+          <div className="mb-2 text-sm text-zinc-400">
+            Top Content <span className="text-xs text-zinc-500">({year})</span>
+          </div>
           <div className="space-y-2">
             {(topContent ?? []).slice(0, 5).map((m) => (
-              <div key={m.message_id} className="flex items-center justify-between rounded-xl border border-zinc-800 p-2 text-sm">
+              <div
+                key={m.message_id}
+                className="flex items-center justify-between rounded-xl border border-zinc-800 p-2 text-sm"
+              >
                 <div className="truncate pr-2">
                   <div className="text-xs text-zinc-500">
-                    {m.created_at ? new Date(m.created_at).toLocaleString() : "—"}
+                    {m.created_at
+                      ? new Date(m.created_at).toLocaleString()
+                      : "—"}
                   </div>
-                  <div className="text-xs text-zinc-500">Author: {m.author_id || "—"}</div>
+                  <div className="text-xs text-zinc-500">
+                    Author: {m.author_id || "—"}
+                  </div>
                 </div>
                 <div className="flex items-center gap-2 text-xs">
-                  <span className="rounded border border-zinc-700 px-2 py-0.5">💬 {fmtNum(m.comments)}</span>
-                  <span className="rounded border border-zinc-700 px-2 py-0.5">👍 {fmtNum(m.reactions)}</span>
-                  <span className="rounded border border-yellow-700 text-yellow-300 px-2 py-0.5">Score {fmtNum(m.score)}</span>
+                  <span className="rounded border border-zinc-700 px-2 py-0.5">
+                    💬 {fmtNum(m.comments)}
+                  </span>
+                  <span className="rounded border border-zinc-700 px-2 py-0.5">
+                    👍 {fmtNum(m.reactions)}
+                  </span>
+                  <span className="rounded border border-yellow-700 text-yellow-300 px-2 py-0.5">
+                    Score {fmtNum(m.score)}
+                  </span>
                 </div>
               </div>
             ))}
             {(!topContent || topContent.length === 0) && (
-              <div className="text-xs text-zinc-500">No posts in this range.</div>
+              <div className="text-xs text-zinc-500">
+                No posts for {year}.
+              </div>
             )}
           </div>
         </div>

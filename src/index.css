@@ -7,6 +7,32 @@
 
 /* ───────────────────────── Base vars & utilities ───────────────────────── */
 
+a,
+a:hover,
+a:focus {
+  text-decoration: none;
+  color: #ffffff;
+}
+
+a:visited {
+  color: #ffffff;
+}
+
+/* Keep header nav links white (override global link colour) */
+header nav a,
+header nav a:visited,
+header nav a:hover,
+header nav a:focus {
+  color: #ffffff !important;
+}
+
+/* Force all yellow-accent text to render white sitewide */
+[class*="text-yellow-"],
+[class*="text-superfilm-yellow"],
+[class*="text-[rgb(var(--brand-yellow))]"] {
+  color: #ffffff !important;
+}
+
 :root {
   /* Fallback edge color for very wide screens */
   --site-bg-edge: #0a0a0a;
@@ -134,3 +160,21 @@
 /* Optional per-theme intensity nudges */
 .sf-theme[data-theme="neon-nights"] .taste-card.engraved::before { opacity: .18; }
 .sf-theme[data-theme="golden-noir"]  .taste-card.engraved::before { opacity: .15; }
+
+/* TMDB attribution badge for TMDB-hosted imagery */
+.tmdb-credit::after {
+  content: "TMDB";
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(0, 0, 0, 0.65);
+  padding: 2px 6px;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(2px);
+  pointer-events: none;
+  z-index: 2;
+}

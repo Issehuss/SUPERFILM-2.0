@@ -9,23 +9,15 @@ import {
   fetchTopContent,
 } from "../lib/analyticsApi";
 
-/** Simple date helper: start of N-day window (inclusive). */
-function startOfNDays(days) {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() - (days - 1));
-  return d;
-}
-
 const UUID_RE = /^[0-9a-f-]{16,}$/i;
 
 /**
  * useClubAnalytics
  * @param {Object} params
  * @param {string} params.clubParam - club slug or uuid (from route)
- * @param {"7d"|"30d"|"90d"} [params.range="30d"] - time window
+ * @param {number} params.year - calendar year (e.g. 2025)
  */
-export default function useClubAnalytics({ clubParam, range = "30d" }) {
+export default function useClubAnalytics({ clubParam, year }) {
   const [clubId, setClubId] = useState(null);
 
   // data
@@ -40,12 +32,13 @@ export default function useClubAnalytics({ clubParam, range = "30d" }) {
   const [error, setError] = useState(null);
   const abortRef = useRef({ cancelled: false });
 
+  // ---- compute annual window for this year ----
   const { from, to } = useMemo(() => {
-    const now = new Date();
-    if (range === "7d") return { from: startOfNDays(7), to: now };
-    if (range === "90d") return { from: startOfNDays(90), to: now };
-    return { from: startOfNDays(30), to: now };
-  }, [range]);
+    const y = Number(year) || new Date().getFullYear();
+    const fromDate = new Date(Date.UTC(y, 0, 1, 0, 0, 0));      // Jan 1, 00:00 UTC
+    const toDate = new Date(Date.UTC(y + 1, 0, 1, 0, 0, 0));    // Jan 1 next year
+    return { from: fromDate, to: toDate };
+  }, [year]);
 
   /** Resolve slug → id (or accept UUID as-is) */
   useEffect(() => {
@@ -87,42 +80,47 @@ export default function useClubAnalytics({ clubParam, range = "30d" }) {
     };
   }, [clubParam]);
 
-  const doFetch = useCallback(async (id) => {
-    if (!id) return;
+  const doFetch = useCallback(
+    async (id) => {
+      if (!id) return;
 
-    setLoading(true);
-    setError(null);
-    abortRef.current.cancelled = false;
+      setLoading(true);
+      setError(null);
+      abortRef.current.cancelled = false;
 
-    try {
-      const [k, s, f, h, t] = await Promise.all([
-        fetchKpis(id, from, to),
-        fetchSeries(id, from, to),
-        fetchEventFunnel(id, from, to),
-        fetchHeatmap(id, from, to),
-        fetchTopContent(id, from, to, 20),
-      ]);
+      try {
+        const [k, s, f, h, t] = await Promise.all([
+          fetchKpis(id, from, to),
+          fetchSeries(id, from, to),
+          fetchEventFunnel(id, from, to),
+          fetchHeatmap(id, from, to),
+          fetchTopContent(id, from, to, 20),
+        ]);
 
-      if (abortRef.current.cancelled) return;
+        if (abortRef.current.cancelled) return;
 
-      setKpis(k || null);
-      setSeries(Array.isArray(s) ? s : []);
-      setFunnel(Array.isArray(f) ? f : []);
-      setHeatmap(Array.isArray(h) ? h : []);
-      setTopContent(Array.isArray(t) ? t : []);
-    } catch (e) {
-      if (!abortRef.current.cancelled) setError(e);
-    } finally {
-      if (!abortRef.current.cancelled) setLoading(false);
-    }
-  }, [from, to]);
+        setKpis(k || null);
+        setSeries(Array.isArray(s) ? s : []);
+        setFunnel(Array.isArray(f) ? f : []);
+        setHeatmap(Array.isArray(h) ? h : []);
+        setTopContent(Array.isArray(t) ? t : []);
+      } catch (e) {
+        if (!abortRef.current.cancelled) setError(e);
+      } finally {
+        if (!abortRef.current.cancelled) setLoading(false);
+      }
+    },
+    [from, to]
+  );
 
-  /** Fetch when clubId or range window changes */
+  /** Fetch when clubId or year window changes */
   useEffect(() => {
     if (!clubId) return;
     abortRef.current.cancelled = false;
     doFetch(clubId);
-    return () => { abortRef.current.cancelled = true; };
+    return () => {
+      abortRef.current.cancelled = true;
+    };
   }, [clubId, doFetch]);
 
   /** Public refresh */
@@ -135,7 +133,7 @@ export default function useClubAnalytics({ clubParam, range = "30d" }) {
     clubId,
     from,
     to,
-    range,
+    year,
 
     // data
     kpis,

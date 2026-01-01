@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import TmdbImage from "./TmdbImage";
 
 export default function EventPosterPicker({ onSelect }) {
   const [query, setQuery] = useState("");
@@ -92,10 +93,11 @@ export default function EventPosterPicker({ onSelect }) {
                 }
                 className="cursor-pointer group"
               >
-                <img
+                <TmdbImage
                   src={poster}
                   alt={movie.title}
-                  className="w-full h-full object-cover rounded-lg border border-zinc-700 group-hover:border-yellow-400 transition-all"
+                  className="w-full h-full rounded-lg border border-zinc-700"
+                  imgClassName="transition-all group-hover:border-yellow-400 rounded-lg"
                 />
               </div>
             );

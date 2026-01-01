@@ -21,5 +21,6 @@ export default function MyClub() {
   }
 
   // has membership → jump straight to the club page
-  return <Navigate to={`/clubs/${club.slug}`} replace />;
+  const target = club.slug || club.id;
+  return <Navigate to={`/clubs/${target}`} replace />;
 }

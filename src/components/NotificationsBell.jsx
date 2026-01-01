@@ -205,7 +205,12 @@ export default function NotificationsBell() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="relative inline-flex items-center justify-center h-9 w-9 rounded-full bg-white/10 hover:bg-white/15 ring-1 ring-white/10"
+        className={
+          `relative inline-flex items-center justify-center h-9 w-9 rounded-full
+           bg-white/10 hover:bg-white/15 ring-1 ring-white/10
+           ${unread > 0 ? "animate-[pulse_1.5s_ease-in-out_infinite] ring-yellow-400" : ""}`
+        }
+        
         aria-label="Open notifications"
       >
         <Bell size={18} />

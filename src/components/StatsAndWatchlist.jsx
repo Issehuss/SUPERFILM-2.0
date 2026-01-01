@@ -3,6 +3,7 @@ import React from "react";
 import { useNavigate } from "react-router-dom";
 import RolePill from "./RolePill.jsx";
 import useWatchlist from "../hooks/useWatchlist";
+import TmdbImage from "./TmdbImage";
 
 export default function StatsAndWatchlist({ statsData, userId, movieRoute = "/movies" }) {
     // premium check (passed implicitly via theme)
@@ -108,10 +109,11 @@ export default function StatsAndWatchlist({ statsData, userId, movieRoute = "/mo
                     title={m?.title || ""}
                   >
                     {poster ? (
-                      <img
+                      <TmdbImage
                         src={poster}
                         alt={m?.title || "Poster"}
-                        className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                        className="w-full h-full"
+                        imgClassName="transition-transform group-hover:scale-105"
                         onError={(e) => {
                           e.currentTarget.onerror = null;
                           e.currentTarget.src =

@@ -1,10 +1,11 @@
 // src/components/Moodboard.jsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import supabase from "../supabaseClient";
 import { X, Plus, ArrowUpRight, Search, Upload, Trash2, Type, Palette } from "lucide-react";
 import { searchMovies } from "../lib/tmdbClient"; // ✅ shared TMDB helper
 import { toast } from "react-hot-toast";
 import useEntitlements from "../hooks/useEntitlements";
+import { trackEvent } from "../lib/analytics";
 
 /**
  * Moodboard item types:
@@ -32,6 +33,8 @@ export default function Moodboard({
   const limits = {
     moodboardTiles: rawLimits?.moodboardTiles ?? 6, // default 6 for free
   };
+  const isPremium = rawLimits?.isPremium === true;
+  const limitHitOnceRef = useRef(false);
 
   // allow external triggers (from EditProfilePanel) to force a reload
   const [refreshTick, setRefreshTick] = useState(0);
@@ -143,20 +146,46 @@ export default function Moodboard({
   function handleAddTileRequest() {
     // Block only when adding a brand-new tile (not replacing)
     if (replaceIndex == null && items.length >= limits.moodboardTiles) {
+      const limitCount = limits.moodboardTiles;
+      const premiumLimit = 120;
+      if (!limitHitOnceRef.current) {
+        trackEvent("limit_hit", {
+          feature: "moodboard",
+          plan: rawLimits?.plan || (isPremium ? "directors_cut" : "free"),
+        });
+        limitHitOnceRef.current = true;
+      }
+      const copy = isPremium
+        ? `Moodboard limit reached (${limitCount} stills).`
+        : `You’ve reached the free Moodboard limit (${limitCount} stills). Director’s Cut unlocks up to ${premiumLimit} stills — try it free for 14 days.`;
+      const showUpsell = !isPremium;
+
       toast((t) => (
-        <div className="text-sm">
-          You’ve reached the free moodboard limit of {limits.moodboardTiles} tiles.
-          <div className="mt-2">
-            <a
-              href="/premium"
-              onClick={() => toast.dismiss(t.id)}
-              className="inline-flex items-center justify-center rounded-2xl px-3 py-1.5 font-semibold text-black bg-gradient-to-br from-yellow-300 to-amber-500 ring-1 ring-yellow-300/60 transition hover:scale-[1.02]"
+        <div className="text-sm text-left space-y-3 text-white">
+          <div className="font-semibold">{copy}</div>
+          {showUpsell ? (
+            <button
+              type="button"
+              onClick={() => {
+                window.location.href = "/premium";
+                toast.dismiss(t.id);
+                trackEvent("trial_started", { source: "moodboard_limit" });
+              }}
+              className="inline-flex items-center justify-center rounded-full px-4 py-2 font-semibold text-black bg-white hover:bg-white/90 text-sm transition shadow-[0_0_0_1px_rgba(255,255,255,0.08)]"
             >
-              Upgrade to Director’s Cut for unlimited tiles
-            </a>
-          </div>
+              Start 14-day free trial
+            </button>
+          ) : null}
         </div>
-      ), { duration: 6000 });
+      ), {
+        duration: 7000,
+        style: {
+          background: "rgba(10,10,10,0.92)",
+          color: "#fff",
+          border: "1px solid rgba(255,255,255,0.08)",
+          boxShadow: "0 12px 30px rgba(0,0,0,0.45)",
+        },
+      });
       return;
     }
     openAddDialog({ replaceAt: null });
@@ -170,7 +199,18 @@ export default function Moodboard({
 
     // Safety: enforce limit in case something bypassed the button guard
     if (replaceIndex == null && items.length >= limits.moodboardTiles) {
-      toast.error("Moodboard limit reached. Upgrade to Director’s Cut for unlimited tiles.");
+      const limitCopy = isPremium
+        ? "Moodboard limit reached."
+        : `You’ve reached the free Moodboard limit (${limits.moodboardTiles} stills). Director’s Cut unlocks up to 120 stills — try it free for 14 days.`;
+      toast(limitCopy, {
+        duration: 6000,
+        style: {
+          background: "rgba(10,10,10,0.92)",
+          color: "#fff",
+          border: "1px solid rgba(255,255,255,0.08)",
+          boxShadow: "0 12px 30px rgba(0,0,0,0.45)",
+        },
+      });
       return;
     }
 
@@ -194,7 +234,7 @@ export default function Moodboard({
 
   return (
     <div className={`rounded-2xl border border-zinc-800 bg-black/40 p-4 ${className}`}>
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-2 flex items-center justify-between">
         <h3 className="text-lg font-semibold text-white">Moodboard</h3>
         <div className="flex items-center gap-2">
           {isOwner && (
@@ -219,6 +259,7 @@ export default function Moodboard({
           </button>
         </div>
       </div>
+      {/* helper text intentionally removed per request */}
 
       {/* Collage preview: tight grid, no borders, slight overlap */}
       <div className="grid grid-cols-6 auto-rows-[60px] gap-0" style={{ overflow: "visible" }}>
@@ -593,7 +634,7 @@ function AddReplaceDialog({ onCancel, onConfirm, initialType = "image" }) {
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-3">
                 <div className="text-xs text-zinc-500">
-                  Add images via TMDB search below. (External URLs will be available with Premium.)
+                  Add images via TMDB search below. Expanded TMDB image sets are coming soon!
                 </div>
               </div>
 

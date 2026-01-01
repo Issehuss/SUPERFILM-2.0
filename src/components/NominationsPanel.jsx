@@ -3,6 +3,7 @@ import React, { useMemo, useState, useEffect } from "react";
 import supabase from "../supabaseClient.js";
 import { Trash2 } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import TmdbImage from "./TmdbImage";
 
 const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -218,14 +219,14 @@ export default function NominationsPanel({
                   className="block w-full text-left"
                 >
                   <div className="aspect-[2/3] w-full overflow-hidden">
-                    <img
+                    <TmdbImage
                       src={
                         n.poster_path
                           ? `https://image.tmdb.org/t/p/w500${n.poster_path}`
                           : "/fallback-next.jpg"
                       }
                       alt={n.movie_title}
-                      className="h-full w-full object-cover"
+                      className="h-full w-full"
                       loading="lazy"
                     />
                   </div>

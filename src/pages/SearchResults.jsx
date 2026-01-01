@@ -2,6 +2,7 @@
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { searchMovies } from "../lib/tmdbClient";
+import TmdbImage from "../components/TmdbImage";
 
 function SearchResults() {
   const [searchParams] = useSearchParams();
@@ -72,10 +73,10 @@ function SearchResults() {
               >
                 <div className="aspect-[2/3] w-full overflow-hidden rounded-lg bg-white/5 ring-1 ring-white/10">
                   {poster ? (
-                    <img
+                    <TmdbImage
                       src={poster}
                       alt={movie.title}
-                      className="h-full w-full object-cover"
+                      className="h-full w-full"
                       loading="lazy"
                     />
                   ) : (

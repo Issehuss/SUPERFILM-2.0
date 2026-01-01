@@ -70,8 +70,8 @@ const AvatarCropper = ({
 
   const handleCropAndSave = async () => {
     try {
-      const croppedImage = await getCroppedImg(imageSrc, croppedAreaPixels);
-      onCropComplete(croppedImage);
+      const { blob, previewUrl } = await getCroppedImg(imageSrc, croppedAreaPixels);
+      onCropComplete(blob, previewUrl);
     } catch (e) {
       console.error("Cropping failed:", e);
     }
@@ -117,7 +117,7 @@ const AvatarCropper = ({
             max={effMaxZoom}
             step={0.05}
             onChange={(_, z) => setZoom(Number(z))}
-            sx={{ color: "#facc15" }}
+            sx={{ color: "#ffffff" }}
           />
 
           <div className="flex justify-end gap-3 mt-4">

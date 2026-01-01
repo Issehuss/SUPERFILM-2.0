@@ -9,7 +9,8 @@ const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 export default function ClubRequests() {
   const { clubParam } = useParams();
   const navigate = useNavigate();
-  const { user } = useUser();
+  const { user, sessionLoaded } = useUser();
+
 
   const [club, setClub] = useState(null);          // { id, name, slug }
   const [rows, setRows] = useState([]);            // pending requests
@@ -59,7 +60,8 @@ export default function ClubRequests() {
 
  // 2) load pending requests for this club (two queries: requests -> profiles)
 useEffect(() => {
-    if (!club?.id) return;
+  if (!sessionLoaded) return;   // ★ never fetch before JWT is restored
+  if (!club?.id) return;
     let alive = true;
   
     (async () => {
@@ -102,7 +104,8 @@ useEffect(() => {
     })();
   
     return () => { alive = false; };
-  }, [club?.id]);
+  }, [club?.id, sessionLoaded]);
+
   
 
   // 3) approve / reject

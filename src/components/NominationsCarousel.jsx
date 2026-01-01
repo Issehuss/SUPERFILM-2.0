@@ -1,15 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import supabase from "../supabaseClient";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
+import TmdbImage from "./TmdbImage";
+import { toast } from "react-hot-toast";
 
 const TMDB_BASE = "https://image.tmdb.org/t/p/w500";
 const AUTO_MS = 6000;
 
-export default function NominationsCarousel({ clubId, canEdit = false }) {
+export default function NominationsCarousel({
+  clubId,
+  canEdit = false,
+  isEditing = false,
+  onRemove,
+}) {
   const [rows, setRows] = useState([]);
   const [idx, setIdx] = useState(0);
   const [isHover, setHover] = useState(false);
+  const [confirmingId, setConfirmingId] = useState(null);
   const ref = useRef(null);
+  const pageCount = useMemo(
+    () => (rows.length ? Math.ceil(rows.length / 4) : 0),
+    [rows.length]
+  );
 
   // --- Fetch nominations directly ---
   useEffect(() => {
@@ -45,12 +57,12 @@ export default function NominationsCarousel({ clubId, canEdit = false }) {
 
   // --- Auto scroll ---
   useEffect(() => {
-    if (rows.length <= 4 || isHover) return;
+    if (pageCount <= 1 || isHover) return;
     const t = setInterval(() => {
-      setIdx((i) => (i + 1) % Math.ceil(rows.length / 4));
+      setIdx((i) => (i + 1) % pageCount);
     }, AUTO_MS);
     return () => clearInterval(t);
-  }, [rows.length, isHover]);
+  }, [pageCount, isHover]);
 
   // --- Page grouping ---
   const pages = useMemo(() => {
@@ -60,24 +72,23 @@ export default function NominationsCarousel({ clubId, canEdit = false }) {
   }, [rows]);
 
   async function removeNomination(id) {
-    const confirmed = window?.confirm
-      ? window.confirm("Remove this nomination?")
-      : true;
-  
-    if (!confirmed) return;
-  
     const { error } = await supabase.from("nominations").delete().eq("id", id);
     if (error) {
       console.error(error);
       return alert("Error removing nomination.");
     }
     setRows((r) => r.filter((x) => x.id !== id));
+    setConfirmingId(null);
+    if (typeof onRemove === "function") {
+      onRemove(id);
+    }
+    toast.success("Nomination removed");
   }
   
 
   function go(delta) {
-    if (pages.length === 0) return;
-    setIdx((i) => (i + delta + pages.length) % pages.length);
+    if (pageCount === 0) return;
+    setIdx((i) => (i + delta + pageCount) % pageCount);
   }
 
   // --- Empty state ---
@@ -130,10 +141,11 @@ export default function NominationsCarousel({ clubId, canEdit = false }) {
                 key={r.id}
                 className="relative group rounded-2xl overflow-hidden bg-zinc-900/60 ring-1 ring-white/10 hover:ring-yellow-400/70 transition"
               >
-                <img
+                <TmdbImage
                   src={r.poster}
                   alt={r.title}
-                  className="block w-full h-full object-cover group-hover:scale-[1.03] transition"
+                  className="block w-full h-full"
+                  imgClassName="group-hover:scale-[1.03] transition"
                 />
 
                 {/* Overlay */}
@@ -148,15 +160,38 @@ export default function NominationsCarousel({ clubId, canEdit = false }) {
                   )}
                 </div>
 
-                {canEdit && (
-                  <button
-                    type="button"
-                    onClick={() => removeNomination(r.id)}
-                    className="absolute top-2 right-2 rounded-full bg-black/60 p-1 opacity-0 group-hover:opacity-100 transition"
-                  >
-                    <X size={16} />
-                  </button>
+                {canEdit && isEditing && (
+                  <div className="absolute top-2 right-2 flex items-center gap-2">
+                    {confirmingId === r.id ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => removeNomination(r.id)}
+                          className="rounded-full bg-yellow-500 text-black text-[10px] px-2 py-1 shadow"
+                        >
+                          Confirm
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmingId(null)}
+                          className="rounded-full bg-black/60 text-white text-[10px] px-2 py-1"
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setConfirmingId(r.id)}
+                        className="rounded-full bg-black/60 p-1 opacity-0 group-hover:opacity-100 transition"
+                        title="Remove nomination"
+                      >
+                        <X size={16} />
+                      </button>
+                    )}
+                  </div>
                 )}
+
               </div>
             ))}
           </div>

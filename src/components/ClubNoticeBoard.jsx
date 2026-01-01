@@ -4,7 +4,7 @@ import { useUser } from "../context/UserContext";
 import supabase from "../supabaseClient";
 import { Pin, Plus, History as HistoryIcon, ChevronDown } from "lucide-react";
 
-const LEADER_ROLES = ["president", "vice_president", "editor_in_chief"];
+const LEADER_ROLES = ["president", "vice_president"];
 
 export default function ClubNoticeBoard({ clubId }) {
   const { user } = useUser();

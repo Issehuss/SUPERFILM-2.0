@@ -5,7 +5,7 @@ export async function assignClubRole({ clubId, userId, role }) {
   const { error } = await supabase.rpc("assign_club_role", {
     p_club_id: clubId,
     p_user_id: userId,
-    p_role: role, // 'president' | 'vice_president' | 'editor_in_chief' | 'member'
+    p_role: role, // 'president' | 'vice_president' | 'member'
   });
   if (error) throw error;
 }

@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import supabase from "../supabaseClient";
 import { useUser } from "../context/UserContext";
+import { trackEvent } from "../lib/analytics";
 
 /**
  * Returns:
@@ -15,15 +16,20 @@ export default function useEntitlements() {
   const { user, profile } = useUser();
   const [presidentsClubs, setPresidentsClubs] = useState([]);
   const [loading, setLoading] = useState(false);
+  const limitHitRef = useMemo(() => ({ moodboard: false, clubs: false }), []);
 
   // ─────────────────────────────── Plan derivation ───────────────────────────────
   const plan = (profile?.plan || "").toLowerCase();
-  const isPremium = plan === "directors_cut" || !!profile?.is_premium;
+  const isPremium = profile?.is_premium === true || plan === "directors_cut";
   const resolvedPlan = plan || (isPremium ? "directors_cut" : "free");
 
   // Define limits per plan (client-side mirror of the DB function)
-  const LIMITS = { free: 1, directors_cut: 5 };
-  const limitForPlan = LIMITS[resolvedPlan] ?? LIMITS.free;
+  const LIMITS = {
+    free: { clubs: 1, moodboardTiles: 6 },
+    directors_cut: { clubs: 5, moodboardTiles: 120 }, // generous cap; server should enforce ultimate limit
+  };
+  const limitForPlan = LIMITS[resolvedPlan]?.clubs ?? LIMITS.free.clubs;
+  const moodboardTiles = LIMITS[resolvedPlan]?.moodboardTiles ?? LIMITS.free.moodboardTiles;
 
   // ─────────────────────────────── Fetch owned clubs ───────────────────────────────
   useEffect(() => {
@@ -95,6 +101,10 @@ export default function useEntitlements() {
       console.error("RPC can_create_club error:", error);
       return false;
     }
+    if (data === false && !limitHitRef.clubs) {
+      trackEvent("limit_hit", { feature: "clubs", plan: resolvedPlan || "free" });
+      limitHitRef.clubs = true;
+    }
     return Boolean(data);
   }
 
@@ -103,6 +113,7 @@ export default function useEntitlements() {
     plan: resolvedPlan,
     isPremium,
     limitForPlan,
+    moodboardTiles,
   };
 
   return {

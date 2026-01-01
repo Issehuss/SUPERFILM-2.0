@@ -3,6 +3,7 @@ import React from "react";
 import PropTypes from "prop-types";
 import { motion, AnimatePresence } from "framer-motion";
 import { glowOptions } from "../constants/glowOptions";
+import TmdbImage from "../components/TmdbImage";
 
 const FavoriteFilms = ({
   films,
@@ -52,12 +53,13 @@ const FavoriteFilms = ({
               }`}
               onClick={() => enableNavigation && onFilmClick?.(film.id)}
             >
-              <img
+              <TmdbImage
                 loading="lazy"
                 decoding="async"
                 src={`https://image.tmdb.org/t/p/w500${posterPath}`}
                 alt={film.title || "Poster"}
-                className="w-full h-[278px] object-cover"
+                className="w-full h-[278px]"
+                imgClassName="rounded"
                 onError={(e) => {
                   e.currentTarget.onerror = null;
                   e.currentTarget.src = "/fallback/poster.jpg";

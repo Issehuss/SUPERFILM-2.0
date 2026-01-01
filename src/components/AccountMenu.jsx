@@ -16,6 +16,7 @@ import { useUser } from "../context/UserContext";
 import PartnerBadge from "./PartnerBadge.jsx";
 import useEntitlements from "../hooks/useEntitlements";
 import DirectorsCutBadge from "./DirectorsCutBadge";
+import FeedbackButton from "./FeedbackButton.jsx";
 
 export default function AccountMenu({ className = "" }) {
   // get auth + profile from context
@@ -28,8 +29,8 @@ export default function AccountMenu({ className = "" }) {
   const btnRef = useRef(null);
 
   const displayName = useMemo(
-    () => profile?.display_name || user?.email?.split("@")[0] || "Me",
-    [profile?.display_name, user?.email]
+    () => profile?.display_name || "Me",
+    [profile?.display_name]
   );
 
   // choose an “active” president club (from localStorage, else first)
@@ -161,12 +162,16 @@ export default function AccountMenu({ className = "" }) {
           <div className="px-3 py-2">
             <div className="text-sm font-semibold truncate flex items-center gap-2">
               <span className="truncate">{displayName}</span>
-              {isPremium && <DirectorsCutBadge className="ml-0" size="xs" />}
             </div>
             <div className="text-xs text-zinc-400 truncate">
-              {profile?.slug ? `@${profile.slug}` : user?.email}
+              {profile?.slug ? `@${profile.slug}` : "Account"}
             </div>
-            {isPartner && <PartnerBadge className="mt-1" />}
+            {(isPartner || isPremium) && (
+              <div className="flex items-center gap-2 mt-1">
+                {isPartner && <PartnerBadge className="!px-2 !py-0.5 !text-[10px]" />}
+                {isPremium && <DirectorsCutBadge className="ml-0" size="xxs" />}
+              </div>
+            )}
           </div>
 
           <div className="h-px bg-white/10" />
@@ -245,40 +250,37 @@ export default function AccountMenu({ className = "" }) {
             <span>Manage Invites</span>
           </button>
 
-          {/* Analytics */}
-          <button
-            type="button"
-            onClick={goAnalytics}
-            role="menuitem"
-            aria-disabled={!premiumEnabled}
-            className={`w-full flex items-center gap-2 px-3 py-2 text-sm rounded-2xl ${
-              premiumEnabled
-                ? "hover:bg-white/10"
-                : "cursor-not-allowed opacity-60 hover:bg-white/5 pointer-events-none"
-            }`}
-            title={
-              premiumEnabled
-                ? "Open Analytics"
-                : "Director’s Cut required (and must be a club president)"
-            }
-          >
-            <BarChart3 className="h-4 w-4" />
-            <span>Analytics</span>
-            {!premiumEnabled && <Lock className="ml-auto h-4 w-4 opacity-70" />}
-          </button>
-
           <div className="h-px bg-white/10 my-1" />
 
-          {/* ✅ Sign out */}
-          <button
-            type="button"
-            onClick={handleSignOut}
-            role="menuitem"
-            className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-white/10 rounded-2xl"
-          >
-            <LogOut className="h-4 w-4" />
-            <span>Sign out</span>
-          </button>
+{/* View Tutorial Again */}
+<button
+  type="button"
+  onClick={() => {
+    setOpen(false);
+    navigate("/onboarding");
+  }}
+  role="menuitem"
+  className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-white/10 rounded-2xl"
+>
+  <span>View tutorial again</span>
+</button>
+
+{/* Feedback */}
+<FeedbackButton variant="menu" />
+
+<div className="h-px bg-white/10 my-1" />
+
+{/* ✅ Sign out */}
+<button
+  type="button"
+  onClick={handleSignOut}
+  role="menuitem"
+  className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-white/10 rounded-2xl"
+>
+  <LogOut className="h-4 w-4" />
+  <span>Sign out</span>
+</button>
+
         </div>
       )}
     </div>

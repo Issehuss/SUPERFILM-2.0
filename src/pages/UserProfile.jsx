@@ -6,7 +6,6 @@ import supabase from "../supabaseClient";
 import { fetchActiveScheme } from "../lib/ratingSchemes";
 import RatingSchemeView from "../components/RatingSchemeView";
 import DirectorsCutBadge from "../components/DirectorsCutBadge";
-
 import { useUser } from "../context/UserContext";
 import StatsAndWatchlist from "../components/StatsAndWatchlist";
 import ClubBadge from "../components/ClubBadge";
@@ -16,10 +15,39 @@ import Moodboard from "../components/Moodboard.jsx";
 import EditProfilePanel from "../components/EditProfilePanel";
 import { getThemeVars } from "../theme/profileThemes";
 import ProfileTasteCards from "../components/ProfileTasteCards";
-import { Link } from "react-router-dom";
 import FilmTakeCard from "../components/FilmTakeCard.jsx";
+import uploadAvatar from "../lib/uploadAvatar";
 
 
+
+const PROFILE_CACHE_TTL = 1000 * 60 * 5; // 5 minutes
+const profileCacheKey = (id) => `sf.profile.cache.v1:${id}`;
+
+const readProfileCache = (id) => {
+  if (!id) return null;
+  try {
+    const raw = localStorage.getItem(profileCacheKey(id));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.ts || !parsed?.data) return null;
+    if (Date.now() - parsed.ts > PROFILE_CACHE_TTL) return null;
+    return parsed.data;
+  } catch {
+    return null;
+  }
+};
+
+const writeProfileCache = (id, data) => {
+  if (!id || !data) return;
+  try {
+    localStorage.setItem(
+      profileCacheKey(id),
+      JSON.stringify({ ts: Date.now(), data })
+    );
+  } catch {
+    // ignore storage errors (e.g., private mode)
+  }
+};
 
 // --- Local profile loader (slug or UUID) ---
 const UUID_RX =
@@ -39,13 +67,23 @@ async function loadAnyProfileLocal(identifier) {
       return data || null;
     }
 
-    const { data, error } = await supabase
+    // Try slug first (legacy), then username as a fallback
+    const { data: bySlug, error: slugErr } = await supabase
       .from("profiles")
       .select("*")
       .eq("slug", String(identifier))
       .maybeSingle();
-    if (error) throw error;
-    return data || null;
+
+    if (bySlug) return bySlug;
+    if (slugErr) console.warn("[loadAnyProfileLocal] slug lookup failed:", slugErr.message);
+
+    const { data: byUsername, error: usernameErr } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("username", String(identifier))
+      .maybeSingle();
+    if (usernameErr) throw usernameErr;
+    return byUsername || null;
   } catch (e) {
     console.error("[loadAnyProfileLocal] failed:", e);
     return null;
@@ -222,8 +260,8 @@ const UserProfile = () => {
   const [editOpen, setEditOpen] = useState(false);
 
   // Avatar editing
-  const [rawAvatarImage, setRawAvatarImage] = useState(null);
-  const [showCropper, setShowCropper] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const fileInputRef = useRef(null);
 
   // Banner overrides (local only)
   const [bannerOverride, setBannerOverride] = useState(null);
@@ -289,7 +327,8 @@ const UserProfile = () => {
       // If identifier matches my own profile → also use current profile
       if (
         profile?.id === identifier ||
-        (profile?.slug && profile.slug === identifier)
+        (profile?.slug && profile.slug === identifier) ||
+        (profile?.username && profile.username === identifier)
       ) {
         setViewProfile(profile);
         setViewLoading(false);
@@ -297,8 +336,17 @@ const UserProfile = () => {
       }
 
       // Otherwise fetch that user
+      // 1) show cached profile instantly (if fresh)
+      const cached = readProfileCache(identifier);
+      if (cached && mounted) {
+        setViewProfile(cached);
+        setViewLoading(false);
+      }
+
+      // 2) revalidate in background
       const fetched = await loadAnyProfileLocal(identifier);
       if (mounted) {
+        if (fetched) writeProfileCache(identifier, fetched);
         setViewProfile(fetched);
         setViewLoading(false);
       }
@@ -462,11 +510,14 @@ const UserProfile = () => {
   
         setFilmTakesLoading(true);
         try {
-          const { data, error } = await supabase
-            .from("film_takes")
-            .select("*")
-            .eq("user_id", viewProfile.id)
-            .order("created_at", { ascending: false })
+          // Load unified Film Takes (from club_film_takes)
+const { data, error } = await supabase
+.from("club_film_takes")
+.select("*")
+.eq("user_id", viewProfile.id)
+.eq("is_archived", false)
+.order("created_at", { ascending: false });
+
 
 
   
@@ -476,7 +527,27 @@ const UserProfile = () => {
             console.error("[film_takes] load error:", error);
             setFilmTakes([]);
           } else {
-            setFilmTakes(Array.isArray(data) ? data : []);
+            setFilmTakes(
+              Array.isArray(data)
+                ? data.map((t) => ({
+                    id: t.id,
+                    user_id: t.user_id,
+                    club_id: t.club_id,
+                    film_id: t.film_id,
+                    film_title: t.film_title,
+title: t.film_title,      // <-- THIS fixes missing names in FilmTakeCard
+
+                    text: t.take || t.text || "",
+                    rating_5: typeof t.rating_5 === "number" ? t.rating_5 : t.rating || null,
+                    aspect_key: t.aspect_key,
+                    poster_path: t.poster_path,
+                    created_at: t.created_at,
+                    updated_at: t.updated_at,
+                    screening_id: t.screening_id,
+                  }))
+                : []
+            );
+            
           }
         } catch (e) {
           if (!cancelled) {
@@ -535,29 +606,57 @@ const UserProfile = () => {
     }
   };
 
-  const handleAvatarUpload = (e) => {
+  const handleAvatarUpload = async (e) => {
+    if (uploadingAvatar) return;
     const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setRawAvatarImage(reader.result);
-      setShowCropper(true);
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const handleCropComplete = async (croppedImageUrl) => {
-    try {
-      await saveProfilePatch({ avatar_url: croppedImageUrl });
-      setAvatar(croppedImageUrl);
-    } catch (e) {
-      console.error("Failed to save avatar:", e);
+    if (!file || !user?.id) {
+      e.target.value = "";
+      return;
     }
-    setShowCropper(false);
+    setUploadingAvatar(true);
+    try {
+      const publicUrl = await uploadAvatar(file, user.id, {
+        prevUrl: viewProfile?.avatar_url || undefined,
+      });
+      await saveProfilePatch({ avatar_url: publicUrl });
+      setAvatar(publicUrl);
+      setViewProfile((prev) => (prev ? { ...prev, avatar_url: publicUrl } : prev));
+    } catch (err) {
+      console.error("Failed to save avatar:", err);
+    } finally {
+      setUploadingAvatar(false);
+      e.target.value = "";
+    }
   };
 
   const handlePanelUpdated = async (patch) => {
     if (!patch) return;
+
+    // Handle avatar uploads coming back from EditProfilePanel as data/blob URLs
+    if (typeof patch.avatar_url === "string") {
+      const src = patch.avatar_url;
+      if ((src.startsWith("data:") || src.startsWith("blob:")) && user?.id) {
+        try {
+          const res = await fetch(src);
+          const blob = await res.blob();
+          const publicUrl = await uploadAvatar(blob, user.id, {
+            prevUrl: viewProfile?.avatar_url || undefined,
+          });
+          patch = { ...patch, avatar_url: publicUrl };
+          setAvatar(publicUrl);
+          setViewProfile((prev) => (prev ? { ...prev, avatar_url: publicUrl } : prev));
+        } catch (e) {
+          console.error("Failed to persist avatar upload:", e);
+          // If upload fails, drop the avatar change so we don't store a blob: URL in DB
+          const { avatar_url, ...restPatch } = patch;
+          patch = restPatch;
+        }
+      } else if (src.startsWith("data:") || src.startsWith("blob:")) {
+        // Can't safely save a data/blob URL without a signed-in user
+        const { avatar_url, ...restPatch } = patch;
+        patch = restPatch;
+      }
+    }
 
     if (typeof patch.banner_url === "string" && patch.banner_url) {
       setBannerOverride(patch.banner_url);
@@ -603,7 +702,7 @@ const UserProfile = () => {
 
     try {
       const { error } = await supabase
-        .from("film_takes")
+      .from("club_film_takes")
         .delete()
         .eq("id", id)
         .eq("user_id", viewProfile?.id);
@@ -644,7 +743,7 @@ const UserProfile = () => {
           : null;
 
       const { data, error } = await supabase
-        .from("film_takes")
+      .from("club_film_takes")
         .update({
           rating_5: newRating,
           take: newText,
@@ -679,7 +778,7 @@ const UserProfile = () => {
   const isPremiumProfile =
     viewProfile?.plan === "directors_cut" || viewProfile?.is_premium === true;
 
-  const username = viewProfile?.slug || "username";
+  const username = viewProfile?.slug || viewProfile?.username || "username";
   const bio = viewProfile?.bio || "";
   const clubName = viewProfile?.club_tag || "";
   const avatarUrl = viewProfile?.avatar_url || "/avatars/default.jpg";
@@ -690,7 +789,7 @@ const UserProfile = () => {
     bannerGradientOverride ?? viewProfile?.banner_gradient ?? "";
 
  // allow null (default/base look) when no theme is selected
-const themeId = viewProfile?.theme_preset ?? null;
+const themeId = isPremiumProfile ? (viewProfile?.theme_preset ?? null) : null;
 const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
 
   
@@ -736,6 +835,7 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
         <div className="absolute bottom-0 left-0 w-full px-6 pb-6 z-10 flex items-end">
           <div className="flex items-end space-x-4 max-w-3xl w-full">
             <div className="relative w-24 h-24 shrink-0">
+              <div className="absolute inset-0 rounded-full bg-[radial-gradient(circle_at_30%_20%,rgba(255,215,0,0.28),rgba(0,0,0,0.9))] opacity-70 pointer-events-none" />
               <img
                 src={avatarUrl}
                 alt="Avatar"
@@ -743,15 +843,17 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
                   e.currentTarget.onerror = null;
                   e.currentTarget.src = "/avatars/default.jpg";
                 }}
-                className="w-full h-full rounded-full border-4 border-black object-cover"
+                className="w-full h-full rounded-full border border-white/20 object-cover shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_14px_30px_rgba(0,0,0,0.45)]"
               />
               {editMode && viewingOwn && (
                 <div className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center opacity-0 hover:opacity-100 transition">
                   <label
                     htmlFor="avatar-upload"
-                    className="cursor-pointer text-white text-sm px-3 py-1 rounded-full bg-black/60 border border-white/10"
+                    className={`cursor-pointer text-white text-sm px-3 py-1 rounded-full bg-black/60 border border-white/10 ${
+                      uploadingAvatar ? "opacity-60 cursor-not-allowed" : ""
+                    }`}
                   >
-                    Change
+                    {uploadingAvatar ? "Uploading…" : "Change"}
                   </label>
                   <input
                     id="avatar-upload"
@@ -759,6 +861,7 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
                     accept="image/*"
                     onChange={handleAvatarUpload}
                     className="hidden"
+                    disabled={uploadingAvatar}
                   />
                 </div>
               )}
@@ -790,7 +893,7 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
               ) : (
                 <p className="text-sm text-gray-300 mt-1 flex items-center">
                   <span>@{username}</span>
-                  {isPremiumProfile && <DirectorsCutBadge className="ml-2" size="xs" />}
+                  {isPremiumProfile && <DirectorsCutBadge className="ml-2" size="xs" active />}
                 </p>
               )}
 
@@ -850,13 +953,7 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
           movieRoute="/movie"
         />
 
-        {showCropper && rawAvatarImage && (
-          <AvatarCropper
-            imageSrc={rawAvatarImage}
-            onCropComplete={handleCropComplete}
-            onCancel={() => setShowCropper(false)}
-          />
-        )}
+        {/* Avatar cropper removed; direct file upload handles images now */}
 
         <div className="px-6 pt-6">
           <div ref={moodboardAnchorRef} id="moodboard">
@@ -892,20 +989,11 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
           </section>
         )}
 
-           {/* FILM TAKES — Preview (first 3 only) */}
-           <section className="mt-8 px-6">
+        {/* FILM TAKES — Preview (first 3 only) */}
+        <section className="mt-8 px-6">
           <div className="themed-card themed-outline forge rounded-2xl border border-zinc-800 bg-black/30 p-4">
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center mb-3">
               <h3 className="text-sm font-semibold text-white">Film Takes</h3>
-
-              {filmTakes.length > 3 && (
-                <Link
-                  to={`/u/${viewProfile?.slug || username}/takes`}
-                  className="text-xs text-yellow-400 hover:text-yellow-300 transition"
-                >
-                  View all takes →
-                </Link>
-              )}
             </div>
 
             {filmTakesLoading ? (
@@ -921,19 +1009,18 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
               <p className="text-xs text-zinc-500">No takes yet.</p>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              {filmTakes.slice(0, 3).map((take) => (
-                <div
-                  key={take.id}
-                  className={viewingOwn ? "cursor-pointer" : ""}
-                  onClick={
-                    viewingOwn ? () => handleOpenEditTake(take) : undefined
-                  }
-                >
-                  <FilmTakeCard take={take} />
-                </div>
-              ))}
-            </div>
-
+                {filmTakes.slice(0, 3).map((take) => (
+                  <div
+                    key={take.id}
+                    className={viewingOwn ? "cursor-pointer" : ""}
+                    onClick={
+                      viewingOwn ? () => handleOpenEditTake(take) : undefined
+                    }
+                  >
+                    <FilmTakeCard take={take} />
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         </section>

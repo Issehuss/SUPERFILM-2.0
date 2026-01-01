@@ -1,6 +1,7 @@
 // src/components/FavoriteFilmsPicker.jsx
 import { useMemo, useState } from "react";
 import { searchMovies } from "../lib/tmdbClient";
+import TmdbImage from "./TmdbImage";
 
 /**
  * Props:
@@ -117,7 +118,7 @@ export default function FavoriteFilmsPicker({
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3">
             {value.map((m) => (
               <div key={m.id} className="relative group">
-                <img
+                <TmdbImage
                   src={
                     m.poster_path
                       ? `https://image.tmdb.org/t/p/w342${m.poster_path}`
@@ -162,7 +163,7 @@ export default function FavoriteFilmsPicker({
                   : "");
               return (
                 <div key={hit.id} className="relative">
-                  <img
+                  <TmdbImage
                     src={posterUrl || "https://via.placeholder.com/342x513?text=No+Poster"}
                     alt={hit.title}
                     className={`rounded-lg shadow w-full h-auto ${

@@ -18,6 +18,7 @@ import {
 import { useUser } from "../context/UserContext";
 import "react-datepicker/dist/react-datepicker.css";
 import supabase from "../supabaseClient.js";
+import TmdbImage from "../components/TmdbImage";
 import uploadAvatar from "../lib/uploadAvatar";
 import { toast } from "react-hot-toast";
 import useStaff from "../hooks/useStaff";
@@ -91,6 +92,34 @@ const AvatarCropper = lazy(() => import("../components/AvatarCropper"));
 
 // UUID detector
 const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const CLUB_CACHE_TTL = 1000 * 60 * 5; // 5 minutes
+const clubCacheKey = (id) => `sf.club.cache.v1:${id}`;
+
+const readClubCache = (id) => {
+  if (!id) return null;
+  try {
+    const raw = localStorage.getItem(clubCacheKey(id));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.ts || !parsed?.data) return null;
+    if (Date.now() - parsed.ts > CLUB_CACHE_TTL) return null;
+    return parsed.data;
+  } catch {
+    return null;
+  }
+};
+
+const writeClubCache = (id, data) => {
+  if (!id || !data) return;
+  try {
+    localStorage.setItem(
+      clubCacheKey(id),
+      JSON.stringify({ ts: Date.now(), data })
+    );
+  } catch {
+    // ignore storage write failures (private mode, quota)
+  }
+};
 
 
 
@@ -179,6 +208,45 @@ const TicketCard = ({ title, tagline, location, datetime, onClick }) => (
 const fallbackNext = '/fallback-next.jpg';
 const fallbackBanner = '/fallback-banner.jpg';
 const fallbackAvatar = '/avatars/default.jpg';
+const fallbackLegacy = '/fallback-next.jpg'; // replaces any old test.jpg/blob fallback
+
+const isBadPoster = (src) => {
+  if (typeof src !== "string") return false;
+  const s = src.trim();
+  return s === "test.jpg" || s === "/test.jpg" || s.endsWith("/test.jpg");
+};
+
+// Normalize poster path/URL handling so we only persist TMDB paths (no size) and render w500 URLs once
+const stripTmdbSizePrefix = (path) =>
+  path.replace(/^\/?w(45|92|154|185|300|342|500|780|1280)\//i, "/").replace(/^\/+/, "/");
+
+const extractTmdbPath = (poster) => {
+  if (!poster || typeof poster !== "string") return null;
+  if (isBadPoster(poster)) return null;
+  if (poster.includes("image.tmdb.org/t/p/")) {
+    const [, suffixRaw] = poster.split("image.tmdb.org/t/p/");
+    if (!suffixRaw) return null;
+    return stripTmdbSizePrefix(`/${suffixRaw}`);
+  }
+  if (poster.startsWith("/")) return stripTmdbSizePrefix(poster);
+  return null;
+};
+
+const normalizeTmdbPoster = (poster) => {
+  const path = extractTmdbPath(poster);
+  if (!path) return { path: null, url: null };
+  return { path, url: `https://image.tmdb.org/t/p/w500${path}` };
+};
+
+const safeImageSrc = (src, fallback) => {
+  if (!src) return fallback;
+  if (typeof src === "string" && src.startsWith("blob:")) {
+    return fallback;
+  }
+  if (isBadPoster(src)) return fallbackLegacy;
+  return src;
+};
+
 // Upload any blob/dataURL to Supabase storage and return a cache-busted public URL
 // Convert various cropper outputs to a Blob
 async function normalizeToBlob(result) {
@@ -252,10 +320,6 @@ async function uploadToBucket({ bucket, path, file, contentType = "image/jpeg" }
   return url ? `${url}?v=${Date.now()}` : null;
 }
 
-
-
-
-
 const cleanTitleForSearch = (title) =>
   title.replace(/screening of/gi, '').replace(/discussion night/gi, '').replace(/['"]/g, '').trim();
 
@@ -292,37 +356,75 @@ const ROLE = { PRESIDENT: 'president', VICE: 'vice_president', NONE: null };
 
 
 function mapClubRowToUI(row) {
+  if (!row) {
+    return {
+      id: null,
+      slug: null,
+      name: "",
+      tagline: "",
+      about: "",
+      location: "",
+      banner: fallbackBanner,
+      profileImageUrl: "",
+      nameLastChangedAt: null,
+      nextEvent: null,
+      featuredFilms: [],
+      featuredMap: {},
+      membersList: [],
+      members: 0,
+      activityFeed: [],
+    };
+  }
+
+  const nextEvent = row.next_screening
+    ? {
+        title: row.next_screening.film_title || "Screening",
+        date: row.next_screening.screening_at || null,
+        location: row.next_screening.location || row.location || "",
+        caption: row.next_screening.caption || "",
+        poster: normalizeTmdbPoster(row.next_screening.film_poster).url || null,
+        movieId: row.next_screening.film_id || null,
+        attendingCount: Number(row?.next_screening?.attending_count) || 0,
+        primeLocation: row.next_screening.location || row.location || "",
+        genreFocus: Array.isArray(row.genre_focus) ? row.genre_focus : [],
+        meetingSchedule: row.meeting_schedule || "",
+      }
+    : null;
+
   return {
     id: row.id,
     slug: row.slug || null,
     name: row.name,
-    tagline: row.tagline || '',
-    about: row.about || '',
-    location: row.location || '',
-    banner: row.banner_url || fallbackBanner,
-    profileImageUrl: row.profile_image_url || '',
+    tagline: row.tagline || "",
+    about: row.about || "",
+    location: row.location || "",
+    banner: safeImageSrc(row.banner_url, fallbackBanner),
+    profileImageUrl: safeImageSrc(row.profile_image_url, ""),
     nameLastChangedAt: row.name_last_changed_at || null,
-    nextEvent: {
-      title: row.next_screening_title || 'Screening',
-      date: row.next_screening_at || new Date(Date.now() + 7 * 86400000).toISOString(),
-      location: row.next_screening_location || row.location || '',
-      caption: row.next_screening_caption || '',
-      poster: row.next_screening_poster || fallbackNext,
-      movieId: row.next_screening_tmdb_id || null,   // ← add this
-      attendingCount: Number(row?.attending_count) || 0,
-      location: row.location || '',
-      primeLocation: row.prime_location || row.location || '',
-      genreFocus: Array.isArray(row.genre_focus) ? row.genre_focus : [],
-      meetingSchedule: row.meeting_schedule || '',
-    },
-    
-    featuredFilms: Array.isArray(row.featured_posters) ? row.featured_posters : [],
+
+    // ---------------------------------------------------------------
+    // NEXT EVENT (now correctly pulled ONLY from club_next_screening)
+    // ---------------------------------------------------------------
+    nextEvent,
+
+    // -----------------------
+    // Featured Films (unchanged)
+    // -----------------------
+    featuredFilms: Array.isArray(row.featured_posters)
+      ? row.featured_posters
+      : [],
     featuredMap: {}, // posterUrl -> { id, title }
+
+    // -----------------------
+    // Members (unchanged)
+    // -----------------------
     membersList: [],
     members: 0,
     activityFeed: [],
   };
 }
+
+
 
 
 function MembersDialog({
@@ -371,7 +473,7 @@ function MembersDialog({
             .map((m) => {
               const p = m.profiles || {};
               const name = p.display_name || "Member";
-              const avatar = p.avatar_url || "/avatar_placeholder.png";
+              const avatar = safeImageSrc(p.avatar_url, "/avatar_placeholder.png");
               const role = m.role;
 
               return (
@@ -397,9 +499,6 @@ function MembersDialog({
                       {role === "vice_president" && (
                         <span className="w-3 h-3 rounded-full bg-gray-400 inline-block" title="Vice President" />
                       )}
-                      {role === "editor_in_chief" && (
-                        <span className="w-3 h-3 rounded-full bg-blue-400 inline-block" title="Editor in Chief" />
-                      )}
                     </p>
                   </div>
 
@@ -418,22 +517,6 @@ function MembersDialog({
                           className="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700"
                         >
                           Make VP
-                        </button>
-                      )}
-
-                      {role === "editor_in_chief" ? (
-                        <button
-                          onClick={() => setMemberRole(p.id, "member")}
-                          className="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700"
-                        >
-                          Remove EIC
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => setMemberRole(p.id, "editor_in_chief")}
-                          className="text-[11px] px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700"
-                        >
-                          Make EIC
                         </button>
                       )}
 
@@ -470,122 +553,11 @@ function MembersDialog({
 
 
 
-  // --- put this ABOVE `export default function ClubProfile()` ---
-
-
-// ⬇️ put this ABOVE `export default function ClubProfile()`
-// ⬇️ put this ABOVE `export default function ClubProfile()`
-
-function LeaveClubMenu({ clubId, isMember, isPresident, members }) {
-  const { user } = useUser();
-  const navigate = useNavigate();
-  const [open, setOpen] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
-  const [showTransfer, setShowTransfer] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [nextPresident, setNextPresident] = useState(null);
-
-  if (!isMember) return null;
-
-  function handleLeaveClick() {
-    if (isPresident) {
-      const others = members.filter(m => m.user_id !== user.id);
-      if (others.length === 0) {
-        // Only member → delete club path
-        setShowConfirm(true);
-      } else {
-        // Must transfer first
-        setNextPresident(others[0].user_id);
-        setShowTransfer(true);
-      }
-    } else {
-      setShowConfirm(true);
-    }
-  }
-
-  async function leaveClub() {
-    setBusy(true);
-    try {
-      await supabase
-        .from("club_members")
-        .delete()
-        .eq("club_id", clubId)
-        .eq("user_id", user.id);
-
-      navigate("/create-club", { replace: true });
-      setTimeout(() => window.location.reload(), 0);
-    } finally { setBusy(false); }
-  }
-
-  async function transferAndLeave() {
-    setBusy(true);
-    try {
-      // 1) assign new president
-      await supabase
-        .from("club_members")
-        .update({ role: "president" })
-        .eq("club_id", clubId)
-        .eq("user_id", nextPresident);
-
-      // 2) downgrade you to member
-      await supabase
-        .from("club_members")
-        .update({ role: "member" })
-        .eq("club_id", clubId)
-        .eq("user_id", user.id);
-
-      // 3) now leave normally
-      await leaveClub();
-    } finally { setBusy(false); }
-  }
-
-
-
-  return (
-    <>
-      {/* Leave option in menu */}
-      <button onClick={handleLeaveClick} className="text-red-300">Leave club</button>
-
-      {/* Transfer presidency modal */}
-      {showTransfer && (
-        <div className="modal">
-          <h3>Transfer presidency</h3>
-          <select value={nextPresident} onChange={e => setNextPresident(e.target.value)}>
-            {members
-              .filter(m => m.user_id !== user.id)
-              .map(m => (
-                <option key={m.user_id} value={m.user_id}>
-                  {m.profiles?.display_name || "Unnamed"}
-                </option>
-              ))}
-          </select>
-
-          <button onClick={() => setShowTransfer(false)}>Cancel</button>
-          <button disabled={busy} onClick={transferAndLeave}>Confirm transfer</button>
-        </div>
-      )}
-
-      {/* Normal leave confirm (or delete if only member) */}
-      {showConfirm && (
-        <div className="modal">
-          <h3>{members.length === 1 ? "Delete club?" : "Leave club?"}</h3>
-          <button onClick={() => setShowConfirm(false)}>Cancel</button>
-          <button disabled={busy} onClick={leaveClub}>
-            {busy ? "Leaving…" : members.length === 1 ? "Yes, delete club" : "Yes, leave"}
-          </button>
-        </div>
-      )}
-    </>
-  );
-}
-
-
-
   
 
+  
 function useFilmTakes() {
-  const { user, profile, saveProfilePatch, isPartner, hasRole } = useUser();
-
+  const { user, profile, saveProfilePatch, isPartner, hasRole, sessionLoaded } = useUser();
 
   async function addTake({ text, rating_5 = null, aspect_key = null, movie, club }) {
     if (!user?.id) throw new Error("Not signed in");
@@ -599,13 +571,23 @@ function useFilmTakes() {
       aspect_key: aspect_key || null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
-      movie: movie ? {
-        id: movie.id ?? null,
-        title: movie.title ?? movie.name ?? null,
-        year: movie.year ?? null,
-        poster: movie.poster ?? null,
-      } : null,
-      club: club ? { id: club.id ?? null, name: club.name ?? null, slug: club.slug ?? null } : null,
+      movie: movie
+        ? {
+            id: movie.id ?? null,
+            title: movie.title ?? movie.name ?? null,
+            year: movie.year ?? null,
+            poster: movie.poster
+  ? movie.poster.replace("https://image.tmdb.org/t/p/w500", "")
+  : null,
+          }
+        : null,
+      club: club
+        ? {
+            id: club.id ?? null,
+            name: club.name ?? null,
+            slug: club.slug ?? null,
+          }
+        : null,
       club_context: !!club,
     };
 
@@ -614,11 +596,8 @@ function useFilmTakes() {
     return next;
   }
 
-  
-
   return { addTake };
 }
-
 
 
 
@@ -690,7 +669,9 @@ function ClubAddTake({ movie, club }) {
           film_id: Number(movie.id),
           screening_id: null,
           film_title: movie.title ?? null,
-          poster_path: movie.poster ?? null,
+          poster_path: movie.poster
+  ? movie.poster.replace("https://image.tmdb.org/t/p/w500", "")
+  : null,
           rating: rating != null ? Number((Number(rating) * 2).toFixed(1)) : null, // 0–10
           take: text.trim(),
           is_archived: false,
@@ -737,9 +718,9 @@ function ClubAddTake({ movie, club }) {
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="text-sm text-yellow-400 hover:underline"
+          className="inline-flex items-center gap-2 rounded-full bg-gradient-to-r from-yellow-300 to-amber-500 px-3 py-2 text-sm font-semibold text-black shadow-[0_12px_28px_rgba(250,204,21,0.25)] hover:shadow-[0_14px_34px_rgba(250,204,21,0.35)] focus:outline-none focus:ring-2 focus:ring-yellow-400/70"
         >
-          {hasExisting ? "click to edit your take" : "click to add your take"}
+          {hasExisting ? "Edit your take" : "Add your take"}
         </button>
       ) : (
         <div className="rounded-xl border border-zinc-800 p-3 bg-black/40">
@@ -837,21 +818,184 @@ const [aspect, setAspect] = useState(null);  // standout craft key
   // 0.5–5.0
         // blurb
   
-        const { user, profile, saveProfilePatch, isPartner, hasRole } = useUser();
+        const { user, profile, saveProfilePatch, isPartner, hasRole, sessionLoaded } = useUser();
+
   const [isMember, setIsMember] = useState(false);
+  const [showLazy, setShowLazy] = useState(false);
 
   const { id: routeId, clubParam } = useParams();
   const idParam = (clubParam || routeId || '').trim();
   const navigate = useNavigate();
 
 
-  const [club, setClub] = useState(null);
+  const [club, setClub] = useState(() => readClubCache(idParam));
+
+// --- Next Screening state ---
+const [nextScreening, setNextScreening] = useState(null);
+  const [savingNext, setSavingNext] = useState(false);
+  const [partnerToolsOpen, setPartnerToolsOpen] = useState(false);
+
+  useEffect(() => {
+    let handle;
+    if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+      handle = window.requestIdleCallback(() => setShowLazy(true), { timeout: 800 });
+    } else {
+      const t = setTimeout(() => setShowLazy(true), 400);
+      handle = { timeoutId: t, isTimeout: true };
+    }
+    return () => {
+      if (handle) {
+        if (handle.isTimeout) clearTimeout(handle.timeoutId);
+        else window.cancelIdleCallback?.(handle);
+      }
+    };
+  }, []);
+
+const saveNextScreening = async () => {
+  if (savingNext) return;
+  console.info("[nextScreening] save clicked", {
+    nextScreening,
+    persistedPosterPath,
+  });
+
+  if (!club?.id) {
+    console.warn("No club.id — aborting save");
+    toast.error("No club ID — refresh and try again.");
+    return;
+  }
+
+  if (!nextScreening) {
+    console.warn("No nextScreening state — aborting");
+    toast.error("Nothing to save yet.");
+    return;
+  }
+
+  // Keep previously saved path if the current UI poster is a fallback/null
+  // Build the film_poster we will persist (TMDB path only)
+  let posterForStorage =
+    nextScreening?.posterPath ??
+    extractTmdbPath(nextScreening.poster) ??
+    persistedPosterPath ??
+    null;
+
+  // If we have a title but no poster path yet, try to fetch a TMDB poster before saving
+  if (!posterForStorage && nextScreening.title) {
+    try {
+      const guess = await fetchPosterFromTMDB(cleanTitleForSearch(nextScreening.title));
+      const guessedUrl = guess?.poster || null;
+      posterForStorage = extractTmdbPath(guessedUrl) ?? null;
+      if (posterForStorage) {
+        setNextScreening((prev) => ({
+          ...(prev || {}),
+          poster: normalizeTmdbPoster(posterForStorage).url || prev?.poster,
+          posterPath: posterForStorage,
+        }));
+      }
+    } catch (err) {
+      console.warn("[nextScreening] poster prefetch failed:", err);
+    }
+  }
+
+  // Ignore known fallbacks/bad values
+  if (posterForStorage && posterForStorage.includes("fallback-next")) {
+    posterForStorage = null;
+  }
+
+  // Convert React state → DB row
+  const payload = {
+    club_id: club.id,
+    film_id: nextScreening.filmId ?? null,
+    film_title: nextScreening.title ?? null,
+    film_poster: posterForStorage,
+    screening_at: nextScreening.date ?? null,
+    location: nextScreening.location ?? null,
+    caption: nextScreening.caption ?? null,
+  };
+
+  console.info("🔥 Payload to save:", payload);
+  toast.loading("Saving next screening…", { id: "next-save" });
+
+  setSavingNext(true);
+  const { data, error } = await supabase
+    .from("club_next_screening")
+    .upsert(payload, { onConflict: "club_id" })
+    .select()
+    .maybeSingle();
+
+  if (error) {
+    console.error("❌ Save failed:", error);
+    toast.error(error.message || "Could not save next screening.", { id: "next-save" });
+    setSavingNext(false);
+    return;
+  }
+
+  console.log("✅ Saved row:", data);
+  toast.success("Next screening saved", { id: "next-save" });
+
+  // Update local state so UI reflects DB
+  const normalized = normalizeTmdbPoster(data.film_poster);
+  const posterUrl = normalized.url || fallbackNext;
+  setNextScreening({
+    filmId: data.film_id,
+    title: data.film_title,
+    poster: posterUrl,
+    posterPath: normalized.path ?? nextScreening?.posterPath ?? null,
+    date: data.screening_at,
+    location: data.location,
+    caption: data.caption,
+    id: data.id,
+  });
+
+  // Keep club.nextEvent in sync for any components that still read from it
+  setClub((prev) =>
+    prev
+      ? {
+          ...prev,
+          nextEvent: {
+            ...(prev.nextEvent || {}),
+            title: data.film_title,
+            date: data.screening_at,
+            location: data.location,
+            caption: data.caption,
+            poster: posterUrl || prev.nextEvent?.poster,
+            movieId: data.film_id,
+          },
+        }
+      : prev
+  );
+
+  // Best-effort cleanup: if the table is missing a UNIQUE constraint on club_id,
+  // previous saves may have created extra rows. Remove any siblings so reloads
+  // can safely pick a single record.
+  try {
+    await supabase
+      .from("club_next_screening")
+      .delete()
+      .eq("club_id", club.id)
+      .neq("id", data.id);
+  } catch (cleanupErr) {
+    console.warn("[nextScreening] cleanup duplicate rows failed:", cleanupErr);
+  }
+
+  // Track which film is persisted (used elsewhere)
+  setPersistedFilmId(data.film_id ?? null);
+  setPersistedPosterPath(normalized.path ?? nextScreening?.posterPath ?? null);
+  setSavingNext(false);
+};
+
+
+// Derived values
+const nextFilmId = nextScreening?.filmId || null;
+const nextPoster = nextScreening?.poster || null;
+const nextTitle  = nextScreening?.title || null;
+
   const nextFilmAverage = club?.nextEvent?.average ?? club?.nextEvent?.avg ?? null;
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !readClubCache(idParam));
   const [notFound, setNotFound] = useState(false);
   const [lastAdded, setLastAdded] = useState(null);
   // Tracks the film_id currently persisted in DB (for archiving takes on change)
 const [persistedFilmId, setPersistedFilmId] = useState(null);
+const [persistedPosterPath, setPersistedPosterPath] = useState(null);
 
 
 
@@ -904,6 +1048,46 @@ const [nominations, setNominations] = useState([]);
 
 
 
+const [isMounted, setIsMounted] = useState(false);
+
+useEffect(() => {
+  setIsMounted(true);
+}, []);
+
+// Keep member avatars in sync when the viewer updates their profile picture
+useEffect(() => {
+  if (!user?.id || !profile?.avatar_url) return;
+
+  setMembers((prev) =>
+    Array.isArray(prev)
+      ? prev.map((m) => {
+          const matches = m?.user_id === user.id || m?.profiles?.id === user.id;
+          if (!matches) return m;
+          const profiles = {
+            ...(m.profiles || {}),
+            id: m?.profiles?.id || user.id,
+            avatar_url: profile.avatar_url,
+          };
+          return { ...m, profiles };
+        })
+      : prev
+  );
+
+  setClub((prev) =>
+    prev
+      ? {
+          ...prev,
+          membersList: Array.isArray(prev.membersList)
+            ? prev.membersList.map((m) =>
+                m.id === user.id ? { ...m, avatar: profile.avatar_url || m.avatar } : m
+              )
+            : prev.membersList,
+        }
+      : prev
+  );
+}, [user?.id, profile?.avatar_url]);
+
+
 
 
 
@@ -949,7 +1133,7 @@ const loadMembers = useCallback(async () => {
     }
 
     // merge + sort
-    const priority = { president: 0, vice_president: 1, editor_in_chief: 2, member: 3 };
+    const priority = { president: 0, vice_president: 1, member: 2 };
     const merged = (memRows || []).map(r => ({
       user_id: r.user_id,
       role: r.role || "member",
@@ -972,7 +1156,8 @@ const loadMembers = useCallback(async () => {
   } finally {
     setMembersLoading(false);
   }
-}, [club?.id]);
+}, [club?.id, sessionLoaded]);
+
 
 
 
@@ -983,7 +1168,8 @@ useEffect(() => {
   if (!club?.id) return;
   setMembersLoading(true);
   loadMembers();
-}, [club?.id, loadMembers]);
+}, [club?.id, loadMembers, sessionLoaded]);
+
 
 // RPC helpers
 const setMemberRole = async (userId, role) => {
@@ -991,7 +1177,7 @@ const setMemberRole = async (userId, role) => {
   const { error } = await supabase.rpc("set_member_role", {
     p_club: club.id,
     p_target: userId,
-    p_role: role, // 'vice_president' | 'editor_in_chief' | 'member'
+    p_role: role, // 'vice_president' | 'member'
   });
   if (error) {
     toast?.error ? toast.error(error.message) : alert(error.message);
@@ -1062,7 +1248,7 @@ useEffect(() => {
 useEffect(() => {
   let cancelled = false;
   async function fetchOpenReview() {
-    if (!club?.id || !club?.nextEvent?.movieId) {
+    if (!club?.id || !nextFilmId) {
       if (!cancelled) setOpenReview(null);
       return;
     }
@@ -1070,7 +1256,7 @@ useEffect(() => {
       .from("club_reviews")
       .select("id, club_id, tmdb_id, title, poster_url, year, state, opens_at, closes_at")
       .eq("club_id", club.id)
-      .eq("tmdb_id", club.nextEvent.movieId)
+      .eq("tmdb_id", nextFilmId)
       .eq("state", "open")
       .order("opens_at", { ascending: false })
       .limit(1)
@@ -1079,8 +1265,11 @@ useEffect(() => {
     if (!cancelled) setOpenReview(error ? null : data || null);
   }
   fetchOpenReview();
-  return () => { cancelled = true; };
-}, [club?.id, club?.nextEvent?.movieId]);
+  return () => {
+    cancelled = true;
+  };
+}, [club?.id, nextFilmId]);
+
 
 
 useEffect(() => {
@@ -1109,24 +1298,37 @@ useEffect(() => {
 
   // Loader: try UUID → slug → id (covers numeric IDs too)
   useEffect(() => {
+    if (!sessionLoaded) return;   // ★ DO NOT LOAD CLUB UNTIL JWT READY
     let cancelled = false;
+  
+    const cached = readClubCache(idParam);
+    if (cached) {
+      setClub(cached);
+      setLoading(false);
+    } else {
+      setClub(null);
+      setLoading(true);
+    }
 
     const loadClub = async () => {
       setDebugParam(idParam);
       if (!idParam) return;
-      setLoading(true);
+      setLoading((prev) => prev && !cached);
       setNotFound(false);
       setLastError(null);
       setLastTried('');
+   
+
 
       // SELECT now includes avatar + name_last_changed_at
+
       const selectCols = `
   id, slug, name, tagline, about, location,
   banner_url, profile_image_url, name_last_changed_at,
-  next_screening_title, next_screening_at, next_screening_location, next_screening_caption, next_screening_poster,
-  next_screening_tmdb_id,
-  featured_posters
+  featured_posters,
+  next_screening:club_next_screening(*)
 `;
+
 
 
       try {
@@ -1144,7 +1346,7 @@ useEffect(() => {
           if (error) setLastError(error);
           if (data) {
             const mapped = mapClubRowToUI(data);
-            if (!mapped.nextEvent.poster && mapped.nextEvent.title) {
+            if (mapped.nextEvent && !mapped.nextEvent.poster && mapped.nextEvent.title) {
               const guess = await fetchPosterFromTMDB(cleanTitleForSearch(mapped.nextEvent.title));
               mapped.nextEvent.poster = guess?.poster || fallbackNext;
             }
@@ -1152,6 +1354,7 @@ useEffect(() => {
               const raw = localStorage.getItem(`sf_featured_map_${data.id}`);
               mapped.featuredMap = raw ? JSON.parse(raw) : {};
             } catch {}
+            writeClubCache(idParam, mapped);
             setClub(mapped);
 setPersistedFilmId(mapped?.nextEvent?.movieId ?? null); // ← add this
 setNewName(mapped.name || '');
@@ -1171,8 +1374,8 @@ return;
         if (cancelled) return;
 
         if (error) setLastError(error);
-        if (!data) {
-          // 3) Try id (non-UUID)
+        if (!data && UUID_RX.test(idParam)) {
+          // 3) Try id when it looks like a valid UUID
           setLastTried((s) => `${s} → id`);
           const alt = await supabase
             .from('clubs')
@@ -1185,7 +1388,7 @@ return;
 
         if (data) {
           const mapped = mapClubRowToUI(data);
-          if (!mapped.nextEvent.poster && mapped.nextEvent.title) {
+          if (mapped.nextEvent && !mapped.nextEvent.poster && mapped.nextEvent.title) {
             const guess = await fetchPosterFromTMDB(cleanTitleForSearch(mapped.nextEvent.title));
             mapped.nextEvent.poster = guess?.poster || fallbackNext;
           }
@@ -1193,6 +1396,7 @@ return;
             const raw = localStorage.getItem(`sf_featured_map_${data.id}`);
             mapped.featuredMap = raw ? JSON.parse(raw) : {};
           } catch {}
+          writeClubCache(idParam, mapped);
           setClub(mapped);
 setPersistedFilmId(mapped?.nextEvent?.movieId ?? null); // ← add this
 setNewName(mapped.name || '');
@@ -1214,13 +1418,19 @@ return;
 
     loadClub();
     return () => { cancelled = true; };
-  }, [idParam]);
+  }, [idParam, sessionLoaded]);
+
+
+
+
 
   // Load featured films from the table (new source) and hydrate the UI shape
 useEffect(() => {
   let alive = true;
   (async () => {
-    if (!club?.id) return;
+    if (!sessionLoaded) return;
+if (!club?.id) return;
+
 
     try {
       const { data: rows, error } = await supabase
@@ -1283,25 +1493,158 @@ useEffect(() => {
   };
 }, [club?.id]);
 
+// Load Next Screening from DB into state
+useEffect(() => {
+  if (!sessionLoaded) return;
+  if (!club?.id) return;
+
+  let active = true;
+
+  (async () => {
+    // Try to load a single next screening row. If duplicates exist (no UNIQUE constraint on club_id),
+    // order and pick the newest so the UI can still hydrate.
+    const { data, error } = await supabase
+      .from("club_next_screening")
+      .select("*")
+      .eq("club_id", club.id)
+      .order("screening_at", { ascending: false, nullsLast: true })
+      .order("id", { ascending: false })
+      .limit(1);
+
+    if (!active) return;
+
+    if (error) {
+      console.warn("[nextScreening] load error:", error);
+      return;
+    }
+
+    const row = Array.isArray(data) ? data[0] : data;
+
+    if (!row) {
+      // No row — leave nextScreening null
+      return;
+    }
+
+    // ⭐ Map DB row → UI shape
+    if (row) {
+      const normalized = normalizeTmdbPoster(row.film_poster);
+      let posterUrl = normalized.url;
+      // Clean up bad poster values in DB (e.g., '/test.jpg' or blob URLs)
+      if (!normalized.path && row.film_poster) {
+        supabase
+          .from("club_next_screening")
+          .update({ film_poster: null })
+          .eq("id", row.id)
+          .eq("club_id", club.id)
+          .then(() => {
+            console.info("[nextScreening] cleaned invalid film_poster", row.film_poster);
+          })
+          .catch((err) => console.warn("[nextScreening] cleanup failed", err));
+        posterUrl = null;
+      }
+      // If DB poster missing, try TMDB fallback using title
+      if (!posterUrl && row.film_title) {
+        const guess = await fetchPosterFromTMDB(cleanTitleForSearch(row.film_title));
+        posterUrl = guess?.poster || null;
+        if (posterUrl) {
+          const guessedPath = extractTmdbPath(posterUrl);
+          if (guessedPath) {
+            setPersistedPosterPath(guessedPath);
+            // Persist the guessed poster so future loads don’t fall back again
+            try {
+              await supabase
+                .from("club_next_screening")
+                .update({ film_poster: guessedPath })
+                .eq("id", row.id)
+                .eq("club_id", club.id);
+            } catch (err) {
+              console.warn("[nextScreening] failed to persist guessed poster", err);
+            }
+          }
+        }
+      }
+      // Last resort: use static fallback
+      const finalPoster = posterUrl || fallbackNext;
+      setNextScreening({
+        filmId: row.film_id,
+        title: row.film_title,
+        poster: finalPoster,
+        posterPath: normalized.path || extractTmdbPath(posterUrl),
+        date: row.screening_at,
+        location: row.location,
+        caption: row.caption,
+        id: row.id,
+      });
+      setPersistedFilmId(row.film_id ?? null);
+      const pathToPersist = normalized.path || extractTmdbPath(posterUrl);
+      if (pathToPersist) setPersistedPosterPath(pathToPersist);
+    }
+    
+
+    console.log("[NEXT LOADER] loaded:", row);
+
+    // ⭐ Mirror into club.nextEvent for UI
+    setClub((prev) =>
+      prev
+        ? {
+            ...prev,
+            nextEvent: {
+              ...prev.nextEvent,
+              title: row.film_title,
+              date: row.screening_at,
+              location: row.location,
+              caption: row.caption,
+              poster:
+                normalizeTmdbPoster(row.film_poster).url ||
+                prev.nextEvent?.poster ||
+                fallbackNext,
+              movieId: row.film_id,
+            },
+          }
+        : prev
+    );
+  })();
+
+  return () => {
+    active = false;
+  };
+}, [club?.id, sessionLoaded]);
+
+
 
   // Normalize to pretty slug when available
   useEffect(() => {
-    if (club?.slug && clubParam && club.slug !== clubParam) {
+    const paramIsIdLike = clubParam && (UUID_RX.test(clubParam) || clubParam === club?.id);
+    if (club?.slug && paramIsIdLike && club.slug !== clubParam) {
       navigate(`/clubs/${club.slug}`, { replace: true });
     }
-  }, [club?.slug, clubParam, navigate]);
+  }, [club?.slug, club?.id, clubParam, navigate]);
 
   // Remember active club for cross-page actions (Movies → Nominate)
   useEffect(() => {
-    if (club?.id) localStorage.setItem("activeClubId", club.id);
-    if (club?.slug) localStorage.setItem("activeClubSlug", club.slug);
-  }, [club?.id, club?.slug]);
-  
-  useEffect(() => {
-    if (!club) return;
-    if (club.slug) localStorage.setItem("activeClubSlug", club.slug);
-    if (club.id)   localStorage.setItem("activeClubId", club.id);
-  }, [club?.slug, club?.id]);
+  if (club?.id) localStorage.setItem("activeClubId", club.id);
+  if (club?.slug) localStorage.setItem("activeClubSlug", club.slug);
+}, [club?.id, club?.slug]);
+
+useEffect(() => {
+  if (!club) return;
+  if (club.slug) localStorage.setItem("activeClubSlug", club.slug);
+  if (club.id)   localStorage.setItem("activeClubId", club.id);
+}, [club?.slug, club?.id]);
+
+// If we have a persisted TMDB path but the UI poster is missing or a fallback, hydrate it
+useEffect(() => {
+  if (!nextScreening?.posterPath) return;
+  const isFallback = !nextScreening.poster || isBadPoster(nextScreening.poster) || nextScreening.poster === fallbackNext;
+  if (!isFallback) return;
+  const normalized = normalizeTmdbPoster(nextScreening.posterPath);
+  if (normalized.url) {
+    setNextScreening((prev) => ({
+      ...(prev || {}),
+      poster: normalized.url,
+    }));
+  }
+}, [nextScreening?.posterPath, nextScreening?.poster]);
   
   // Hydrate members for real UUID clubs
   useEffect(() => {
@@ -1366,7 +1709,7 @@ useEffect(() => {
       }
     }
 
-    const priority = { president: 0, vice_president: 1, editor_in_chief: 2, member: 3 };
+    const priority = { president: 0, vice_president: 1, member: 2 };
     const sorted = (memRows || []).map(r => ({
       user_id: r.user_id,
       role: r.role || "member",
@@ -1414,10 +1757,6 @@ const isPresident = members?.some(
 // TMDB numeric ID for rating & takes
 
 
-  const nextEvent = club?.nextEvent || {};
-  const nextFilmId = club?.nextEvent?.movieId || null;
-const nextPoster = nextEvent.poster || nextEvent.poster_url || null;
-const nextTitle  = nextEvent.title  || nextEvent.movieTitle || null;
 
 
 
@@ -1441,7 +1780,6 @@ useEffect(() => {
         !!data ||
         isPresident ||
         isVice ||
-        hasRole("editor_in_chief") ||
         isStaff
       );
     }
@@ -1457,7 +1795,6 @@ const canSeeMembersOnly =
     isPresident ||
     isVice ||
     isStaff ||
-    (typeof hasRole === "function" && hasRole("editor_in_chief")) ||
     isMember
   );
 
@@ -1465,20 +1802,38 @@ const canSeeMembersOnly =
 
 
 
+// Update a single nextScreening + club.nextEvent field safely
+const updateField = (field, value) => {
+  // 1) Update nextScreening (source of truth)
+  setNextScreening((prev) => ({
+    ...(prev || {}),
+    [field]: value,
+  }));
 
-  const updateField = (section, field, value) => {
-    setClub((prev) => ({
-      ...prev,
-      [section]: { ...prev[section], [field]: value },
-    }));
-  };
+  // 2) Mirror into club.nextEvent
+  setClub((prev) =>
+    prev
+      ? {
+          ...prev,
+          nextEvent: {
+            ...(prev.nextEvent || {}),
+            [field]: value,
+          },
+        }
+      : prev
+  );
+};
+
+  
 
   // Hydrate recent activity feed for this club (uses the same view)
 useEffect(() => {
   let cancelled = false;
 
   (async () => {
-    if (!club?.id) {
+    if (!sessionLoaded) return;
+if (!club?.id) {
+
       setClub(prev => prev ? { ...prev, activityFeed: [] } : prev);
       return;
     }
@@ -1509,7 +1864,8 @@ useEffect(() => {
   })();
 
   return () => { cancelled = true; };
-}, [club?.id]);
+}, [club?.id, sessionLoaded]);
+
 
 useEffect(() => {
   let ignore = false;
@@ -1526,7 +1882,6 @@ useEffect(() => {
         !!data ||
         isPresident ||
         isVice ||
-        hasRole("editor_in_chief") ||
         isStaff
       );
     }
@@ -1542,40 +1897,57 @@ useEffect(() => {
 
 useEffect(() => {
   async function loadAvg() {
-    if (!club?.id || !club?.nextEvent?.movieId) { setNextAvg(null); return; }
+    if (!sessionLoaded) return;
+if (!club?.id || !nextFilmId) {
+      setNextAvg(null);
+      return;
+    }
     const { data, error } = await supabase
       .from("film_ratings")
       .select("rating")
       .eq("club_id", club.id)
-      .eq("movie_id", nextFilmId)
-    if (error) { console.warn("avg rating error:", error.message); setNextAvg(null); return; }
+      .eq("movie_id", nextFilmId);
+
+    if (error) {
+      console.warn("avg rating error:", error.message);
+      setNextAvg(null);
+      return;
+    }
     const arr = data || [];
-    const avg = arr.length ? (arr.reduce((s, r) => s + r.rating, 0) / arr.length).toFixed(1) : null;
+    const avg = arr.length
+      ? (arr.reduce((s, r) => s + r.rating, 0) / arr.length).toFixed(1)
+      : null;
     setNextAvg(avg);
   }
   loadAvg();
-}, [club?.id, club?.nextEvent?.movieId]);
+}, [club?.id, nextFilmId, sessionLoaded]);
+
+
 
 useEffect(() => {
   function onRatingsUpdated(e) {
-    if (!club?.id || !club?.nextEvent?.movieId) return;
+    if (!club?.id || !nextFilmId) return;
     if (e?.detail?.clubId !== club.id) return;
-    if (e?.detail?.filmId !== club.nextEvent.movieId) return;
-    // re-run the same average fetch
+    if (e?.detail?.filmId !== nextFilmId) return;
+
     (async () => {
       const { data } = await supabase
         .from("film_ratings")
         .select("rating")
         .eq("club_id", club.id)
-        .eq("movie_id", nextFilmId)
+        .eq("movie_id", nextFilmId);
+
       const arr = data || [];
-      const avg = arr.length ? (arr.reduce((s, r) => s + r.rating, 0) / arr.length).toFixed(1) : null;
+      const avg = arr.length
+        ? (arr.reduce((s, r) => s + r.rating, 0) / arr.length).toFixed(1)
+        : null;
       setNextAvg(avg);
     })();
   }
   window.addEventListener("ratings-updated", onRatingsUpdated);
   return () => window.removeEventListener("ratings-updated", onRatingsUpdated);
-}, [club?.id, club?.nextEvent?.movieId]);
+}, [club?.id, nextFilmId]);
+
 
 useEffect(() => {
   let cancelled = false;
@@ -1583,6 +1955,8 @@ useEffect(() => {
   async function check() {
     if (!user?.id || !club?.id) {
       if (!cancelled) setIsClubAdmin(false);
+      if (!sessionLoaded) return;
+
       return;
     }
 
@@ -1633,7 +2007,7 @@ useEffect(() => {
   return () => {
     cancelled = true;
   };
-}, [user?.id, club?.id]);
+}, [club?.id, user?.id, sessionLoaded]);
 
 
 
@@ -2149,62 +2523,8 @@ const postActivity = async (summary) => {
   }
 };
 
-  // NEW: persist next screening fields to Supabase
-  const saveNextScreening = async () => {
-    if (!club?.id) return;
-  
-    // capture what’s currently persisted as "old"
-    const oldFilmId = persistedFilmId || null;
-  
-    try {
-      // save new next screening fields
-      const { error: updErr } = await supabase
-        .from("clubs")
-        .update({
-          next_screening_title: club.nextEvent.title || null,
-          next_screening_at: club.nextEvent.date || null,
-          next_screening_location: club.nextEvent.location || null,
-          next_screening_caption: club.nextEvent.caption || null,
-          next_screening_poster: club.nextEvent.poster || null,
-          next_screening_tmdb_id: club.nextEvent.movieId || null, // new film id (may be same as before)
-        })
-        .eq("id", club.id);
-  
-      if (updErr) throw updErr;
+   
 
-          // ✅ Archive old takes when film changes (via SQL function)
-    if (oldFilmId && oldFilmId !== (club.nextEvent.movieId || null)) {
-      try {
-        await supabase.rpc("archive_old_takes", {
-          p_club: club.id,
-          p_current_film: String(club.nextEvent.movieId || ""),
-        });
-        console.log("Old takes archived successfully");
-      } catch (rpcErr) {
-        console.warn("archive_old_takes failed:", rpcErr.message);
-      }
-    }
-
-  
-      // if the film actually changed, archive old takes
-      if (oldFilmId && oldFilmId !== (club.nextEvent.movieId || null)) {
-        await supabase
-          .from("club_film_takes")
-          .update({ is_archived: true })
-          .eq("club_id", club.id)
-          .eq("movie_id", nextFilmId)
-          .eq("is_archived", false);
-      }
-      
-  
-      // update our local tracker to the new persisted film id
-      setPersistedFilmId(club.nextEvent.movieId || null);
-    } catch (e) {
-      console.error("Failed to save next screening:", e?.message || e);
-      alert("Could not save the next screening.");
-    }
-  };
-  
 
 
 
@@ -2251,8 +2571,10 @@ const postActivity = async (summary) => {
     );
   }
   
+
+
   // Countdown
-  const countdown = club?.nextEvent?.date ? getCountdown(club.nextEvent.date) : null;
+  const countdown = nextScreening?.date ? getCountdown(nextScreening.date) : null;
   // --- derived variables for Film Takes component (safe and correct)
 
 
@@ -2262,148 +2584,154 @@ const postActivity = async (summary) => {
     ? new Date(new Date(club.nameLastChangedAt).getTime() + 90 * 24 * 60 * 60 * 1000)
     : null;
   
-    return (
+  return (
       <div className="min-h-screen bg-black text-white">
-        {/* Banner */}
-        <div
-  className="h-[276px] bg-cover bg-center flex items-end px-6 py-4 relative rounded-2xl border-8 border-zinc-900 overflow-visible"
-  style={{ backgroundImage: `url(${club.banner})` }}
-  aria-label={`${club.name} banner`}
->
-          {/* LEFT: avatar + name */}
-          <div className="flex items-end gap-4">
-            <div className="relative h-20 w-20 rounded-full overflow-hidden border-2 border-zinc-800 bg-zinc-900">
-              <img
-                src={club.profileImageUrl || fallbackAvatar}
-                alt={`${club.name} avatar`}
-                className="h-full w-full object-cover"
-              />
-              {isEditing && isPresident && (
-                <label className="absolute bottom-0 right-0 mb-1 mr-1 inline-flex items-center justify-center rounded-full bg-black/70 hover:bg-black/90 w-8 h-8 cursor-pointer ring-1 ring-zinc-700">
-                  <ImagePlus className="w-4 h-4" />
-                  <input
-  type="file"
-  accept="image/*"
-  className="hidden"
-  onChange={(e) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    // preview in cropper first
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setRawAvatarImage(reader.result);    // dataURL to feed cropper
-      setShowAvatarCropper(true);
-    };
-    reader.readAsDataURL(f);
-    e.currentTarget.value = "";
-  }}
-/>
+{/* Banner */}
+{isMounted && (
+  <div
+    className="h-[276px] bg-cover bg-center flex items-end px-6 py-4 relative rounded-2xl border-8 border-zinc-900 overflow-visible"
+    style={{ backgroundImage: `url(${safeImageSrc(club.banner, fallbackBanner)})` }}
+    aria-label={`${club.name} banner`}
+  >
+    {/* Legibility gradient overlays */}
+    <div
+      className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/35 to-transparent"
+      aria-hidden="true"
+    />
+    <div
+      className="absolute inset-0 bg-gradient-to-r from-black/35 via-transparent to-black/35"
+      aria-hidden="true"
+    />
 
-                </label>
-              )}
-            </div>
-    
-            <div className="pb-1">
-              {isEditing && isPresident ? (
-                <div className="flex flex-col">
-                  <input
-                    className="bg-transparent border-b border-neutral-600 focus:outline-none text-3xl font-bold"
-                    value={newName}
-                    onChange={(e) => setNewName(e.target.value)}
-                    maxLength={80}
-                    placeholder="Club name"
-                  />
-                  <div className="flex items-center gap-2 mt-2">
-                    <button
-                      onClick={handleRenameClub}
-                      className="px-3 py-1 rounded bg-yellow-500 text-black text-sm hover:bg-yellow-400"
-                      disabled={uploadingAvatar}
-                    >
-                      Save name
-                    </button>
-                    <span className="inline-flex items-center gap-1 text-xs opacity-70">
-                      <Shield size={14} /> Presidents only
-                    </span>
-                  </div>
-                  {!!renameError && (
-                    <span className="text-red-400 text-xs mt-1">{renameError}</span>
-                  )}
-                  {!!renameOk && (
-                    <span className="text-green-400 text-xs mt-1">{renameOk}</span>
-                  )}
-                  {nextRenameDate && (
-                    <div className="text-xs opacity-70 mt-1">
-                      Next rename after: {nextRenameDate.toLocaleDateString()}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <h1 className="text-3xl font-bold">{club.name}</h1>
-              )}
-            </div>
-          </div>
-    
-          {/* RIGHT: banner controls */}
-<div className="absolute top-3 right-3 z-20 flex items-center gap-2">
-  {canEdit && isEditing && (
-    <>
-      {/* Upload banner */}
-      <label
-        className="inline-flex items-center justify-center rounded-full bg-black/60 hover:bg-black/80 p-2 ring-1 ring-white/10 cursor-pointer"
-        aria-label="Upload new banner image"
-      >
-        <ImagePlus size={18} />
-        <input
-          type="file"
-          accept="image/*"
-          onChange={(e) => handleImageUpload(e, "banner")}
-          className="hidden"
+    {/* LEFT: avatar + name */}
+    <div className="relative z-10 flex items-end gap-4">
+      <div className="relative h-20 w-20 rounded-full overflow-hidden border-2 border-zinc-800 bg-zinc-900">
+        <img
+            src={safeImageSrc(club.profileImageUrl || fallbackAvatar, fallbackAvatar)}
+          alt={`${club.name} avatar`}
+          className="h-full w-full object-cover"
         />
-      </label>
+        {isEditing && isPresident && (
+          <label className="absolute bottom-0 right-0 mb-1 mr-1 inline-flex items-center justify-center rounded-full bg-black/70 hover:bg-black/90 w-8 h-8 cursor-pointer ring-1 ring-zinc-700">
+            <ImagePlus className="w-4 h-4" />
+            <input
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (!f) return;
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                  setRawAvatarImage(reader.result);
+                  setShowAvatarCropper(true);
+                };
+                reader.readAsDataURL(f);
+                e.currentTarget.value = "";
+              }}
+            />
+          </label>
+        )}
+      </div>
 
-      {/* Re-crop banner */}
-      <button
-        onClick={openReCrop}
-        title="Re-crop banner"
-        type="button"
-        className="rounded-full bg-black/60 hover:bg-black/80 p-2 ring-1 ring-white/10"
-        aria-label="Re-crop banner"
-      >
-        <CropIcon size={18} />
-      </button>
-    </>
-  )}
+      <div className="pb-1">
+        {isEditing && isPresident ? (
+          <div className="flex flex-col">
+            <input
+              className="bg-transparent border-b border-neutral-600 focus:outline-none text-3xl font-bold"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              maxLength={80}
+              placeholder="Club name"
+            />
+            <div className="flex items-center gap-2 mt-2">
+              <button
+                onClick={handleRenameClub}
+                className="px-3 py-1 rounded bg-yellow-500 text-black text-sm hover:bg-yellow-400"
+                disabled={uploadingAvatar}
+              >
+                Save name
+              </button>
+              <span className="inline-flex items-center gap-1 text-xs opacity-70">
+                <Shield size={14} /> Presidents only
+              </span>
+            </div>
+            {!!renameError && (
+              <span className="text-red-400 text-xs mt-1">{renameError}</span>
+            )}
+            {!!renameOk && (
+              <span className="text-green-400 text-xs mt-1">{renameOk}</span>
+            )}
+            {nextRenameDate && (
+              <div className="text-xs opacity-70 mt-1">
+                Next rename after: {nextRenameDate.toLocaleDateString()}
+              </div>
+            )}
+          </div>
+        ) : (
+          <h1 className="text-3xl font-bold">{club.name}</h1>
+        )}
+      </div>
+    </div>
 
-  {/* Ellipsis / Leave club */}
-  <LeaveClubMenu
-  clubId={club.id}
-  isMember={isMember}
-  isPresident={isPresident}   // <-- add this
-  members={members}           // <-- so we can choose successor
-/>
+    {/* RIGHT: banner controls */}
+    <div className="absolute top-3 right-3 z-20 flex items-center gap-2">
+      {canEdit && isEditing && (
+        <>
+          {/* Upload banner */}
+          <label
+            className="inline-flex items-center justify-center rounded-full bg-black/60 hover:bg-black/80 p-2 ring-1 ring-white/10 cursor-pointer"
+            aria-label="Upload new banner image"
+          >
+            <ImagePlus size={18} />
+            <input
+              type="file"
+              accept="image/*"
+              onChange={(e) => handleImageUpload(e, "banner")}
+              className="hidden"
+            />
+          </label>
 
+          {/* Re-crop banner */}
+          <button
+            onClick={openReCrop}
+            title="Re-crop banner"
+            type="button"
+            className="rounded-full bg-black/60 hover:bg-black/80 p-2 ring-1 ring-white/10"
+            aria-label="Re-crop banner"
+          >
+            <CropIcon size={18} />
+          </button>
+        </>
+      )}
 
+      {/* Edit toggle */}
+      {canEdit && (
+        <button
+          onClick={async () => {
+            if (isEditing) {
+            }
+            setIsEditing((prev) => !prev);
+          }}
+          className="bg-zinc-800 px-3 py-1 rounded text-sm hover:bg-zinc-700"
+          type="button"
+        >
+          {isEditing ? "Finish Editing" : "Edit"}
+        </button>
+      )}
+    </div>
+  </div>
+)}
+{/* end banner */}
 
-  {/* Edit toggle */}
-  {canEdit && (
-    <button
-      onClick={() => setIsEditing(!isEditing)}
-      className="bg-zinc-800 px-3 py-1 rounded text-sm hover:bg-zinc-700"
-      type="button"
-    >
-      {isEditing ? "Finish Editing" : "Edit"}
-    </button>
-  )}
-</div>
-
-        </div>
-        {/* end banner */}
     
        {/* Notice Board — now global, under the banner */}
 <div className="mt-6">
-  <Suspense fallback={<div className="text-xs text-zinc-500 px-6">Loading board…</div>}>
-    <ClubNoticeBoard clubId={club.id} />
-  </Suspense>
+  {showLazy && (
+    <Suspense fallback={<div className="text-xs text-zinc-500 px-6">Loading board…</div>}>
+      <ClubNoticeBoard clubId={club.id} />
+    </Suspense>
+  )}
 </div>
 
 {/* Partner-only moderation UI; old PointsReviewPanel is deprecated */}
@@ -2419,23 +2747,35 @@ const postActivity = async (summary) => {
     
 {/* Partner-only moderation UI; old PointsReviewPanel.jsx is now a no-op */}
 {isPartner && (
-  <Suspense fallback={null}>
-    <PartnerPointsReviewPanel clubId={club.id} />
-  </Suspense>
-)}
+  <div className="mx-6 mt-3 rounded-xl border border-amber-400/30 bg-amber-500/10">
+    <button
+      type="button"
+      onClick={() => setPartnerToolsOpen((v) => !v)}
+      className="w-full flex items-center justify-between px-4 py-3 text-amber-50 font-semibold"
+    >
+      <span>Partner / Safety tools</span>
+      <span className="text-xs">{partnerToolsOpen ? "Hide" : "Show"}</span>
+    </button>
+    {partnerToolsOpen && (
+      <div className="px-4 pb-4 space-y-3">
+        {showLazy ? (
+          <Suspense fallback={<div className="text-xs text-amber-100/80">Loading tools…</div>}>
+            <PartnerPointsReviewPanel clubId={club.id} />
+          </Suspense>
+        ) : null}
 
+        {showLazy ? (
+          <Suspense fallback={null}>
+            <PartnerChatAuditPanel clubId={club.id} />
+          </Suspense>
+        ) : null}
 
-{isPartner && (
-  <Suspense fallback={null}>
-    <PartnerChatAuditPanel clubId={club.id} />
-  </Suspense>
-)}
-
-
-{isPartner && (
-  <div className="mx-6 mt-3 inline-flex items-center gap-2 rounded-full bg-amber-500/10 border border-amber-400/40 px-3 py-1 text-xs text-amber-100">
-    <span className="w-2 h-2 rounded-full bg-amber-300" aria-hidden />
-    Signed in as SuperFilm Partner
+        <div className="inline-flex items-center gap-2 rounded-full bg-amber-500/10 border border-amber-400/40 px-3 py-1 text-xs text-amber-100">
+          <span className="w-2 h-2 rounded-full bg-amber-300" aria-hidden />
+          Signed in as SuperFilm Partner
+        </div>
+      </div>
+    )}
   </div>
 )}
         {/* DEBUG — remove after confirming */}
@@ -2446,10 +2786,12 @@ const postActivity = async (summary) => {
  
     
         {/* Transparency: recent point awards */}
-        <div className="mt-4 px-6">
-  <Suspense fallback={<div className="text-xs text-zinc-500">Loading awards…</div>}>
-  {isPartner ? <RecentPointAwards clubId={club.id} /> : null}
-  </Suspense>
+<div className="mt-4 px-6">
+  {showLazy && (
+    <Suspense fallback={<div className="text-xs text-zinc-500">Loading awards…</div>}>
+      {isPartner ? <RecentPointAwards clubId={club.id} /> : null}
+    </Suspense>
+  )}
 </div>
 
     
@@ -2533,8 +2875,7 @@ const postActivity = async (summary) => {
       (canEdit ||
         isPresident ||
         isVice ||
-        isStaff ||
-        (typeof hasRole === "function" && hasRole("editor_in_chief")));
+        isStaff);
 
     if (!youAlready && youCanForceShow) {
       list.unshift({
@@ -2546,8 +2887,6 @@ const postActivity = async (summary) => {
           ? "president"
           : isVice
           ? "vice_president"
-          : (typeof hasRole === "function" && hasRole("editor_in_chief"))
-          ? "editor_in_chief"
           : "member",
         isPremium:
           (profile?.plan && String(profile.plan).toLowerCase() === "directors_cut") ||
@@ -2566,7 +2905,6 @@ const postActivity = async (summary) => {
           let roleLabel = null;
           if (m.role === "president") roleLabel = "President";
           if (m.role === "vice_president") roleLabel = "Vice President";
-          if (m.role === "editor_in_chief") roleLabel = "Editor-in-Chief";
           if (m.role === "partner") roleLabel = "SuperFilm Partner";
 
 
@@ -2575,16 +2913,19 @@ const postActivity = async (summary) => {
               <Link
                 to={href}
                 aria-label={roleLabel || "Member"}
-                className="block h-12 w-12 rounded-full overflow-hidden ring-1 ring-white/10 hover:ring-yellow-400/60 transition"
+                className="block h-12 w-12 rounded-full overflow-hidden ring-2 ring-yellow-400/70 hover:ring-yellow-300 focus:ring-yellow-300 transition transform duration-150 hover:scale-105 focus-visible:scale-105 shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
               >
                 <img
-                  src={m.avatar || "/avatar_placeholder.png"}
-                  alt={roleLabel || "Member"}
-                  className="h-full w-full object-cover"
-                  onError={(e) => {
-                    e.currentTarget.src = "/avatar_placeholder.png";
-                  }}
-                />
+  src={safeImageSrc(m.avatar || "/avatar_placeholder.png", "/avatar_placeholder.png")}
+  alt={roleLabel || "Member"}
+  className="h-full w-full object-cover"
+  loading="lazy"
+  onError={(e) => {
+    e.currentTarget.onerror = null;
+    e.currentTarget.src = "/avatar_placeholder.png";
+  }}
+/>
+                
               </Link>
 
               {/* username + premium badge (inline, text-only) */}
@@ -2626,26 +2967,30 @@ const postActivity = async (summary) => {
   <div className="grid md:grid-cols-2 gap-6 items-start">
     {/* Left: Poster */}
     <div>
-      {club.nextEvent?.poster && (
-        <div className="inline-block rounded-xl border-[4px] border-yellow-500 overflow-hidden group">
-          <Link
-            to={club.nextEvent?.movieId ? `/movies/${club.nextEvent.movieId}` : "#"}
-            onClick={(e) => {
-              if (!club.nextEvent?.movieId) e.preventDefault();
-            }}
-            className="block transition-transform duration-150 group-hover:scale-[1.03]"
-            title={club.nextEvent?.movieTitle || "Open movie details"}
-          >
-            <img
-              ref={posterRef}
-              src={club.nextEvent.poster}
-              alt={club.nextEvent?.movieTitle || "Next screening poster"}
-              className="block w-full h-auto object-cover"
-              loading="lazy"
-            />
-          </Link>
-        </div>
-      )}
+    {isMounted && (
+  <div
+    key={nextScreening?.poster || "next-poster"}
+    className="inline-block rounded-xl border-[4px] border-yellow-500 overflow-hidden group"
+  >
+    <Link
+      to={nextScreening?.filmId ? `/movies/${nextScreening.filmId}` : "#"}
+      onClick={(e) => {
+        if (!nextScreening?.filmId) e.preventDefault();
+      }}      
+      className="block transition-transform duration-150 group-hover:scale-[1.03]"
+      title={nextScreening?.movieTitle || "Open movie details"}
+    >
+      <img
+        ref={posterRef}
+        src={safeImageSrc(nextScreening?.poster || fallbackNext, fallbackNext)}
+        alt={nextScreening?.movieTitle || "Next screening poster"}
+        className="block w-full h-auto object-cover"
+        loading="lazy"
+      />
+    </Link>
+  </div>
+)}
+
 
       {/* Edit UI (search) */}
       {canEdit && isEditing && (
@@ -2667,26 +3012,46 @@ const postActivity = async (summary) => {
           </button>
 
           <div className="grid grid-cols-2 gap-2 mt-2">
-            {nextSearchResults.map((movie) => (
-              <img
+          {nextSearchResults.map((movie) => (
+              <TmdbImage
                 key={movie.id}
-                src={`https://image.tmdb.org/t/p/w500${movie.poster_path}`}
+                src={
+                  movie.poster_path
+                    ? `https://image.tmdb.org/t/p/w500${movie.poster_path}`
+                    : movie.posterUrl || movie.backdropUrl || fallbackNext
+                }
                 alt={`${movie.title || "Film"} poster`}
                 className="cursor-pointer hover:opacity-80"
                 onClick={() => {
                   const pickedTitle = movie.title || movie.name || "";
-                  const pickedPoster = movie.poster_path
-                    ? `https://image.tmdb.org/t/p/w500${movie.poster_path}`
-                    : (movie.posterUrl || movie.backdropUrl || "");
+                  const pickedPosterPath =
+                    movie.poster_path ||
+                    extractTmdbPath(movie.posterUrl) ||
+                    extractTmdbPath(movie.backdropUrl) ||
+                    null;
+                  const fullPoster = pickedPosterPath
+                    ? `https://image.tmdb.org/t/p/w500${pickedPosterPath}`
+                    : movie.posterUrl || movie.backdropUrl || null;
 
-                  updateField("nextEvent", "poster", pickedPoster);
-                  updateField("nextEvent", "movieId", movie.id);
-                  updateField("nextEvent", "movieTitle", pickedTitle);
-                  updateField("nextEvent", "title", pickedTitle);
+                  // ✅ Update dedicated nextScreening state (source of truth)
+                  setNextScreening((prev) => ({
+                    ...(prev || {}),
+                    filmId: movie.id,
+                    title: pickedTitle,
+                    poster: fullPoster,
+                    posterPath: pickedPosterPath,
+                  }));
+
+                  
+                  
+                  
+    
+
                   setNextSearchResults([]);
                 }}
               />
             ))}
+
           </div>
         </div>
       )}
@@ -2699,65 +3064,113 @@ const postActivity = async (summary) => {
           {/* Title */}
           <label className="block text-xs uppercase tracking-wide text-zinc-400">Title</label>
           <input
-            value={club.nextEvent.title}
-            onChange={(e) => updateField("nextEvent", "title", e.target.value)}
-            className="w-full bg-zinc-800 p-2 rounded"
-            placeholder="Film title"
-            aria-label="Event title"
-          />
+  value={nextScreening?.title || ""}
+  onChange={(e) =>
+    setNextScreening((prev) => ({
+      ...(prev || {}),
+      title: e.target.value
+    }))
+  }
+  className="w-full bg-zinc-800 p-2 rounded"
+  placeholder="Film title"
+  aria-label="Event title"
+/>
+
 
           {/* Location */}
           <label className="block text-xs uppercase tracking-wide text-zinc-400">Location</label>
           <div className="relative">
             <MapPin className="w-4 h-4 text-yellow-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
-              value={club.nextEvent.location}
-              onChange={(e) => updateField("nextEvent", "location", e.target.value)}
-              className="w-full bg-zinc-800 p-2 pl-9 rounded"
-              placeholder="Venue, area (e.g., Electric Cinema, Notting Hill)"
-              aria-label="Event location"
-            />
+  value={nextScreening?.location || ""}
+  onChange={(e) =>
+    setNextScreening((prev) => ({
+      ...(prev || {}),
+      location: e.target.value
+    }))
+  }
+  className="w-full bg-zinc-800 p-2 pl-9 rounded"
+  placeholder="Venue, area (e.g., Electric Cinema, Notting Hill)"
+  aria-label="Event location"
+/>
+
+
           </div>
 
           {/* Tagline */}
           <label className="block text-xs uppercase tracking-wide text-zinc-400">Tagline</label>
           <textarea
-            value={club.nextEvent.caption}
-            onChange={(e) => updateField("nextEvent", "caption", e.target.value)}
-            className="w-full bg-zinc-800 p-2 rounded"
-            placeholder="Optional note for the ticket"
-            aria-label="Event caption"
-          />
+  value={nextScreening?.caption || ""}
+  onChange={(e) =>
+    setNextScreening((prev) => ({
+      ...(prev || {}),
+      caption: e.target.value
+    }))
+  }
+  className="w-full bg-zinc-800 p-2 rounded"
+  placeholder="Optional note for the ticket"
+  aria-label="Event caption"
+/>
+
+
 
           {/* Date & time */}
           <label className="block text-xs uppercase tracking-wide text-zinc-400">Date &amp; time</label>
           <Suspense fallback={<div className="text-xs text-zinc-500">Date picker…</div>}>
           <DatePicker
-  selected={new Date(club.nextEvent.date)}
-  onChange={(date) => updateField("nextEvent", "date", date.toISOString())}
+  selected={nextScreening?.date ? new Date(nextScreening.date) : null}
+  onChange={(date) => {
+    if (!date) {
+      setNextScreening((prev) => ({ ...(prev || {}), date: null }));
+      return;
+    }
+    setNextScreening((prev) => ({
+      ...(prev || {}),
+      date: date.toISOString(),
+    }));
+  }}
+
   showTimeSelect
   dateFormat="Pp"
-  className="bg-zinc-800 text-white p-2 rounded w-full"
+          className="bg-zinc-800 text-white p-2 rounded w-full"
 />
+
 
 </Suspense>
 
+          <div className="mt-3 text-xs text-zinc-400">
+            Want to list a public event? Use the Events page (Discover → Events) to create it so everyone can find it.
+          </div>
 
-          {/* Save */}
-          
+          <div className="pt-2 flex justify-end">
+            <button
+              type="button"
+              onClick={saveNextScreening}
+              disabled={savingNext}
+              className="inline-flex items-center gap-2 rounded-lg bg-yellow-500 px-4 py-2 text-sm font-semibold text-black hover:bg-yellow-400 disabled:opacity-50"
+            >
+              {savingNext ? "Saving…" : "Save next screening"}
+            </button>
+          </div>
         </div>
+
       ) : canSeeMembersOnly ? (
         <TicketCard
-          title={club.nextEvent.title}
-          tagline={club.nextEvent.caption}
-          location={club.nextEvent.location}
-          datetime={new Date(club.nextEvent.date).toLocaleString([], {
-            dateStyle: "medium",
-            timeStyle: "short",
-          })}
+  title={nextScreening?.title}
+  tagline={nextScreening?.caption}
+  location={nextScreening?.location}
+  datetime={
+    nextScreening?.date
+      ? new Date(nextScreening.date).toLocaleString([], {
+          dateStyle: "medium",
+          timeStyle: "short",
+        })
+      : ""
+  }
+
           onClick={() => {
             navigate(`/clubs/${club.slug || club.id}/events/next`, {
-              state: { clubName: club.name, event: club.nextEvent, clubId: club.id },
+              state: { clubName: club.name, event: nextScreening, clubId: club.id },
             });
           }}
         />
@@ -2798,45 +3211,72 @@ const postActivity = async (summary) => {
      
 
       {/* Quick personal take (posts to profiles.film_takes) */}
-      <div className="mt-3">
+
+      {/* Film Takes */}
+      <div className="mt-5 rounded-2xl border border-zinc-800 bg-gradient-to-br from-black/55 via-zinc-900/55 to-black/60 shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800/80 backdrop-blur-sm bg-black/40">
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.18em] text-yellow-300/80">
+              Film Takes
+            </p>
+            <h3 className="text-sm font-semibold text-white">Share your club’s reactions</h3>
+          </div>
+          <div className="flex items-center gap-2">
+            <Link
+              to={`/clubs/${club.slug || club.id}/takes/archive`}
+              className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-zinc-200 hover:border-yellow-400 hover:text-white transition"
+            >
+              Archived takes
+            </Link>
             <ClubAddTake
-              movie={{ id: nextFilmId, title: nextTitle, poster: nextPoster }}
+              movie={{
+                id: nextScreening?.filmId,
+                title: nextScreening?.title,
+                poster: nextScreening?.poster,
+              }}
               club={{ id: club.id, name: club.name, slug: club.slug }}
             />
           </div>
+        </div>
 
-      {/* Film Takes */}
-      {!nextFilmId ? (
-        <div className="rounded-xl border border-zinc-800 bg-black/40 p-3 text-sm text-zinc-300 mt-3">
-          {canSeeMembersOnly ? (
-            canEdit ? (
-              <div className="flex items-center justify-between gap-3">
-                <span>No film selected for this screening.</span>
+        <div className="p-4">
+          {!nextScreening?.filmId ? (
+            <div className="rounded-xl border border-dashed border-zinc-700/80 bg-zinc-900/50 px-4 py-5 text-sm text-zinc-300 flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                {canSeeMembersOnly ? (
+                  canEdit ? (
+                    "No film selected for this screening."
+                  ) : (
+                    "A film hasn’t been chosen yet. Once the club sets the next film, members’ takes will appear here."
+                  )
+                ) : (
+                  "Film Takes are for members."
+                )}
+              </div>
+              {canSeeMembersOnly && canEdit && (
                 <button
                   type="button"
                   onClick={() => {
                     setIsEditing(true);
-                    document.querySelector('input[aria-label="Search film title"]')?.focus();
+                    document.querySelector('input[aria-label=\"Search film title\"]')?.focus();
                   }}
-                  className="rounded bg-yellow-500 px-3 py-1.5 text-black text-sm font-semibold hover:bg-yellow-400"
+                  className="rounded-full bg-yellow-400/90 hover:bg-yellow-300 px-4 py-2 text-sm font-semibold text-black focus:outline-none focus:ring-2 focus:ring-yellow-400/70"
                 >
                   Pick a film
                 </button>
-              </div>
-            ) : (
-              "A film hasn’t been chosen yet. Once the club sets the next film, members’ takes will appear here."
-            )
+              )}
+            </div>
           ) : (
-            "Film Takes are for members."
+            <div className="rounded-xl border border-zinc-800 bg-black/40 p-3">
+              <ClubFilmTakesSection
+                clubId={club.id}
+                filmId={nextScreening?.filmId}
+                canSeeMembersOnly={canSeeMembersOnly}
+              />
+            </div>
           )}
         </div>
-      ) : (
-        <ClubFilmTakesSection
-          clubId={club.id}
-          filmId={nextFilmId}
-          canSeeMembersOnly={canSeeMembersOnly}
-        />
-      )}
+      </div>
       
 
    {/* Club rating + submissions */}
@@ -2848,22 +3288,29 @@ const postActivity = async (summary) => {
 
     <div className="mt-1 text-2xl font-semibold">
     <FilmAverageCell
-  average={null}                 // for now we just show "—" and let the modal handle details
+  average={null}
   clubId={club.id}
-  filmId={nextFilmId}
-  movieTitle={nextTitle}
-  posterPath={nextPoster}
+  filmId={nextScreening?.filmId}
+  movieTitle={nextScreening?.title}
+  posterPath={nextScreening?.poster}
 />
+
 
     </div>
   </div>
 ) : null}
 
-    </div>
-  </div>
+
+
+
+
+  
+
+
+
 </div>
-
-
+</div>
+</div>
 
 
 
@@ -2875,36 +3322,42 @@ const postActivity = async (summary) => {
     canEdit={canEdit}
     onSaved={(patch) => setClub((p)=> p ? { ...p, ...patch } : p)}
   />
-  <Suspense fallback={<div className="text-xs text-zinc-500">Loading featured films…</div>}>
-    <FeaturedFilms
-      club={club}
-      canEdit={canEdit}
-      showSearch={isEditing && canEdit}
-      onChange={(next) => setClub((p)=> p ? { ...p, featuredFilms: next } : p)}
-    />
-  </Suspense>
+  {showLazy && (
+    <Suspense fallback={<div className="text-xs text-zinc-500">Loading featured films…</div>}>
+      <FeaturedFilms
+        club={club}
+        canEdit={canEdit}
+        showSearch={isEditing && canEdit}
+        onChange={(next) => setClub((p)=> p ? { ...p, featuredFilms: next } : p)}
+      />
+    </Suspense>
+  )}
 </div>
 
 
 {/* Nominations full-width band */}
 {/* Nominations full-width band */}
-<Suspense fallback={null}>
-  <NominationsCarousel
-    clubId={club.id}
-    canEdit={canEdit}
-    isEditing={isEditing}
-    nominations={nominations}
-    onRemove={removeNomination}
-  />
-</Suspense>
+{showLazy && (
+  <Suspense fallback={null}>
+    <NominationsCarousel
+      clubId={club.id}
+      canEdit={canEdit}
+      isEditing={isEditing}
+      nominations={nominations}
+      onRemove={removeNomination}
+    />
+  </Suspense>
+)}
 
 
 
 
 <div className="mt-6">
-  <Suspense fallback={<div className="text-xs text-zinc-500 px-6">Loading year in review…</div>}>
-    <ClubYearInReview clubId={club.id} />
-  </Suspense>
+  {showLazy && (
+    <Suspense fallback={<div className="text-xs text-zinc-500 px-6">Loading year in review…</div>}>
+      <ClubYearInReview clubId={club.id} />
+    </Suspense>
+  )}
 </div>
 
 {/* Full Members Dialog */}
@@ -2921,7 +3374,8 @@ const postActivity = async (summary) => {
     transferPresidency={transferPresidency}
   />
 )}
-{/* close page wrapper */}
+
 </div>
+
 );
 }

@@ -1,5 +1,5 @@
 // src/pages/UserFilmTakes.jsx
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
 import supabase from "../supabaseClient";
 import FilmTakeCard from "../components/FilmTakeCard.jsx";
@@ -68,6 +68,7 @@ export default function UserFilmTakes() {
     };
   }, [slug, id]);
 
+  // ---- Load Film Takes (Unified from club_film_takes table) ----
   const loadNextPage = useCallback(async () => {
     if (!profile?.id || loadingPage || !hasMore) return;
     setLoadingPage(true);
@@ -77,18 +78,41 @@ export default function UserFilmTakes() {
       const to = from + PAGE_SIZE - 1;
 
       const { data, error } = await supabase
-        .from("film_takes")
+        .from("club_film_takes")
         .select("*")
         .eq("user_id", profile.id)
-        .eq("visibility", "public") // public-only for MVP
-        .order("updated_at", { ascending: false })
+        .eq("is_archived", false)
+        .order("created_at", { ascending: false })
         .range(from, to);
 
       if (error) throw error;
 
       const rows = Array.isArray(data) ? data : [];
-      setTakes((prev) => [...prev, ...rows]);
+
+      // Normalize shape for FilmTakeCard
+      const normalized = rows.map((t) => ({
+        id: t.id,
+        user_id: t.user_id,
+        club_id: t.club_id,
+        film_id: t.film_id,
+        film_title: t.film_title,
+        title: t.film_title || t.title || "",
+        text: t.take || t.text || "",
+        rating:
+          typeof t.rating === "number"
+            ? t.rating
+            : typeof t.rating_5 === "number"
+            ? t.rating_5
+            : null,
+        aspect_key: t.aspect_key,
+        poster_path: t.poster_path,
+        created_at: t.created_at,
+        screening_id: t.screening_id,
+      }));
+
+      setTakes((prev) => [...prev, ...normalized]);
       pageRef.current += 1;
+
       if (rows.length < PAGE_SIZE) {
         setHasMore(false);
       }
@@ -102,14 +126,14 @@ export default function UserFilmTakes() {
     }
   }, [profile?.id, loadingPage, hasMore]);
 
-  // First page when profile is ready
+  // First page when ready
   useEffect(() => {
     if (profile?.id && !initialLoaded && !loadingPage) {
       loadNextPage();
     }
   }, [profile?.id, initialLoaded, loadingPage, loadNextPage]);
 
-  // IntersectionObserver for infinite scroll
+  // IntersectionObserver infinite scroll
   useEffect(() => {
     if (!hasMore || loadingPage) return;
     const node = sentinelRef.current;
@@ -132,10 +156,26 @@ export default function UserFilmTakes() {
   const displayName =
     profile?.display_name || profile?.slug || "Profile";
 
+  const uniqueFilmCount = useMemo(() => {
+    const seen = new Set();
+    takes.forEach((t) => {
+      const key =
+        (t.film_id !== null && t.film_id !== undefined
+          ? `id:${t.film_id}`
+          : null) ||
+        (t.film_title
+          ? `title:${t.film_title.trim().toLowerCase()}`
+          : null) ||
+        (t.title ? `title:${t.title.trim().toLowerCase()}` : null);
+      if (key) seen.add(key);
+    });
+    return seen.size;
+  }, [takes]);
+
   return (
     <div className="w-full min-h-screen bg-black text-white py-8 px-4">
       <div className="max-w-5xl mx-auto">
-        {/* Header / breadcrumb */}
+        {/* Header */}
         <div className="mb-6 flex items-center justify-between gap-3">
           <div>
             <div className="text-xs text-zinc-500 mb-1">
@@ -159,6 +199,9 @@ export default function UserFilmTakes() {
               </span>
             </h1>
           </div>
+          <div className="text-xs text-zinc-400 whitespace-nowrap">
+            {uniqueFilmCount} {uniqueFilmCount === 1 ? "film" : "films"} logged
+          </div>
         </div>
 
         {profileLoading && (
@@ -173,14 +216,14 @@ export default function UserFilmTakes() {
           </div>
         )}
 
-        {/* Grid of takes */}
+        {/* Grid */}
         <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {takes.map((take) => (
             <FilmTakeCard key={take.id} take={take} />
           ))}
         </div>
 
-        {/* Infinite scroll sentinel */}
+        {/* Infinite Scroll Sentinel */}
         <div ref={sentinelRef} className="h-10 w-full" />
 
         {loadingPage && (
@@ -190,8 +233,13 @@ export default function UserFilmTakes() {
         )}
 
         {!loadingPage && initialLoaded && takes.length === 0 && (
-          <div className="mt-8 text-sm text-zinc-400">
-            No public film takes yet.
+          <div className="mt-8 text-sm text-zinc-300 rounded-2xl border border-zinc-800 bg-black/40 p-4">
+            <div className="font-medium text-white mb-1">
+              No film takes yet.
+            </div>
+            <p className="text-zinc-400 text-xs">
+              Share your first take after a club screening to see it appear here. Your reviews will help your clubs and friends discover more great films.
+            </p>
           </div>
         )}
       </div>

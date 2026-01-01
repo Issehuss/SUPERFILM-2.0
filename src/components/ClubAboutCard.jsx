@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import supabase from "../supabaseClient";
 import { MapPin, Info, X, Plus } from "lucide-react";
 
@@ -9,15 +9,19 @@ export default function ClubAboutCard({ club, isEditing, canEdit, onSaved }) {
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [genreInput, setGenreInput] = useState("");
+  const [dirty, setDirty] = useState(false);
+  const prevEditingRef = useRef(isEditing);
 
   useEffect(() => {
     setAbout(club?.about || "");
     setLocation(club?.location || "");
     setGenres(Array.isArray(club?.genres) ? club.genres : []);
+    setDirty(false);
   }, [club]);
 
   async function save() {
     if (!canEdit || !club?.id) return;
+    if (busy) return;
     setBusy(true);
     try {
       const { error } = await supabase
@@ -26,6 +30,7 @@ export default function ClubAboutCard({ club, isEditing, canEdit, onSaved }) {
         .eq("id", club.id);
       if (error) throw error;
       onSaved?.({ about, location, genres });
+      setDirty(false);
     } catch (e) {
       alert(e.message || "Could not save About section.");
     } finally {
@@ -33,15 +38,28 @@ export default function ClubAboutCard({ club, isEditing, canEdit, onSaved }) {
     }
   }
 
+  // Auto-save when finishing editing (on transition from editing → view)
+  useEffect(() => {
+    const wasEditing = prevEditingRef.current;
+    if (wasEditing && !isEditing && dirty) {
+      save();
+    }
+    prevEditingRef.current = isEditing;
+  }, [isEditing, dirty]);
+
   function addGenre() {
     const val = genreInput.trim();
     if (!val) return;
-    if (!genres.includes(val)) setGenres([...genres, val]);
+    if (!genres.includes(val)) {
+      setGenres([...genres, val]);
+      setDirty(true);
+    }
     setGenreInput("");
   }
 
   function removeGenre(g) {
     setGenres(genres.filter((x) => x !== g));
+    setDirty(true);
   }
 
   // ---------- VIEW MODE ----------
@@ -183,17 +201,6 @@ export default function ClubAboutCard({ club, isEditing, canEdit, onSaved }) {
           className="rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 hover:text-yellow-400"
         >
           Add “Any and all genres”
-        </button>
-      </div>
-
-      <div className="mt-3 flex justify-end">
-        <button
-          type="button"
-          onClick={save}
-          disabled={busy}
-          className="rounded-lg bg-yellow-500 px-3 py-1.5 text-sm font-semibold text-black disabled:opacity-50"
-        >
-          {busy ? "Saving…" : "Save About"}
         </button>
       </div>
     </section>

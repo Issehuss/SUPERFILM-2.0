@@ -3,8 +3,15 @@ import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import supabase from "../supabaseClient.js";
 import { useUser } from "../context/UserContext";
+import TmdbImage from "../components/TmdbImage";
+import { MapPin, ChevronDown } from "lucide-react";
 
 const ROLE = { PRESIDENT: "president" };
+const MAX_CREATE_WAIT_MS = 3000;
+
+const isUuid = (v) =>
+  typeof v === "string" &&
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
 
 /* --------------------------------
    Helpers
@@ -60,74 +67,174 @@ const BACKDROPS = [
   "/59ur074TVZ13QuQvRcubrEB3Izf.jpg",
 ];
 
+const CUSTOM_CITY_OPTION = "__custom_city__";
+
+const CITY_OPTIONS = [
+  "London",
+  "Mogadishu",
+  "Warsaw",
+  "New York City",
+  "Los Angeles",
+  "Paris",
+  "Berlin",
+  "Toronto",
+  "Vancouver",
+  "Chicago",
+  "San Francisco",
+  "Mexico City",
+  "Sao Paulo",
+  "Buenos Aires",
+  "Madrid",
+  "Barcelona",
+  "Lisbon",
+  "Rome",
+  "Milan",
+  "Copenhagen",
+  "Stockholm",
+  "Oslo",
+  "Helsinki",
+  "Dublin",
+  "Amsterdam",
+  "Brussels",
+  "Zurich",
+  "Geneva",
+  "Vienna",
+  "Prague",
+  "Budapest",
+  "Istanbul",
+  "Dubai",
+  "Abu Dhabi",
+  "Riyadh",
+  "Doha",
+  "Cairo",
+  "Nairobi",
+  "Lagos",
+  "Accra",
+  "Johannesburg",
+  "Cape Town",
+  "Mogadishu",
+  "Abuja",
+  "Addis Ababa",
+  "Kigali",
+  "Kampala",
+  "Tunis",
+  "Algiers",
+  "Rabat",
+  "Dakar",
+  "Pretoria",
+  "Luanda",
+  "Maputo",
+  "Harare",
+  "Mumbai",
+  "Delhi",
+  "Bengaluru",
+  "Chennai",
+  "Kolkata",
+  "Dhaka",
+  "Karachi",
+  "Lahore",
+  "Singapore",
+  "Hong Kong",
+  "Tokyo",
+  "Osaka",
+  "Seoul",
+  "Taipei",
+  "Beijing",
+  "Shanghai",
+  "Manila",
+  "Jakarta",
+  "Sydney",
+  "Melbourne",
+  "Auckland",
+  "Wellington",
+  "Online / Virtual",
+];
+
 /* --------------------------------
    Ultra-sharp responsive backdrop with LQIP → hi-res fade
 --------------------------------- */
-const loadedHiRes = new Set();
+/* --------------------------------
+   OPTIMISED + SAFARI-STABLE BACKDROP
+--------------------------------- */
 function CinematicBackdrop({ path, priority = false, objectPosition = "50% 50%" }) {
   const safePath = useMemo(() => normalizeTmdbPath(path), [path]);
-  const low = useMemo(() => tmdbUrl("w300", safePath), [safePath]);
-  const src780 = useMemo(() => tmdbUrl("w780", safePath), [safePath]);
-  const src1280 = useMemo(() => tmdbUrl("w1280", safePath), [safePath]);
-  const srcOriginal = useMemo(() => tmdbUrl("original", safePath), [safePath]);
 
-  const [hiReady, setHiReady] = useState(
-    loadedHiRes.has(src1280) || loadedHiRes.has(srcOriginal)
-  );
+  // Use TMDB's stable CDN
+  const lqip = useMemo(() => `https://image.tmdb.org/t/p/w780${safePath}`, [safePath]);
+  const hd = useMemo(() => `https://image.tmdb.org/t/p/w1280${safePath}`, [safePath]);
+  const original = useMemo(() => `https://image.tmdb.org/t/p/original${safePath}`, [safePath]);
+
+  const [loaded, setLoaded] = useState(false);
+  const [errorFallback, setErrorFallback] = useState(false);
 
   useEffect(() => {
+    setLoaded(false);
+    setErrorFallback(false);
+
     const img = new Image();
-    img.src = src1280;
-    // @ts-ignore
-    img.fetchPriority = priority ? "high" : "auto";
-    const done = () => {
-      loadedHiRes.add(src1280);
-      setHiReady(true);
-    };
+    img.src = original;
+
+    const finish = () => setLoaded(true);
+
     if (img.decode) {
-      img.decode().then(done).catch(() => (img.onload = done));
+      img.decode().then(finish).catch(() => {
+        img.onload = finish;
+      });
     } else {
-      img.onload = done;
+      img.onload = finish;
     }
 
-    // Opportunistically warm original for very large / Hi-DPI screens
-    if ((window.devicePixelRatio || 1) > 1.4 || window.innerWidth > 1440) {
-      const o = new Image();
-      o.src = srcOriginal;
-    }
-  }, [src1280, srcOriginal, priority]);
+    img.onerror = () => {
+      // Try HD as backup
+      const fallbackImg = new Image();
+      fallbackImg.src = hd;
+      fallbackImg.onload = finish;
+      fallbackImg.onerror = () => setErrorFallback(true);
+    };
+  }, [hd, original]);
+
+  // Decide what we actually show
+  const finalHD = errorFallback ? lqip : loaded ? original : lqip;
 
   return (
     <div className="absolute inset-0">
-      {/* Instant LQIP layer */}
-      <img
-        src={low}
+      {/* LQIP BLUR BASE LAYER */}
+      <TmdbImage
+        src={lqip}
+        srcSet={`${lqip} 780w, ${hd} 1280w, ${original} 2000w`}
+        sizes="100vw"
         alt=""
-        className="absolute inset-0 w-full h-full object-cover scale-[1.02]"
-        style={{ objectPosition, filter: "blur(12px)", transform: "translateZ(0)" }}
-        loading={priority ? "eager" : "lazy"}
-        fetchpriority={priority ? "high" : "auto"}
-        decoding="async"
+        className="absolute inset-0 w-full h-full"
+        imgClassName="object-cover"
+        style={{
+          objectPosition,
+          filter: "brightness(0.92)",
+        }}
         draggable={false}
       />
 
-      {/* Responsive hi-res with original in srcset */}
-      <img
-        src={src1280}
-        alt=""
-        className="absolute inset-0 w-full h-full object-cover transition-opacity duration-700"
-        style={{ objectPosition, opacity: hiReady ? 1 : 0, willChange: "opacity" }}
-        loading={priority ? "eager" : "lazy"}
-        fetchpriority={priority ? "high" : "auto"}
-        decoding="async"
-        draggable={false}
-        srcSet={`${src780} 780w, ${src1280} 1280w, ${srcOriginal} 2560w`}
+      {/* HD LAYER */}
+      <TmdbImage
+        src={finalHD}
+        srcSet={`${lqip} 780w, ${hd} 1280w, ${original} 2000w`}
         sizes="100vw"
+        alt=""
+        className="absolute inset-0 w-full h-full"
+        imgClassName="object-cover transition-opacity duration-[900ms]"
+        style={{
+          objectPosition,
+          opacity: loaded ? 1 : 0,
+        }}
+        draggable={false}
       />
-      <div className="absolute inset-0 bg-gradient-to-t from-black/55 via-black/40 to-black/30" />
+
+      {/* GRADIENT OVERLAY */}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/35 via-black/20 to-black/10" />
     </div>
   );
 }
+
+
 
 /* --------------------------------
    Component
@@ -146,6 +253,7 @@ export default function CreateClubWizard() {
   const [tagline, setTagline] = useState("");
   const [about, setAbout] = useState("");
   const [location, setLocation] = useState("");
+  const [customLocation, setCustomLocation] = useState("");
 
   // Tone-setting film (optional)
   const [toneFilmTmdbId, setToneFilmTmdbId] = useState("");
@@ -153,6 +261,18 @@ export default function CreateClubWizard() {
 
   // Welcome message (optional)
   const [welcomeMessage, setWelcomeMessage] = useState("");
+
+  const finalLocation = useMemo(
+    () =>
+      location === CUSTOM_CITY_OPTION
+        ? customLocation.trim()
+        : location.trim(),
+    [location, customLocation]
+  );
+  const isCityValid =
+    location === CUSTOM_CITY_OPTION
+      ? finalLocation.length > 0
+      : CITY_OPTIONS.includes(location);
 
   const [submitting, setSubmitting] = useState(false);
 
@@ -171,11 +291,11 @@ export default function CreateClubWizard() {
     if (step === 1) return !!name.trim();
     if (step === 2) return !!tagline.trim();
     if (step === 3) return !!about.trim();
-    if (step === 4) return !!location.trim();
+    if (step === 4) return !!finalLocation && isCityValid;
     // 5 tone film optional
     // 6 final submit
     return true;
-  }, [step, name, tagline, about, location]);
+  }, [step, name, tagline, about, finalLocation, isCityValid]);
 
   const next = useCallback(() => {
     if (step < LAST_STEP && canGoNext) setStep((s) => s + 1);
@@ -244,12 +364,12 @@ export default function CreateClubWizard() {
     if (submitting) return;
 
     // Final guard — jump to first missing
-    if (!name || !tagline || !about || !location) {
+    if (!name || !tagline || !about || !finalLocation || !isCityValid) {
       alert("Please complete the required steps first.");
       if (!name) setStep(1);
       else if (!tagline) setStep(2);
       else if (!about) setStep(3);
-      else if (!location) setStep(4);
+      else if (!finalLocation || !isCityValid) setStep(4);
       return;
     }
 
@@ -276,13 +396,20 @@ export default function CreateClubWizard() {
         // ignore
       }
 
+      if (!isUuid(user.id)) {
+        throw new Error("owner_id must be a uuid");
+      }
+
       const payload = {
         name: safeName,
         slug: safeSlug,
         tagline: tagline.trim(),
         about: about.trim(),
-        location: location.trim(),
+        location: finalLocation,
         owner_id: user.id,
+        president_user_id: user.id,
+        created_by: user.id,
+        next_screening_id: null,
         is_published: false,
         welcome_message: (welcomeMessage || "").trim() || null,
       };
@@ -303,7 +430,8 @@ export default function CreateClubWizard() {
       navigate(`/clubs/${clubSlug}`, { replace: true });
     } catch (e) {
       console.error("[CreateClubWizard] create failed:", e);
-      alert(e?.message || "Could not create club.");
+alert("ERROR: " + (e?.message || JSON.stringify(e)));
+
     } finally {
       setSubmitting(false);
     }
@@ -314,6 +442,12 @@ export default function CreateClubWizard() {
   --------------------------------- */
   const inputCls =
     "w-full p-4 rounded-lg bg-zinc-900 border border-yellow-500/60 focus:border-yellow-400 outline-none transition";
+  const selectShellCls =
+    "relative group mt-2 rounded-xl overflow-hidden bg-black/60 border border-white/10 ring-1 ring-yellow-500/25 shadow-[0_18px_45px_rgba(0,0,0,0.55)]";
+  const selectGradientOverlay =
+    "pointer-events-none absolute inset-0 bg-gradient-to-r from-yellow-500/10 via-transparent to-amber-400/10 opacity-90 group-hover:opacity-100 transition-opacity duration-200";
+  const selectCls =
+    "w-full appearance-none bg-transparent px-5 pr-12 py-3 text-white text-sm tracking-tight outline-none";
   const textAreaCls =
     "w-full p-4 rounded-lg bg-zinc-900 border border-yellow-500/60 focus:border-yellow-400 outline-none transition";
 
@@ -442,16 +576,51 @@ export default function CreateClubWizard() {
               {step === 4 && (
                 <>
                   <div className="mb-2 text-sm text-zinc-300">
-                    <span className="font-semibold">Q:</span> Where does your club meet?
+                    <span className="font-semibold">Q:</span> Which city does your club meet in?
                   </div>
-                  <input
-                    className={inputCls}
-                    placeholder="City or area (type 'Online' if virtual)"
-                    value={location}
-                    onChange={(e) => setLocation(e.target.value)}
-                    aria-label="Club location"
-                    autoFocus
-                  />
+                  <p className="text-xs text-zinc-400 mb-2">
+                    Cities only — pick one from the list (no countries or regions). Choose
+                    &ldquo;Online / Virtual&rdquo; if you never meet in person. If your city
+                    isn’t listed, pick “Type your own” and enter it.
+                  </p>
+                  <div className={selectShellCls}>
+                    <div className={selectGradientOverlay} aria-hidden="true" />
+                    <div className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-yellow-300/80">
+                      <MapPin size={18} />
+                    </div>
+                    <select
+                      className={`${selectCls} pl-12`}
+                      value={location}
+                      onChange={(e) => setLocation(e.target.value)}
+                      aria-label="Club city"
+                      autoFocus
+                    >
+                      <option value="">Select a city</option>
+                      <option value={CUSTOM_CITY_OPTION}>Type your own city…</option>
+                      {CITY_OPTIONS.map((city) => (
+                        <option key={city} value={city}>
+                          {city}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-yellow-200/70">
+                      <ChevronDown size={18} />
+                    </div>
+                  </div>
+                  {location === CUSTOM_CITY_OPTION && (
+                    <input
+                      className={`${inputCls} mt-3`}
+                      placeholder="Type your city"
+                      value={customLocation}
+                      onChange={(e) => setCustomLocation(e.target.value)}
+                      aria-label="Custom city"
+                    />
+                  )}
+                  {!isCityValid && location && (
+                    <p className="mt-2 text-xs text-red-400">
+                      Please choose a city from the list above or type your city.
+                    </p>
+                  )}
                   <div className="mt-6 flex justify-between">
                     <button onClick={back} className="text-zinc-300 hover:text-white">
                       ← Back
@@ -540,7 +709,7 @@ export default function CreateClubWizard() {
 
           {/* Credit */}
           <div className="absolute bottom-2 right-3 text-[10px] text-white/70">
-            Images via TMDB
+            
           </div>
         </div>
       </div>

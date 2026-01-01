@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { glowOptions } from '../constants/glowOptions';
+import TmdbImage from "./TmdbImage";
 
 const FavoriteFilmsGrid = ({ films, setFilms, onFilmSelect, editMode, useGlowStyle }) => {
   const navigate = useNavigate();
@@ -47,10 +48,10 @@ const FavoriteFilmsGrid = ({ films, setFilms, onFilmSelect, editMode, useGlowSty
               onClick={() => handleClick(film.id)}
               className={`relative cursor-pointer transform transition duration-300 hover:scale-110 rounded overflow-hidden border ${useGlowStyle ? film.glowClass : 'border-white'} w-[96px] h-[144px]`}
             >
-              <img
+              <TmdbImage
                 src={`https://image.tmdb.org/t/p/w500${film.posterPath}`}
                 alt={film.title}
-                className="w-full h-full object-cover"
+                className="w-full h-full"
               />
               {editMode && useGlowStyle && (
                 <div className="absolute bottom-1 left-1 flex space-x-1">
@@ -86,7 +87,5 @@ const FavoriteFilmsGrid = ({ films, setFilms, onFilmSelect, editMode, useGlowSty
 };
 
 export default FavoriteFilmsGrid;
-
-
 
 

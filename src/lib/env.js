@@ -84,6 +84,21 @@ export const env = {
   // --- Mode flags ---
   NODE_ENV: (vite && vite.MODE) || process.env.NODE_ENV || "development",
   IS_DEV: !!((vite && vite.DEV) || process.env.NODE_ENV === "development"),
+
+  // --- Beta gate ---
+  BETA_PASSWORD: pick(
+    vite && vite.VITE_BETA_PASSWORD,
+    process.env.REACT_APP_BETA_PASSWORD,
+    process.env.NEXT_PUBLIC_BETA_PASSWORD
+  ),
+  BETA_BYPASS: toBool(
+    pick(
+      vite && (vite.VITE_BETA_BYPASS ?? vite.BETA_BYPASS),
+      process.env.REACT_APP_BETA_BYPASS,
+      process.env.NEXT_PUBLIC_BETA_BYPASS
+    ),
+    false
+  ),
 };
 
 /**
@@ -102,4 +117,12 @@ export function tmdbHeaders() {
 
 export function hasTmdbAuth() {
   return !!(env.TMDB_READ_TOKEN || env.TMDB_API_KEY);
+}
+
+export function missingCriticalEnv() {
+  const missing = [];
+  if (!env.SUPABASE_URL) missing.push("SUPABASE_URL");
+  if (!env.SUPABASE_ANON_KEY) missing.push("SUPABASE_ANON_KEY");
+  if (!env.TMDB_READ_TOKEN && !env.TMDB_API_KEY) missing.push("TMDB_READ_TOKEN / TMDB_API_KEY");
+  return missing;
 }

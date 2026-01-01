@@ -3,17 +3,40 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import supabase from "../supabaseClient";
 import { useUser } from "../context/UserContext";
+import TmdbImage from "../components/TmdbImage";
+import { toast } from "react-hot-toast";
 
 // ─── 1) env + in-memory cache (module-level so it survives re-renders) ───
 const TMDB_KEY =
   process.env.REACT_APP_TMDB_KEY || process.env.REACT_APP_TMDB_API_KEY || "";
 const TMDB_CACHE = new Map();
+const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6h shared with HomeSignedIn
+const NOW_PLAYING_CACHE_KEY = "tmdb:nowPlaying:GB:v2";
+
+const readCache = (key) => {
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.at || !parsed?.data) return null;
+    if (Date.now() - parsed.at > CACHE_TTL_MS) return null;
+    return parsed.data;
+  } catch {
+    return null;
+  }
+};
+const writeCache = (key, data) => {
+  try {
+    sessionStorage.setItem(key, JSON.stringify({ at: Date.now(), data }));
+  } catch {}
+};
 
 function Movies({ searchQuery = "" }) {
   const [movies, setMovies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
   const [nominating, setNominating] = useState({});
+  const [nominatedIds, setNominatedIds] = useState(new Set());
   const { user } = useUser();
 
   // ─── 2) debounced + cached TMDB fetch ───
@@ -33,7 +56,19 @@ function Movies({ searchQuery = "" }) {
       setMovies(TMDB_CACHE.get(cacheKey));
       setLoading(false);
     } else {
-      setLoading(true);
+      // allow cross-page session cache for the default now playing deck
+      if (!q) {
+        const cached = readCache(NOW_PLAYING_CACHE_KEY);
+        if (cached?.list?.length) {
+          TMDB_CACHE.set(cacheKey, cached.list);
+          setMovies(cached.list);
+          setLoading(false);
+        } else {
+          setLoading(true);
+        }
+      } else {
+        setLoading(true);
+      }
     }
 
     const controller = new AbortController();
@@ -59,6 +94,9 @@ function Movies({ searchQuery = "" }) {
         );
 
         TMDB_CACHE.set(cacheKey, sorted);
+        if (!q) {
+          writeCache(NOW_PLAYING_CACHE_KEY, { list: sorted });
+        }
         setMovies(sorted);
         setErr("");
       } catch (e) {
@@ -116,9 +154,64 @@ function Movies({ searchQuery = "" }) {
         } else {
           alert(error.message || "Could not add nomination.");
         }
+        return;
       }
+
+      toast.success("Nominated!");
+      setNominatedIds((prev) => {
+        const next = new Set(prev);
+        next.add(movie.id);
+        return next;
+      });
     } catch (e2) {
       alert(e2.message || "Could not add nomination.");
+    } finally {
+      setNominating((prev) => {
+        const next = { ...prev };
+        delete next[movie.id];
+        return next;
+      });
+    }
+  };
+
+  const handleUnnominate = async (movie, e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+
+    const activeClubId = localStorage.getItem("activeClubId");
+    if (!activeClubId) {
+      alert("Open your club page first so I know which club to un-nominate from.");
+      return;
+    }
+    if (!user?.id) {
+      alert("Please sign in to manage nominations.");
+      return;
+    }
+
+    setNominating((prev) => ({ ...prev, [movie.id]: true }));
+    try {
+      const { error } = await supabase
+        .from("nominations")
+        .delete()
+        .eq("club_id", activeClubId)
+        .eq("movie_id", movie.id)
+        .eq("created_by", user.id);
+
+      if (error) {
+        alert(error.message || "Could not remove nomination.");
+        return;
+      }
+
+      toast.success("Nomination removed");
+      setNominatedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(movie.id);
+        return next;
+      });
+    } catch (e2) {
+      alert(e2.message || "Could not remove nomination.");
     } finally {
       setNominating((prev) => {
         const next = { ...prev };
@@ -168,10 +261,11 @@ function Movies({ searchQuery = "" }) {
                 className="relative overflow-hidden rounded-lg transform hover:scale-105 transition-transform duration-300 hover:ring-2 hover:ring-yellow-400"
               >
                 {movie.poster_path ? (
-                  <img
+                  <TmdbImage
                     src={`https://image.tmdb.org/t/p/w500${movie.poster_path}`}
                     alt={movie.title}
-                    className="w-full h-72 object-cover aspect-[2/3]"
+                    className="w-full h-72 aspect-[2/3]"
+                    imgClassName="rounded-lg"
                     loading="lazy"
                     decoding="async"
                     referrerPolicy="no-referrer"
@@ -183,14 +277,32 @@ function Movies({ searchQuery = "" }) {
                 )}
 
                 {/* Nominate button */}
-                <button
-                  onClick={(e) => handleNominate(movie, e)}
-                  disabled={isBusy}
-                  className="absolute left-2 bottom-2 text-xs px-2 py-1 rounded bg-yellow-500 text-black hover:bg-yellow-400 disabled:opacity-60"
-                  title="Nominate this film for your active club"
-                >
-                  {isBusy ? "Adding…" : "Nominate"}
-                </button>
+              <button
+                onClick={(e) =>
+                  nominatedIds.has(movie.id)
+                    ? handleUnnominate(movie, e)
+                    : handleNominate(movie, e)
+                }
+                disabled={isBusy}
+                className={`absolute left-2 bottom-2 text-xs px-2 py-1 rounded ${
+                  nominatedIds.has(movie.id)
+                    ? "bg-red-500 text-black hover:bg-red-400"
+                    : "bg-yellow-500 text-black hover:bg-yellow-400"
+                } disabled:opacity-60`}
+                title={
+                  nominatedIds.has(movie.id)
+                    ? "Remove your nomination for this film"
+                    : "Nominate this film for your active club"
+                }
+              >
+                {isBusy
+                  ? nominatedIds.has(movie.id)
+                    ? "Removing…"
+                    : "Adding…"
+                  : nominatedIds.has(movie.id)
+                  ? "Un Nominate"
+                  : "Nominate"}
+              </button>
               </Link>
             );
           })}
@@ -201,4 +313,3 @@ function Movies({ searchQuery = "" }) {
 }
 
 export default Movies;
-

@@ -191,101 +191,128 @@ export default function EventNew() {
   const handleSave = async () => {
     if (saving) return;
     setSaveError("");
-
+  
     if (!selectedClubId) return setSaveError("Pick a club.");
     if (!posterUrl) return setSaveError("Pick a film poster.");
     if (!date) return setSaveError("Pick a date.");
-
+  
     try {
       setSaving(true);
-
-      /* Re-fetch user session reliably */
+  
       const {
         data: { session },
       } = await supabase.auth.getSession();
-
+  
       const u = session?.user || null;
       if (!u) {
         setSaveError("Session expired. Please sign in again.");
         return;
       }
-
+  
       const baseTitle = title || "Untitled Screening";
       const slug = `${slugify(baseTitle)}-${uid()}`;
-
-      const isoDate = new Date(`${date}T${time}`).toISOString();
-
+  
+      // ⭐ FIXED — Save local timestamp correctly (no toISOString)
+      const isoDate = new Date(`${date}T${time}:00`);
+      const isoString = isoDate.toISOString();
+      const dateOnly = date; // yyyy-mm-dd from input
+  
       const tags = splitCsv(tagsInput);
-
-      const details = {
-        capacity: capacity ? Number(capacity) : null,
-        waitlist,
-        hosts: splitCsv(hostsInput),
-        agenda: [],
-        schedule: [],
-        price: price || "Free",
-        rsvpRequired,
-        rsvpLink: "",
-        contactEmail: contactEmail || "",
-        accessibility: accessibility || "",
-        ageRating: ageRating || "",
-        dressCode: "",
+  
+      const basePayload = {
+        slug,
+        title: baseTitle,
+        club_id: selectedClubId,
+        club_name: clubName || null, // for schemas that still store it
+        poster_url: posterUrl,
+        venue: venue || "TBA",
+        summary: summary || "",
+        tags,
+        created_by: u.id,
       };
 
-      console.log("[DEBUG CREATED_BY CHECK]", {
-        
-        expected: "a173370f-2698-4bfe-95e7-38ba27efebd7",
-        selectedClubId,
-      });
+      // Try several schema variants to avoid 400s on missing/mismatched columns
+      const variants = [
+        { ...basePayload, datetime: isoString, date: dateOnly },
+        { ...basePayload, starts_at: isoString, date: dateOnly },
+        { ...basePayload, date_time: isoString, date: dateOnly },
+        { ...basePayload, date: dateOnly },
+      ];
 
-      const {
-        data: { session: debugSession }
-      } = await supabase.auth.getSession();
-      
-      console.log("[DEBUG SESSION]", debugSession);
-      
+      let inserted = null;
+      let lastError = null;
+      for (const payload of variants) {
+        let attemptPayload = { ...payload };
+        const tryInsert = async (body) =>
+          supabase
+            .from("events")
+            .insert(body)
+            .select("id, slug")
+            .maybeSingle();
 
-      /* --- FINAL INSERT (RLS safe) --- */
-      const { data, error } = await supabase
-        .from("events")
-        .insert({
-          slug,
-          title: baseTitle,
-          club_id: selectedClubId,
-          club_name: clubName,
-          poster_url: posterUrl,
-          date: isoDate,
-          venue: venue || "TBA",
-          summary: summary || "",
-          tags,
-          details,
-          created_by: u.id, // ⭐ RLS REQUIRED
-        })
-        .select("id, slug")
-        .maybeSingle();
+        // Up to 3 attempts per variant; remove offending columns if schema rejects them.
+        for (let i = 0; i < 3; i++) {
+          const { data, error } = await tryInsert(attemptPayload);
+          if (!error) {
+            inserted = data;
+            break;
+          }
 
-      if (error) {
-        console.error("[EventNew] Insert error:", error);
-        setSaveError("Could not save event. Please try again.");
+          // Parse "record \"new\" has no field \"xyz\"" or "column \"xyz\" does not exist"
+          const msg = error?.message || "";
+          const missingMatch =
+            msg.match(/no field \"([^\"]+)\"/) ||
+            msg.match(/column \"([^\"]+)\"/);
+          if (missingMatch) {
+            const missingKey = missingMatch[1];
+            if (missingKey && missingKey in attemptPayload) {
+              const { [missingKey]: _, ...rest } = attemptPayload;
+              attemptPayload = rest;
+              lastError = error;
+              continue;
+            }
+          }
+
+          // Specific club_name fallback
+          if (msg.includes("club_name") && "club_name" in attemptPayload) {
+            const { club_name, ...rest } = attemptPayload;
+            attemptPayload = rest;
+            lastError = error;
+            continue;
+          }
+
+          lastError = error;
+          break;
+        }
+
+        if (inserted) break;
+      }
+
+      if (!inserted) {
+        console.error("[EventNew] Insert error:", lastError);
+        const msg =
+          lastError?.message ||
+          lastError?.hint ||
+          lastError?.details ||
+          "Could not save event. Please try again.";
+        setSaveError(msg);
         return;
       }
 
-      /* Optimistic event object */
       navigate("/events", {
         replace: true,
         state: {
           newEvent: {
-            id: data?.id,
+            id: inserted?.id,
             slug,
             title: baseTitle,
             clubId: selectedClubId,
-            clubName,
-            date: isoDate,
+            clubName, // best effort; not persisted in insert
+            date: isoString,
             venue: venue || "TBA",
             posterUrl,
             tags,
             summary,
-            details,
           },
         },
       });
@@ -293,6 +320,7 @@ export default function EventNew() {
       setSaving(false);
     }
   };
+  
 
   /* ---------- Live Preview Data ---------- */
   const liveEvt = {

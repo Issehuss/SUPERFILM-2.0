@@ -6,6 +6,7 @@ import supabase from "../supabaseClient";
 import { useUser } from "../context/UserContext";
 import { openBillingPortal, startCheckout } from "../lib/billing";
 import { toast } from "react-hot-toast";
+const DIRECT_PORTAL_URL = "https://billing.stripe.com/p/login/aFa3cocP83Mx5LUgU9gQE00";
 
 // 5.7.a — human-readable status
 const humanStatus = (s) =>
@@ -174,6 +175,7 @@ useEffect(() => {
               Learn more
             </button>
           </div>
+          <p className="mt-2 text-xs text-zinc-500">14-day free trial. Cancel anytime.</p>
         </div>
       </div>
     );
@@ -269,6 +271,15 @@ useEffect(() => {
           >
             the billing portal
           </button>.
+          {" "}If the portal link doesn’t load, you can also{" "}
+          <a
+            href={DIRECT_PORTAL_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="underline underline-offset-2 hover:text-amber-100"
+          >
+            open the Stripe portal directly
+          </a>.
         </div>
 
         {/* 5.7.b — Stripe note */}

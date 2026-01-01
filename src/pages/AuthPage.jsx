@@ -1,6 +1,6 @@
 // src/pages/AuthPage.jsx
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import supabase from "../supabaseClient.js";
 import { useSearchParams } from "react-router-dom";
 
@@ -14,6 +14,8 @@ export default function AuthPage() {
   const [msg, setMsg] = useState(null); // { type: 'success' | 'error', text: string } | null
   const [search] = useSearchParams();
 const initialMode = search.get("mode") === "signup" ? "signup" : "signin";
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [marketingOptIn, setMarketingOptIn] = useState(false);
 
 
   const handleSignIn = async (e) => {
@@ -35,9 +37,17 @@ const initialMode = search.get("mode") === "signup" ? "signup" : "signin";
   const handleSignUp = async (e) => {
     e.preventDefault();
     setMsg(null);
+    if (!acceptedTerms) {
+      setMsg({ type: "error", text: "Please agree to the Terms before creating an account." });
+      return;
+    }
     setLoading(true);
     try {
-      const { error } = await supabase.auth.signUp({ email, password });
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { data: { marketing_opt_in: marketingOptIn } },
+      });
       if (error) throw error;
       setMsg({
         type: "success",
@@ -77,6 +87,41 @@ const initialMode = search.get("mode") === "signup" ? "signup" : "signin";
           placeholder="••••••••"
           required
         />
+
+        {mode === "signup" && (
+          <label className="mb-3 flex items-start gap-2 text-sm text-zinc-300">
+            <input
+              type="checkbox"
+              checked={acceptedTerms}
+              onChange={(e) => {
+                setAcceptedTerms(e.target.checked);
+                if (msg?.type === "error") setMsg(null);
+              }}
+              className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-900"
+            />
+            <span>
+              I agree to the{" "}
+              <Link to="/terms" className="text-yellow-400 hover:underline">
+                Terms & Conditions
+              </Link>
+              .
+            </span>
+          </label>
+        )}
+
+        {mode === "signup" && (
+          <label className="mb-4 flex items-start gap-2 text-sm text-zinc-300">
+            <input
+              type="checkbox"
+              checked={marketingOptIn}
+              onChange={(e) => setMarketingOptIn(e.target.checked)}
+              className="mt-1 h-4 w-4 rounded border-zinc-700 bg-zinc-900"
+            />
+            <span>
+              I’d like to receive SuperFilm updates and announcements. You can opt out anytime.
+            </span>
+          </label>
+        )}
 
         <button
           type="submit"
@@ -123,5 +168,3 @@ const initialMode = search.get("mode") === "signup" ? "signup" : "signin";
     </div>
   );
 }
-
-

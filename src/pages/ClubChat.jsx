@@ -21,7 +21,7 @@ export default function ClubChat() {
   // Route params (support legacy id and new slug forms)
   const { clubId: legacyClubId, clubParam } = useParams();
   const navigate = useNavigate();
-  const { user } = useUser();
+  const { user, profile, avatar } = useUser();
 
   // Resolved club data
   const [clubRow, setClubRow] = useState(null);
@@ -45,6 +45,39 @@ export default function ClubChat() {
   // Reporting UI state (banner/spinner)
   const [reporting] = useState(false);
   const [reportError] = useState(null);
+  const [profilesCache, setProfilesCache] = useState({});
+
+  const selfProfile = useMemo(() => {
+    if (!user?.id) return null;
+    return {
+      id: user.id,
+      avatar_url:
+        avatar ||
+        profile?.avatar_url ||
+        user.user_metadata?.avatar_url ||
+        null,
+      display_name:
+        profile?.display_name ||
+        profile?.full_name ||
+        user.user_metadata?.full_name ||
+        "You",
+      username:
+        profile?.username ||
+        profile?.slug ||
+        user.user_metadata?.user_name ||
+        null,
+      slug: profile?.slug || null,
+    };
+  }, [user?.id, avatar, profile?.avatar_url, profile?.display_name, profile?.full_name, profile?.username, profile?.slug, user?.user_metadata?.avatar_url, user?.user_metadata?.full_name, user?.user_metadata?.user_name, user?.email]);
+
+  // Seed cache with self profile for instant avatar/handle on send
+  useEffect(() => {
+    if (selfProfile?.id) {
+      setProfilesCache((prev) =>
+        prev[selfProfile.id] ? prev : { ...prev, [selfProfile.id]: selfProfile }
+      );
+    }
+  }, [selfProfile]);
 
   // Refs
   const listRef = useRef(null);
@@ -141,6 +174,7 @@ useEffect(() => {
         if (profs) profileMap = Object.fromEntries(profs.map(p => [p.id, p]));
       }
   
+      setProfilesCache(profileMap);
       const hydrated = (rows || []).map(r => ({ ...r, profiles: profileMap[r.user_id] || null }));
       if (!cancelled) {
         setMessages(hydrated);
@@ -175,11 +209,19 @@ if (!cancelled && me) {
         async (payload) => {
           if (cancelled) return;
           const msg = payload.new;
-          const { data: profile } = await supabase
-            .from("profiles")
-            .select("id, avatar_url, display_name, slug")
-            .eq("id", msg.user_id)
-            .maybeSingle();
+          const cachedProfile = profilesCache[msg.user_id];
+          let profile = cachedProfile;
+          if (!profile) {
+            const { data: prof } = await supabase
+              .from("profiles")
+              .select("id, avatar_url, display_name, slug, username")
+              .eq("id", msg.user_id)
+              .maybeSingle();
+            profile = prof || null;
+            if (profile) {
+              setProfilesCache((prev) => ({ ...prev, [profile.id]: profile }));
+            }
+          }
           setMessages(prev => [...prev, { ...msg, profiles: profile || null }]);
           requestAnimationFrame(scrollToBottom);
         }
@@ -304,10 +346,13 @@ if (!cancelled && me) {
     }
   };
 
+  const reader = new FileReader();
+
+
   const onPickImage = (file) => {
     if (!file) return;
     setImageFile(file);
-    const url = URL.createObjectURL(file);
+    const url = reader.readAsDataURL(file)    ;
     setImageObjectUrl(url);
   };
 
@@ -343,7 +388,7 @@ if (!cancelled && me) {
 
     // Optimistic UI
     const tempId = `temp_${Date.now()}`;
-    const optimistic = {
+  const optimistic = {
       id: tempId,
       _optimistic: true,
       club_id: resolvedClubId,
@@ -351,12 +396,7 @@ if (!cancelled && me) {
       body: body || null,
       image_url: imageObjectUrl || null,
       created_at: new Date().toISOString(),
-      profiles: {
-        id: me,
-        avatar_url: user?.profileAvatarUrl || null,
-        display_name: user?.name || null,
-        username: user?.username || null,
-      },
+      profiles: selfProfile,
     };
     setMessages((prev) => [...prev, optimistic]);
     scrollToBottom();
@@ -595,12 +635,7 @@ async function handleDeleteMessage(arg) {
                       ...prev,
                       {
                         ...newMsg,
-                        profiles: {
-                          id: me,
-                          avatar_url: user?.profileAvatarUrl || null,
-                          display_name: user?.name || null,
-                          username: user?.username || null,
-                        },
+                        profiles: selfProfile,
                       },
                     ]);
                     requestAnimationFrame(scrollToBottom);

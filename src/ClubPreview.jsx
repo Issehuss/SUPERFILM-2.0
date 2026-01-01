@@ -40,13 +40,13 @@ export default function ClubPreview() {
         </h2>
         <div className="relative w-full aspect-video bg-zinc-800 rounded-lg overflow-hidden">
           <img
-            src={club.nextEvent.poster || fallbackNext}
-            alt={club.nextEvent.title}
+            src={nextScreening.poster || fallbackNext}
+            alt={nextScreening.title}
             className="absolute w-full h-full object-cover opacity-70"
           />
           <div className="absolute inset-0 p-4 flex flex-col justify-end bg-gradient-to-t from-black via-transparent to-transparent">
-            <h3 className="text-white text-xl font-bold">{club.nextEvent.title}</h3>
-            <p className="text-zinc-300 text-sm">{club.nextEvent.date} — {club.nextEvent.location}</p>
+            <h3 className="text-white text-xl font-bold">{nextScreening.title}</h3>
+            <p className="text-zinc-300 text-sm">{nextScreening.date} — {nextScreening.location}</p>
           </div>
           {isAdmin && (
             <label className="absolute top-2 right-2 bg-black bg-opacity-50 p-2 rounded-full cursor-pointer">

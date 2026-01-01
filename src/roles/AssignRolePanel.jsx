@@ -3,7 +3,6 @@ import { useState } from "react";
 const ROLES = [
   { value: "president", label: "President" },
   { value: "vice_president", label: "Vice-President" },
-  { value: "editor_in_chief", label: "Editor-in-Chief" },
   { value: "member", label: "Remove leadership (Member)" },
 ];
 

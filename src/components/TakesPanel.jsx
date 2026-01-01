@@ -49,9 +49,9 @@ export default function TakesPanel({
     open={!!open}
     onClose={onClose}
     clubId={clubId}
-    filmId={club.nextEvent.movieId}  // numeric TMDB id
-    movieTitle={club.nextEvent.title}
-    posterPath={club.nextEvent.poster}
+    filmId={nextScreening.movieId}  // numeric TMDB id
+    movieTitle={nextScreening.title}
+    posterPath={nextScreening.poster}
   />
   
 

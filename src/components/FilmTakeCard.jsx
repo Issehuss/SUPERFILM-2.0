@@ -1,6 +1,7 @@
 // src/components/FilmTakeCard.jsx
 import React from "react";
 import { Star } from "lucide-react";
+import TmdbImage from "./TmdbImage";
 
 export default function FilmTakeCard({ take }) {
   if (!take) return null;
@@ -38,10 +39,11 @@ export default function FilmTakeCard({ take }) {
       {/* Poster */}
       <div className="w-12 h-16 flex-shrink-0">
         {poster ? (
-          <img
+          <TmdbImage
             src={poster}
             alt={filmTitle}
-            className="w-full h-full object-cover rounded-xl border border-zinc-800"
+            className="w-full h-full rounded-xl border border-zinc-800"
+            imgClassName="rounded-xl"
             loading="lazy"
           />
         ) : (

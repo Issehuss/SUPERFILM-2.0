@@ -187,7 +187,7 @@ export default function LeaderboardAndPlayoffs() {
         <button
           type="button"
           onClick={() => setShowInfo(true)}
-          className="ml-1 inline-flex items-center justify-center rounded-md border border-zinc-800 bg-black/40 p-1.5 text-zinc-300 hover:text-white hover:border-zinc-700"
+          className="ml-1 inline-flex items-center justify-center rounded-md border border-yellow-400/50 bg-yellow-400/15 p-2 text-yellow-200 hover:text-yellow-50 hover:border-yellow-300"
           title="How points & playoffs work"
         >
           <Info size={16} />
@@ -246,21 +246,11 @@ export default function LeaderboardAndPlayoffs() {
             </div>
             <div className="mt-3 space-y-2 leading-relaxed">
               <p>
-                <span className="font-medium text-white">Points</span> show a club’s
-                <span className="font-medium text-white"> average points per member</span> for the current week, capped at <span className="font-medium text-white">6</span>.
-              </p>
-              <ul className="list-disc pl-5 space-y-1">
-                <li>Attend your club screening.</li>
-                <li>Post your take on the film (short write-up/rating).</li>
-                <li>Optional extras (e.g., hosting, organizing) may add points for the week—still capped at 6.</li>
-              </ul>
-              <p className="text-zinc-300">
-                <span className="font-medium text-white">Total</span> is the season-to-date club score.
-                Right now it mirrors this week’s score; we’ll roll it forward weekly so Week 1: 6 → Total 6, Week 2: +5 → Total 11, and so on.
+                Points are just for fun. We’re looking at which clubs feel alive, don’t take them too seriously.
               </p>
               <p>
-                <span className="font-medium text-white">Playoffs:</span> the top 8 clubs by season total qualify for the bracket at season end.
-                Tie-breakers: higher recent weekly score, then participation rate.
+                In late August we’ll randomly select 8 clubs for playoffs. It’s not based on points; the only requirement
+                is that your club shows signs of life.
               </p>
             </div>
           </div>
@@ -517,5 +507,4 @@ function Row({ r }) {
     </div>
   );
 }
-
 

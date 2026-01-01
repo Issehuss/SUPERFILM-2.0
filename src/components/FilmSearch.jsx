@@ -1,6 +1,7 @@
 // src/components/FilmSearch.jsx
 import React, { useState } from "react";
 import { searchMovies } from "../lib/tmdbClient"; // <- uses Supabase Edge Function
+import TmdbImage from "./TmdbImage";
 
 const TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w185";
 
@@ -80,7 +81,7 @@ const FilmSearch = ({ onSelect }) => {
               className="cursor-pointer hover:bg-gray-800 p-2 rounded text-left"
               onClick={() => handleFilmSelect(film)}
             >
-              <img
+              <TmdbImage
                 src={
                   film.posterUrl
                     ? film.posterUrl
@@ -89,7 +90,8 @@ const FilmSearch = ({ onSelect }) => {
                     : "https://via.placeholder.com/185x278?text=No+Image"
                 }
                 alt={film.title}
-                className="w-full h-[278px] object-cover rounded"
+                className="w-full h-[278px]"
+                imgClassName="rounded"
                 loading="lazy"
               />
               <p className="mt-2 text-sm text-center truncate">{film.title}</p>

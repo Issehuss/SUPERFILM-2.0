@@ -1,51 +1,52 @@
 // src/components/DirectorsCutBadge.jsx
 import clsx from "clsx";
 
-/**
- * DirectorsCutBadge
- * Pure textual badge: “Director’s Cut”
- * - No icons/emojis
- * - Subtle cinematic glow
- * - Compact height to sit inline with usernames
- *
- * Props:
- *  - className?: string         Additional classes (e.g., `ml-2`)
- *  - size?: "xs" | "sm"         Visual size (default: "sm")
- *  - variant?: "gold" | "cyan" | "magenta" | "emerald"  (default: "gold")
- *  - title?: string             Tooltip text (default: "Director’s Cut")
- */
 export default function DirectorsCutBadge({
   className = "ml-2",
   size = "sm",
-  variant = "gold",
-  title = "Director’s Cut",
+  active = true,
+  title = undefined,
 }) {
   const sizeClasses =
-    size === "xs"
-      ? "text-[10px] px-2 py-[1px]"
-      : "text-[11px] px-2 py-[2px]";
+    size === "xxs"
+      ? "text-[9px] px-1.5 py-[2px]"
+      : size === "xs"
+      ? "text-[10px] px-2 py-[3px]"
+      : "text-[11px] px-2.5 py-[4px]";
 
-  const variantMap = {
-    gold: "text-yellow-400 ring-yellow-500/35 shadow-[0_0_10px_rgba(255,215,0,0.35)]",
-    cyan: "text-cyan-300 ring-cyan-500/35 shadow-[0_0_10px_rgba(0,255,255,0.30)]",
-    magenta: "text-fuchsia-400 ring-fuchsia-500/35 shadow-[0_0_10px_rgba(255,0,255,0.32)]",
-    emerald: "text-emerald-400 ring-emerald-500/35 shadow-[0_0_10px_rgba(0,255,150,0.32)]",
-  };
+  const palette = active
+    ? {
+        border: "border-[#f5c451]/70",
+        bg: "bg-[radial-gradient(circle_at_20%_20%,rgba(245,196,81,0.22),rgba(0,0,0,0.45)),linear-gradient(135deg,#0a0a0a,#111015,#0a0a0a)]",
+        text: "text-[#f7dba0]",
+        shadow: "shadow-[0_10px_24px_rgba(0,0,0,0.45),0_0_0_1px_rgba(245,196,81,0.18)]",
+      }
+    : {
+        border: "border-white/15",
+        bg: "bg-black/60",
+        text: "text-zinc-300",
+        shadow: "shadow-[0_8px_18px_rgba(0,0,0,0.3)]",
+      };
 
   return (
     <span
       className={clsx(
-        "inline-flex items-center uppercase tracking-wider font-semibold rounded-full",
-        "bg-zinc-900/60 ring-1",
+        "inline-flex items-center uppercase tracking-[0.18em] font-semibold rounded-full",
+        palette.border,
+        palette.bg,
+        palette.text,
+        palette.shadow,
+        "backdrop-blur-sm",
+        "transition-none",
+        active ? "opacity-100" : "opacity-70",
         sizeClasses,
-        variantMap[variant] || variantMap.gold,
         className
       )}
-      aria-label="Director’s Cut badge"
+      aria-label="DC badge"
       title={title}
       data-testid="directors-cut-badge"
     >
-      Director’s Cut
+      DC
     </span>
   );
 }

@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import supabase from "../supabaseClient";
+import TmdbImage from "./TmdbImage";
 
 // Small in-memory cache so we don't spam TMDB
 const posterCache = new Map();
@@ -174,13 +175,14 @@ export default function UserFilmRatings({
               title={`${it.screening_title || "Screening"} — ${new Date(
                 it.starts_at
               ).toLocaleDateString()}`}
-            >
+              >
               <div className="relative aspect-[2/3] w-full overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950">
                 {src ? (
-                  <img
+                  <TmdbImage
                     src={src}
                     alt="Poster"
-                    className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
+                    className="h-full w-full"
+                    imgClassName="transition-transform duration-200 group-hover:scale-[1.03]"
                     loading="lazy"
                   />
                 ) : (

@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import supabase from "../supabaseClient";
 import { useUser } from "../context/UserContext";
+import useEntitlements from "../hooks/useEntitlements";
 import { awardPointsForAction } from "../lib/points";
 import RatingInput from "./RatingInput";
 import RatingTagChip from "./RatingTagChip";
@@ -38,8 +39,10 @@ export default function ReviewCards({
   movieTitle,
   posterPath,
 }) {
-  const { user } = useUser();
+  const { user, profile } = useUser();
   const uid = user?.id;
+  const { limits } = useEntitlements();
+  const isPremium = limits?.isPremium || false;
 
   // panel state
   const [loading, setLoading] = useState(true);
@@ -47,7 +50,6 @@ export default function ReviewCards({
   const [reviews, setReviews] = useState([]);
 
   // premium & scheme
-  const [isPremium, setIsPremium] = useState(false);
   const [defaultMode, setDefaultMode] = useState("stars"); // 'tags' | 'stars'
   const [scheme, setScheme] = useState(null);
 
@@ -73,26 +75,14 @@ const filmValue = Number(filmId) || null;
   // --- load helpers ---
   async function loadPremiumAndScheme() {
     if (!uid) {
-      setIsPremium(false);
       setScheme(null);
       setDefaultMode("stars");
       return;
     }
 
-    // minimal profile fields
-    const { data: prof } = await supabase
-      .from("profiles")
-      .select("id, is_premium, default_rating_input")
-      .eq("id", uid)
-      .maybeSingle();
+    setDefaultMode(profile?.default_rating_input === "tags" ? "tags" : "stars");
 
-    const premium = !!prof?.is_premium; // adjust if you also track a `plan`
-    setIsPremium(premium);
-    setDefaultMode(
-      prof?.default_rating_input === "tags" ? "tags" : "stars"
-    );
-
-    if (premium) {
+    if (isPremium) {
       const { data: sch } = await supabase
         .from("profile_rating_schemes")
         .select("*")
@@ -176,7 +166,7 @@ const filmValue = Number(filmId) || null;
 
   useEffect(() => {
     loadPremiumAndScheme();
-  }, [uid]);
+  }, [uid, isPremium, profile?.default_rating_input]);
 
   useEffect(() => {
     load();

@@ -4,7 +4,7 @@ import supabase from "../supabaseClient.js";
 import { useUser } from "../context/UserContext";
 
 export default function useWatchlist(userId) {
-  const { user } = useUser();
+  const { user, sessionLoaded } = useUser();
   const effectiveUserId = userId || user?.id || null;
 
   const [items, setItems] = useState([]);
@@ -12,7 +12,7 @@ export default function useWatchlist(userId) {
   const [error, setError] = useState(null);
 
   const fetchWatchlist = useCallback(async () => {
-    if (!effectiveUserId) return;
+    if (!sessionLoaded || !effectiveUserId) return;
     setLoading(true);
     setError(null);
 
@@ -35,13 +35,13 @@ export default function useWatchlist(userId) {
       setItems(mapped);
     }
     setLoading(false);
-  }, [effectiveUserId]);
+  }, [effectiveUserId, sessionLoaded]);
 
   useEffect(() => { fetchWatchlist(); }, [fetchWatchlist]);
 
   // Realtime refresh
   useEffect(() => {
-    if (!effectiveUserId) return;
+    if (!sessionLoaded || !effectiveUserId) return;
     const channel = supabase
       .channel(`watchlist:${effectiveUserId}`)
       .on(
@@ -51,6 +51,23 @@ export default function useWatchlist(userId) {
       )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
+  }, [effectiveUserId, fetchWatchlist, sessionLoaded]);
+
+  // Retry after a token refresh/sign-in so stale JWTs never freeze the UI
+  useEffect(() => {
+    const { data: auth } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_OUT") {
+        setItems([]);
+        setLoading(false);
+        return;
+      }
+      if (event === "TOKEN_REFRESHED" || event === "SIGNED_IN") {
+        if (session?.user?.id && session.user.id === effectiveUserId) {
+          fetchWatchlist();
+        }
+      }
+    });
+    return () => auth?.subscription?.unsubscribe();
   }, [effectiveUserId, fetchWatchlist]);
 
   // Add item (current signed-in user only)

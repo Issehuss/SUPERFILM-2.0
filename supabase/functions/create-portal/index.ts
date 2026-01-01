@@ -73,9 +73,31 @@ serve(async (req) => {
       }
     }
 
+    // Fetch latest subscription for targeted cancel flow
+    let latestSubId: string | null = null;
+    try {
+      const subs = await stripe.subscriptions.list({
+        customer: stripeCustomerId,
+        status: "all",
+        limit: 1,
+        expand: ["data.default_payment_method"],
+      });
+      latestSubId = subs.data?.[0]?.id || null;
+    } catch (e) {
+      console.warn("[create-portal] subscriptions.list failed:", e);
+    }
+
     const session = await stripe.billingPortal.sessions.create({
       customer: stripeCustomerId,
       return_url: `${origin(req)}/settings/premium`,
+      ...(latestSubId
+        ? {
+            flow_data: {
+              type: "subscription_cancel",
+              subscription_cancel: { subscription: latestSubId },
+            },
+          }
+        : {}),
     });
 
     return json(200, { url: session.url }, req);
@@ -88,9 +110,9 @@ serve(async (req) => {
 /* ---------------- Helpers ---------------- */
 
 function corsHeaders(req: Request) {
-  const originUrl = new URL(req.url);
+  const origin = req.headers.get("origin") || "*";
   return {
-    "Access-Control-Allow-Origin": originUrl.origin,
+    "Access-Control-Allow-Origin": origin === "null" ? "*" : origin,
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   };

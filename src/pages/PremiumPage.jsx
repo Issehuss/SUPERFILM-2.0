@@ -1,12 +1,15 @@
 import { useEffect } from "react";
 import { Link, useSearchParams, useNavigate } from "react-router-dom";
 import { useUser } from "../context/UserContext";
+import { useState } from "react";
 import { startCheckout } from "../lib/billing";
+import { trackEvent } from "../lib/analytics";
 
 export default function PremiumPage() {
-  const { isPremium, refreshProfile } = useUser();
+  const { isPremium, refreshProfile, user } = useUser();
   const [sp] = useSearchParams();
   const navigate = useNavigate();
+  const [redirecting, setRedirecting] = useState(false);
 
   useEffect(() => {
     refreshProfile?.();
@@ -40,14 +43,33 @@ export default function PremiumPage() {
             Shape your cinematic identity with more creativity, style, and freedom.
           </p>
 
-          <div className="mt-8 flex items-center gap-3">
-            <button
-              onClick={startCheckout}
-              className="inline-flex items-center justify-center rounded-2xl px-6 py-3 font-semibold text-black bg-gradient-to-br from-yellow-300 to-amber-500 shadow-[0_0_30px_rgba(255,200,0,0.35)] ring-1 ring-yellow-300/60 hover:scale-[1.02] transition"
-            >
-              Subscribe £3 per month
-            </button>
-            {/* Removed the “See what’s included” button */}
+          <div className="mt-8 flex items-center gap-3 flex-wrap">
+            {isPremium ? (
+              <button
+                onClick={() => navigate("/settings/premium")}
+                className="inline-flex items-center justify-center rounded-2xl px-6 py-3 font-semibold text-black bg-gradient-to-br from-yellow-300 to-amber-500 shadow-[0_0_30px_rgba(255,200,0,0.35)] ring-1 ring-yellow-300/60 hover:scale-[1.02] transition"
+              >
+                Manage subscription
+              </button>
+            ) : (
+              <button
+                onClick={async () => {
+                  try {
+                    setRedirecting(true);
+                    trackEvent("trial_started", { source: "premium_page" });
+                    await startCheckout();
+                  } catch (e) {
+                    console.error("Checkout error:", e);
+                  } finally {
+                    setRedirecting(false);
+                  }
+                }}
+                disabled={!user || redirecting}
+                className="inline-flex items-center justify-center rounded-2xl px-6 py-3 font-semibold text-black bg-gradient-to-br from-yellow-300 to-amber-500 shadow-[0_0_30px_rgba(255,200,0,0.35)] ring-1 ring-yellow-300/60 hover:scale-[1.02] transition disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {redirecting ? "Redirecting..." : "Start 14-day free trial"}
+              </button>
+            )}
           </div>
         </div>
       </section>
@@ -85,12 +107,7 @@ export default function PremiumPage() {
         <Feature tone="indigo" title="Private Clubs">
           Presidents can switch clubs to invite only for a more intimate space.
         </Feature>
-        <Feature tone="fuchsia" title="Club Analytics Dashboard">
-          Track member growth, activity, and engagement in a clean overview.
-        </Feature>
-        <Feature tone="orange" title="Exclusive Polls and Events Coming Soon">
-          Host members-only screenings and polls with staged rollout.
-        </Feature>
+        
       </Section>
 
       {/* Experience and Early Access */}
@@ -111,6 +128,9 @@ export default function PremiumPage() {
         title="Future Perks Already in the Works"
         subtitle="Your membership funds rapid iteration."
       >
+        <Feature tone="teal" title="Expanded TMDB Image Sets">
+          We’re unlocking deeper TMDB stills and artwork so you can build richer moodboards with more cinematic options.
+        </Feature>
         <Feature tone="yellow" title="Year in Review Deep Dive">
           A visual look back at your year in film with richer stats and insights.
         </Feature>
@@ -125,17 +145,9 @@ export default function PremiumPage() {
       {/* Pricing */}
       <section id="subscribe" className="mx-auto max-w-6xl px-6 py-10">
         <div className="rounded-3xl border border-zinc-800 bg-zinc-900/40 p-6 md:p-8">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
-            <div>
-              <h3 className="text-2xl font-bold">Director’s Cut</h3>
-              <p className="mt-1 text-zinc-400">£3 per month · cancel anytime · no ads</p>
-            </div>
-            <button
-              onClick={startCheckout}
-              className="inline-flex items-center justify-center rounded-2xl px-6 py-3 font-semibold text-black bg-gradient-to-br from-yellow-300 to-amber-500 shadow-[0_0_30px_rgba(255,200,0,0.35)] ring-1 ring-yellow-300/60 hover:scale-[1.02] transition"
-            >
-              Continue £3 per month
-            </button>
+          <div className="flex flex-col gap-2">
+            <h3 className="text-2xl font-bold">Director’s Cut</h3>
+            <p className="text-zinc-400">£3 per month · cancel anytime · no ads</p>
           </div>
         </div>
       </section>
@@ -145,7 +157,7 @@ export default function PremiumPage() {
         <div className="rounded-3xl border border-zinc-800 bg-zinc-900/40 p-6 md:p-8">
           <h4 className="text-lg font-semibold">A Note from the Team</h4>
           <p className="mt-3 text-zinc-300 leading-relaxed">
-            SuperFilm is built by an independent grassroots collective made up of a couple of film lovers with big dreams for this platform.
+            SuperFilm was founded by two film lovers with big dreams for this platform.
             Every subscription directly fuels new features, helps us grow, and keeps SuperFilm bold, imaginative, and independent.
             We truly appreciate every time someone opens SuperFilm, invites a friend or recommends us. Thank you.
           </p>

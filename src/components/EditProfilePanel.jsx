@@ -8,7 +8,6 @@ import {
   Type, Palette, Crop as CropIcon, Image as ImageIcon, User as UserIcon,
   BookmarkMinus
 } from "lucide-react";
-import AvatarCropper from "./AvatarCropper";
 import { useUser } from "../context/UserContext";
 import TasteCardPicker from "./TasteCardPicker"; // your existing picker
 import { fetchActiveScheme } from "../lib/ratingSchemes";
@@ -18,6 +17,7 @@ import { searchStills } from "../lib/stills";
 import { toast } from "react-hot-toast";
 import useEntitlements from "../hooks/useEntitlements";
 import { PROFILE_THEMES } from "../theme/profileThemes";
+import uploadAvatar from "../lib/uploadAvatar";
 // --- PREMIUM FLAGS (define early!) ---
 
 
@@ -165,38 +165,50 @@ function getProfileViewPath() {
   }, [open, profile?.display_name, profile?.slug, profile?.bio]);
 
   /* ───────────────────────────────── Avatar ───────────────────────────────── */
-  const [rawAvatar, setRawAvatar] = useState(null);
-  const [showCropper, setShowCropper] = useState(false);
   const avatarUrl = profile?.avatar_url || "/avatars/default.jpg";
-  const handleAvatarPick = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onloadend = () => { setRawAvatar(reader.result); setShowCropper(true); };
-    reader.readAsDataURL(file);
-  };
-  async function onAvatarCropped(croppedDataUrl) {
-    try { onUpdated?.({ avatar_url: croppedDataUrl }); }
-    finally { setShowCropper(false); setRawAvatar(null); }
-  }
+  const fileInputRef = useRef(null);
 
-  /* ───────────────────────────── Banner & Gradient (+TMDB) ───────────────────────────── */
+  const handleAvatarUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !user?.id) {
+      e.target.value = "";
+      return;
+    }
+    try {
+      const publicUrl = await uploadAvatar(file, user.id, {
+        prevUrl: profile?.avatar_url || null,
+      });
+      onUpdated?.({ avatar_url: publicUrl });
+      toast.success("Avatar updated");
+    } catch (err) {
+      console.error("Avatar upload failed:", err);
+      toast.error(err?.message || "Could not upload avatar.");
+    } finally {
+      e.target.value = "";
+    }
+  };
+
+/* ───────────────────────────── Banner (+TMDB) ───────────────────────────── */
   
-  const [gradient, setGradient] = useState(profile?.banner_gradient || "");
   const [tmdbQuery, setTmdbQuery] = useState("");
   const [tmdbSearching, setTmdbSearching] = useState(false);
   const [themePreset, setThemePreset] = useState(profile?.theme_preset ?? null);
   useEffect(() => {
     if (!open) return;
+    // Non-premium users should default to no theme
+    if (!isPremium) {
+      setThemePreset(null);
+      return;
+    }
     setThemePreset(profile?.theme_preset ?? null);
-  }, [open, profile?.theme_preset]);
+  }, [open, profile?.theme_preset, isPremium]);
 // Premium Deep Stills
 const [deepQ, setDeepQ] = useState("");
 const [deepSearching, setDeepSearching] = useState(false);
 const [deepTitles, setDeepTitles] = useState([]);       // [{id, kind, title, year, poster, backdrop}]
 const [deepPicked, setDeepPicked] = useState(null);     // { id, kind, title }
 const [deepLoadingImgs, setDeepLoadingImgs] = useState(false);
-const [deepImages, setDeepImages] = useState([]);       // [{url, w, h, aspect}]
+  const [deepImages, setDeepImages] = useState([]);       // [{url, w, h, aspect}]
 
 // helper: premium flag from existing limits/isPremium you already compute:
  // or whatever you derived earlier
@@ -315,14 +327,6 @@ async function deepFetchImages(pick) {
 
 
   const [tmdbResults, setTmdbResults] = useState([]);
-  const gradientPresets = [
-    "linear-gradient(to bottom, rgba(0,0,0,0.0), rgba(0,0,0,0.6))",
-    "linear-gradient(45deg, rgba(255,215,0,0.12), rgba(0,0,0,0.6))",
-    "linear-gradient(to top, rgba(0,0,0,0.65), rgba(0,0,0,0.05))",
-    "",
-  ];
-  useEffect(() => { if (open) setGradient(profile?.banner_gradient || ""); }, [open, profile?.banner_gradient]);
-
   async function searchTMDB() {
     setTmdbResults([]);
     const q = (tmdbQuery || "").trim();
@@ -347,13 +351,9 @@ async function deepFetchImages(pick) {
 
 
  
-  
 
   
-  function applyGradient(preset) {
-    setGradient(preset); // ✅ stage only; final Save will persist
-  }
-  
+
   // Only allow TMDB-hosted images for banners
 function applyBanner(url) {
   const u = String(url || "").trim();
@@ -377,7 +377,6 @@ function applyBanner(url) {
 
   const originalRef = useRef([]);
   const bannerSave = useSaveFeedback();   // reserved
-  const gradientSave = useSaveFeedback(); // reserved
   const avatarSave = useSaveFeedback();   // reserved
   const [pendingBannerUrl, setPendingBannerUrl] = useState(null);
 
@@ -790,9 +789,9 @@ setGlobalGlow(effectiveProfile?.taste_card_style_global || "glow-blue");
   
 
   
-// ✅ All-in-one saver (saves basics, banner/gradient, taste cards, moodboard)
-// ✅ All-in-one saver (saves basics, banner/gradient, taste cards, moodboard)
-// ✅ All-in-one saver (basics, banner/gradient/theme, taste cards, moodboard)
+// ✅ All-in-one saver (saves basics, banner, taste cards, moodboard)
+// ✅ All-in-one saver (saves basics, banner, taste cards, moodboard)
+// ✅ All-in-one saver (basics, banner/theme, taste cards, moodboard)
 
 function emitTasteCardsUpdated(cards) {
   try {
@@ -808,6 +807,7 @@ async function handleSaveAll() {
   try {
     await allSave.withFeedback(async () => {
       const patch = {};
+      let didUpdate = false;
 
       // --- basics ---
       if ((displayName || "") !== (profile?.display_name || "")) {
@@ -820,14 +820,10 @@ async function handleSaveAll() {
         patch.bio = bio || "";
       }
 
-      // --- gradient ---
-      if ((gradient || "") !== (profile?.banner_gradient || "")) {
-        patch.banner_gradient = gradient || "";
-      }
-
       // --- theme (allow null to mean default) ---
       const prevTheme = profile?.theme_preset ?? null;
-      const nextTheme = themePreset ?? null;
+      // Non-premium users cannot set a theme; force null
+      const nextTheme = isPremium ? (themePreset ?? null) : null;
       if (nextTheme !== prevTheme) {
         patch.theme_preset = nextTheme;
       }
@@ -844,6 +840,7 @@ async function handleSaveAll() {
       // --- write once (if needed) ---
       if (Object.keys(patch).length) {
         await onUpdated?.(patch);
+        didUpdate = true;
       }
 
       // --- taste cards (plan-aware) ---
@@ -877,7 +874,7 @@ async function handleSaveAll() {
             new CustomEvent("sf:tastecards:updated", { detail: { cards: normalizedTC } })
           );
         } catch {}
-        await refreshProfile?.();
+        didUpdate = true;
       }
 
       // --- moodboard only if dirty ---
@@ -894,6 +891,12 @@ async function handleSaveAll() {
             new CustomEvent("sf:moodboard:updated", { detail: { profileId: moodProfileId } })
           );
         } catch {}
+        didUpdate = true;
+      }
+
+      if (didUpdate) {
+        const refreshed = await refreshProfile?.();
+        if (refreshed) toast.success("Profile updated");
       }
     });
 
@@ -1015,103 +1018,75 @@ async function handleSaveAll() {
                     className="h-20 w-20 rounded-full border border-zinc-800 object-cover"
                     onError={(e) => { e.currentTarget.src = "/avatars/default.jpg"; }}
                   />
-                  <label className="inline-flex cursor-pointer items-center gap-2 rounded-md border border-zinc-700 px-3 py-1.5 text-sm text-white hover:bg-zinc-900">
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-2 rounded-md border border-zinc-700 px-3 py-1.5 text-sm text-white hover:bg-zinc-900"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
                     <Upload className="h-4 w-4" />
                     Upload new
-                    <input type="file" accept="image/*" className="hidden" onChange={handleAvatarPick} />
-                  </label>
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleAvatarUpload}
+                  />
                 </div>
-
-                {showCropper && rawAvatar && (
-                  <div className="mt-4">
-                    <AvatarCropper
-                      imageSrc={rawAvatar}
-                      onCropComplete={onAvatarCropped}
-                      onCancel={() => { setShowCropper(false); setRawAvatar(null); }}
-                    />
-                  </div>
-                )}
               </section>
             )}
 
-           {/* BANNER & GRADIENT */}
+           {/* BANNER */}
 {active === "banner" && (
   <section>
-    <h3 className="mb-3 text-sm font-semibold text-zinc-300">Banner & Gradient</h3>
+    <h3 className="mb-3 text-sm font-semibold text-zinc-300">Banner</h3>
 
-    <div className="grid gap-4 sm:grid-cols-2">
-      {/* Left column — TMDB Search only */}
-      <div className="space-y-3">
-        <label className="block text-xs text-zinc-400">Find a film still (TMDB)</label>
+    <div className="space-y-3">
+      <label className="block text-xs text-zinc-400">Find a film still (TMDB)</label>
 
-        <div className="flex gap-2">
-          <input
-            className="flex-1 rounded-md border border-zinc-700 bg-black/40 p-2 text-sm text-white outline-none"
-            placeholder="Search films…"
-            value={tmdbQuery}
-            onChange={(e) => setTmdbQuery(e.target.value)}
-          />
-          <button
-            type="button"
-            onClick={searchTMDB}
-            className="rounded-md border border-zinc-700 px-3 py-1.5 text-sm text-white hover:bg-zinc-900"
-            title="Search"
-          >
-            <Search className="h-4 w-4" />
-          </button>
-        </div>
-
-        <div className="grid grid-cols-3 gap-2">
-          {tmdbSearching ? (
-            <div className="col-span-3 h-24 animate-pulse rounded-md bg-zinc-900" />
-          ) : (
-            tmdbResults.map((m) => {
-              const poster = m?.backdropUrl || m?.posterUrl || "";
-              if (!poster) return null;
-              return (
-                <button
-                  key={m.id}
-                  type="button"
-                  onClick={() => onUpdated?.({ banner_url: poster })}
-                  className="aspect-[2/3] overflow-hidden rounded-md border border-zinc-800 hover:ring-2 hover:ring-yellow-500 transition"
-                  title="Use this image"
-                >
-                  <img
-                    src={poster}
-                    alt="TMDB result"
-                    className="h-full w-full object-cover"
-                    loading="lazy"
-                  />
-                </button>
-              );
-            })
-          )}
-        </div>
+      <div className="flex gap-2">
+        <input
+          className="flex-1 rounded-md border border-zinc-700 bg-black/40 p-2 text-sm text-white outline-none"
+          placeholder="Search films…"
+          value={tmdbQuery}
+          onChange={(e) => setTmdbQuery(e.target.value)}
+        />
+        <button
+          type="button"
+          onClick={searchTMDB}
+          className="rounded-md border border-zinc-700 px-3 py-1.5 text-sm text-white hover:bg-zinc-900"
+          title="Search"
+        >
+          <Search className="h-4 w-4" />
+        </button>
       </div>
 
-      {/* Right column — gradient presets only */}
-      <div className="space-y-3">
-        <label className="block text-xs text-zinc-400">Gradient overlay</label>
-        <div className="grid grid-cols-2 gap-2">
-          {gradientPresets.map((g, i) => (
-            <button
-              key={i}
-              type="button"
-              onClick={() => applyGradient(g)}
-              className="h-16 rounded-md border border-zinc-700"
-              style={{
-                backgroundImage: g || undefined,
-                backgroundColor: g ? undefined : "transparent",
-              }}
-              title={g || "No gradient"}
-            />
-          ))}
-        </div>
-        
-        <p className="text-xs text-zinc-500">
-          Only official gradients and TMDB images can be used.  
-          Premium users can unlock advanced overlays in Director’s Cut.
-        </p>
+      <div className="grid grid-cols-3 gap-2">
+        {tmdbSearching ? (
+          <div className="col-span-3 h-24 animate-pulse rounded-md bg-zinc-900" />
+        ) : (
+          tmdbResults.map((m) => {
+            const poster = m?.backdropUrl || m?.posterUrl || "";
+            if (!poster) return null;
+            return (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => onUpdated?.({ banner_url: poster })}
+                className="aspect-[2/3] overflow-hidden rounded-md border border-zinc-800 hover:ring-2 hover:ring-yellow-500 transition"
+                title="Use this image"
+              >
+                <img
+                  src={poster}
+                  alt="TMDB result"
+                  className="h-full w-full object-cover"
+                  loading="lazy"
+                />
+              </button>
+            );
+          })
+        )}
       </div>
     </div>
   </section>
@@ -1607,7 +1582,7 @@ function AddReplaceDialog({ onCancel, onConfirm, initialType = "image" }) {
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-3">
                 <div className="text-xs text-zinc-500">
-                  Add images via TMDB search below. (External URLs will be available with Premium.)
+                  Add images via TMDB search below. Expanded TMDB image sets are coming soon!
                 </div>
               </div>
 

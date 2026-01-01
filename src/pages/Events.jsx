@@ -1,8 +1,36 @@
 // src/pages/Events.jsx
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import "./Events.css";
 import supabase from "../supabaseClient.js";
+
+const EVENTS_CACHE_KEY = "cache:events:v1";
+const EVENTS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const FALLBACK_EVENT_IMAGE = "https://placehold.co/600x800?text=Event";
+
+function readEventsCache() {
+  try {
+    const raw = sessionStorage.getItem(EVENTS_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.at || !Array.isArray(parsed?.data)) return null;
+    if (Date.now() - parsed.at > EVENTS_CACHE_TTL_MS) return null;
+    return parsed.data;
+  } catch {
+    return null;
+  }
+}
+
+function writeEventsCache(data) {
+  try {
+    sessionStorage.setItem(
+      EVENTS_CACHE_KEY,
+      JSON.stringify({ at: Date.now(), data })
+    );
+  } catch {
+    /* ignore cache write errors */
+  }
+}
 
 
 // ---------------- Row → UI mapper (tolerant to schema) ----------------
@@ -35,7 +63,7 @@ function mapRowToEvent(row) {
     posterUrl:
       row.poster_url ??
       row.image_url ??
-      "https://via.placeholder.com/600x800?text=Event+Poster",
+      FALLBACK_EVENT_IMAGE,
     tags: Array.isArray(row.tags)
       ? row.tags
       : typeof row.tags === "string"
@@ -58,15 +86,18 @@ function PosterCard({ evt }) {
 
   return (
     <article className="poster-card">
-      <Link to={`/events/${evt.slug}`} className="block">
+      <Link
+        to={`/events/${evt.slug}`}
+        state={{ event: evt }}
+        className="block"
+      >
         <div className="poster-media">
           <img
-            src={evt.posterUrl}
+            src={evt.posterUrl || FALLBACK_EVENT_IMAGE}
             alt={evt.title}
             className="w-full h-full object-cover"
             onError={(e) => {
-              e.currentTarget.src =
-                "https://via.placeholder.com/600x800?text=Event+Poster";
+              e.currentTarget.src = FALLBACK_EVENT_IMAGE;
             }}
           />
           <div className="poster-date">
@@ -96,8 +127,9 @@ function PosterCard({ evt }) {
 
 /* ---------------- Page ---------------- */
 export default function Events() {
-  const [liveEvents, setLiveEvents] = useState([]);
-  const [loadingLive, setLoadingLive] = useState(true);
+  const cached = readEventsCache();
+  const [liveEvents, setLiveEvents] = useState(cached || []);
+  const [loadingLive, setLoadingLive] = useState(!cached);
   const [query, setQuery] = useState("");
 
   const location = useLocation();
@@ -116,22 +148,59 @@ export default function Events() {
     }
   }, [location, navigate]);
 
+  // Accept a removed event from /events via location.state
+  useEffect(() => {
+    const removedId = location.state?.removedEventId;
+    if (!removedId) return;
+    setLiveEvents((prev) => {
+      const next = prev.filter((e) => String(e.id) !== String(removedId));
+      writeEventsCache(next);
+      return next;
+    });
+    navigate(location.pathname, { replace: true, state: {} });
+  }, [location, navigate]);
+
   // Load from Supabase on mount
   useEffect(() => {
     let mounted = true;
+
+    if (cached?.length) {
+      setLiveEvents(cached);
+      setLoadingLive(false);
+    }
+
     (async () => {
       try {
-        const { data, error } = await supabase
-          .from("events")
-          .select("*")
-          .order("date", { ascending: true })
-          .limit(300);
+        let mapped = [];
 
-        if (error) throw error;
+        // Attempt broad select first (most tolerant to schema differences)
+        try {
+          const { data, error } = await supabase
+            .from("events")
+            .select("*")
+            .limit(300);
+          if (error) throw error;
+          mapped = (data || []).map(mapRowToEvent);
+        } catch (primaryErr) {
+          console.warn("[events] primary fetch failed, retrying:", primaryErr?.message || primaryErr);
+          // Fallback: conservative column list to avoid 400s on missing columns
+          const { data, error } = await supabase
+            .from("events")
+            .select("id, slug, title, date, datetime, starts_at, venue, location, poster_url, image_url, tags, summary, club_id, club_name")
+            .limit(300);
+          if (error) throw error;
+          mapped = (data || []).map(mapRowToEvent);
+        }
 
-        const mapped = (data || []).map(mapRowToEvent);
+        const sorted = mapped.sort(
+          (a, b) =>
+            new Date(a.date || 0).getTime() - new Date(b.date || 0).getTime()
+        );
 
-        if (mounted) setLiveEvents(mapped);
+        if (mounted) {
+          setLiveEvents(sorted);
+          writeEventsCache(sorted);
+        }
       } catch {
         if (mounted) setLiveEvents([]); // no fallback to fake data
       } finally {

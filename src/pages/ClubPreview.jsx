@@ -1,5 +1,6 @@
 import React from 'react';
 import { Upload, MapPin, Film } from 'lucide-react';
+import TmdbImage from '../components/TmdbImage';
 
 function ClubPreview() {
   return (
@@ -12,10 +13,11 @@ function ClubPreview() {
           <Film className="w-5 h-5 text-yellow-400" /> Next Screening
         </h2>
         <div className="relative w-full aspect-video bg-zinc-800 rounded-lg overflow-hidden">
-          <img
+          <TmdbImage
             src="https://image.tmdb.org/t/p/w500/c1BZv2tzfFfhlzlAWlcz5p9UoFV.jpg"
             alt="Next Screening"
-            className="absolute w-full h-full object-cover opacity-70"
+            className="absolute w-full h-full"
+            imgClassName="object-cover opacity-70"
           />
           <div className="absolute inset-0 p-4 flex flex-col justify-end bg-gradient-to-t from-black via-transparent to-transparent">
             <h3 className="text-white text-xl font-bold">Screening of "Past Lives"</h3>
@@ -42,4 +44,3 @@ function ClubPreview() {
 }
 
 export default ClubPreview;
-

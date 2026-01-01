@@ -15,7 +15,7 @@ export default function ClubPortfolio({
     schedule: club?.meetingSchedule || "",
     founded: club?.created_at ? new Date(club.created_at).getFullYear() : undefined,
     nextLine: club?.nextEvent?.title
-      ? `Next: ${club.nextEvent.title} • ${new Date(club.nextEvent.date).toLocaleDateString()}`
+      ? `Next: ${nextScreening.title} • ${new Date(nextScreening.date).toLocaleDateString()}`
       : null,
   };
 

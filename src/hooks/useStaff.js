@@ -7,7 +7,6 @@ export default function useStaff(clubId) {
   const { user } = useUser();
   const [isStaff, setIsStaff] = useState(false);
   const [loading, setLoading] = useState(true);
-  const STAFF_ROLES = new Set(["president","vice_president","admin","moderator","partner"]);
 
   useEffect(() => {
     let cancelled = false;
@@ -28,34 +27,29 @@ export default function useStaff(clubId) {
           .maybeSingle();
         const partner = !!prof?.is_partner;
 
-        // explicit staff?
-        const { data: staffRow } = await supabase
-          .from("club_staff")
-          .select("role")
-          .eq("club_id", clubId)
-          .eq("user_id", user.id)
-          .maybeSingle();
-        const staff = !!staffRow;
-
-        // leader?
+        // leader (president / vp)
         const { data: memRow } = await supabase
           .from("club_members")
           .select("role")
           .eq("club_id", clubId)
           .eq("user_id", user.id)
           .maybeSingle();
-        const leader = ["president","vice_president","editor_in_chief"].includes(memRow?.role);
+        const leader = ["president","vice_president"].includes(memRow?.role);
 
-        const result = partner || staff || leader;
+        const result = partner || leader;
 
         if (!cancelled) {
           setIsStaff(result);
           setLoading(false);
         }
 
-        // TEMP: see exactly why (remove when done)
+        // Debug
         console.log("[useStaff]", {
-          clubId, partner, staffRole: staffRow?.role || null, memberRole: memRow?.role || null, result
+          clubId,
+          partner,
+          staffRole: null, // no club_staff table
+          memberRole: memRow?.role || null,
+          result
         });
       } catch (e) {
         if (!cancelled) {

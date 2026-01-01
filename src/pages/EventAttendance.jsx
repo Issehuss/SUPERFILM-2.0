@@ -139,7 +139,7 @@ export default function EventAttendance() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clubId, eventDateISO]);
 
-  // Create a screening if allowed (from club.next_screening_*)
+
   async function ensureScreening() {
     if (screeningId) return screeningId;
     if (!canCreate) return null;

@@ -64,3 +64,47 @@ html, body, #root {
   -webkit-mask-image: linear-gradient(to right, transparent 0%, black 12%, black 88%, transparent 100%);
           mask-image: linear-gradient(to right, transparent 0%, black 12%, black 88%, transparent 100%);
 }
+
+
+/* ----------------------------------------
+   SuperFilm Cinematic Toggle
+----------------------------------------- */
+
+.sf-toggle {
+  width: 54px;
+  height: 28px;
+  border-radius: 9999px;
+  background: linear-gradient(to right, #27272a, #111);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  position: relative;
+  transition: all 0.25s ease;
+  padding: 3px;
+  display: flex;
+  align-items: center;
+}
+
+.sf-toggle:hover:not(.opacity-50) {
+  box-shadow: 0 0 10px rgba(255, 215, 0, 0.25);
+}
+
+.sf-toggle-on {
+  background: linear-gradient(to right, #ffd500, #b49000);
+  border-color: rgb(var(--brand-yellow));
+  box-shadow: 0 0 20px rgba(255, 215, 0, 0.45);
+}
+
+.sf-toggle-handle {
+  width: 20px;
+  height: 20px;
+  background: white;
+  border-radius: 9999px;
+  position: absolute;
+  left: 4px;
+  transition: all 0.25s ease;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+
+.sf-toggle-on .sf-toggle-handle {
+  left: 30px;
+  background: black;
+}

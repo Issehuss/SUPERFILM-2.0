@@ -1,87 +1,201 @@
 // src/lib/uploadAvatar.js
 import supabase from "../supabaseClient";
+import heic2any from "heic2any";
 
-const AVATAR_BUCKET = "club-avatars";
-const MAX_BYTES = 5 * 1024 * 1024; // 5MB
+const AVATAR_BUCKET = "user-avatars";
+const MAX_BYTES = 5 * 1024 * 1024;
+
+// Formats Supabase supports without issues (after conversion)
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+const ALLOWED_EXTS = ["jpg", "jpeg", "png", "webp", "gif"];
 
-/**
- * Upload a new avatar for a user and persist the public URL in profiles.avatar_url.
- * Optionally removes the previous avatar file if it belongs to the same bucket/folder.
- *
- * @param {File|Blob} file - Image file from <input type="file" />
- * @param {string} userId - The authenticated user's UUID
- * @param {object} [opts]
- * @param {string|null} [opts.prevUrl] - Existing avatar_url (to clean up)
- * @returns {Promise<string>} public URL of the uploaded avatar
- */
+const normalizeMime = (raw) => (raw ? String(raw).toLowerCase() : "");
+
+const inferMimeFromName = (name) => {
+  if (!name) return "";
+  const ext = name.split(".").pop()?.toLowerCase();
+  if (!ext) return "";
+  switch (ext) {
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "png":
+      return "image/png";
+    case "webp":
+      return "image/webp";
+    case "gif":
+      return "image/gif";
+    case "heic":
+    case "heif":
+      return "image/heic";
+    default:
+      return "";
+  }
+};
+
+// HEIC binary signature detection
+async function isHeicBinary(file) {
+  try {
+    const head = await file.slice(4, 12).arrayBuffer();
+    const text = new TextDecoder().decode(head);
+    return (
+      text.startsWith("ftypheic") ||
+      text.startsWith("ftypheix") ||
+      text.startsWith("ftyphevc") ||
+      text.startsWith("ftyphevx")
+    );
+  } catch {
+    return false;
+  }
+}
+
+// Sniff a likely image MIME from the first few bytes (fallback for blank/misreported types)
+async function sniffMime(file) {
+  try {
+    const buf = await file.slice(0, 16).arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    const str = (start, len) => String.fromCharCode(...bytes.slice(start, start + len));
+    if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+    if (str(0, 8) === "\x89PNG\r\n\x1a\n") return "image/png";
+    if (str(0, 4) === "GIF8") return "image/gif";
+    if (str(0, 4) === "RIFF" && str(8, 4) === "WEBP") return "image/webp";
+    const brand = str(4, 8);
+    if (brand.includes("ftypheic")) return "image/heic";
+    if (brand.includes("ftypheif")) return "image/heif";
+  } catch {
+    // ignore
+  }
+  return "";
+}
+
 export default async function uploadAvatar(file, userId, opts = {}) {
   if (!file) throw new Error("No file provided.");
   if (!userId) throw new Error("No user id provided.");
 
-  // Basic validation
+  let rawMime =
+    normalizeMime(file.type) ||
+    inferMimeFromName(file.name) ||
+    (await sniffMime(file)) ||
+    "";
+
+  // Debug log to confirm what we're receiving
+  console.log("[Avatar] raw file.type =", file.type);
+  console.log("[Avatar] inferred MIME =", rawMime);
+  console.log("[Avatar] file.name =", file.name);
+
+  // HEIC detection rules (bulletproof)
+  const looksHeic =
+    rawMime.includes("heic") ||
+    rawMime.includes("heif") ||
+    (file.name && file.name.toLowerCase().endsWith(".heic")) ||
+    (file.name && file.name.toLowerCase().endsWith(".heif")) ||
+    (file.type === "" && file.size > 200 * 1024) || // Safari quirk: blank MIME + photo-size → HEIC
+    (await isHeicBinary(file)); // binary magic check
+
+  console.log("[Avatar] looksHeic =", looksHeic);
+
+  // Always convert HEIC → JPEG
+  if (looksHeic) {
+    try {
+      const convertedBlob = await heic2any({
+        blob: file,
+        toType: "image/jpeg",
+        quality: 0.9,
+      });
+
+      file = new File(
+        [convertedBlob],
+        (file.name || "avatar").replace(/\.[^.]+$/, ".jpg"),
+        { type: "image/jpeg" }
+      );
+
+      rawMime = "image/jpeg";
+    } catch (err) {
+      console.error("HEIC conversion failed:", err);
+      throw new Error("Could not process HEIC/HEIF image. Try another photo.");
+    }
+  }
+
+  // Validate fully-converted file
+  console.log("[Avatar] final MIME =", rawMime);
+
   if (file.size > MAX_BYTES) {
     throw new Error("File too large. Max 5MB.");
   }
-  if (!ALLOWED_TYPES.includes(file.type)) {
-    throw new Error("Unsupported file type. Use JPG, PNG, WEBP, or GIF.");
+
+  if (!ALLOWED_TYPES.includes(rawMime)) {
+    // Last-chance sniff for common misreports (e.g., iOS returning text/html)
+    const sniffed = await sniffMime(file);
+    if (!sniffed || !ALLOWED_TYPES.includes(sniffed)) {
+      console.error("[Avatar] REJECTED MIME:", rawMime, "file:", file);
+      throw new Error("Unsupported file type. Use JPG, PNG, WEBP, or GIF.");
+    }
+    rawMime = sniffed;
   }
 
-  // Compose a safe storage path: <uid>/<timestamp>-<safe-name>.<ext>
+  // Final extension
   const original = (file.name || "avatar").toLowerCase();
-  const ext = original.includes(".") ? original.split(".").pop() : mimeToExt(file.type) || "jpg";
-  const safeBase = original.replace(/\.[^.]+$/, "").replace(/[^a-z0-9-_]+/g, "-").slice(0, 40) || "avatar";
+  const extFromName = original.includes(".") ? original.split(".").pop() : "";
+  const ext = ALLOWED_EXTS.includes(extFromName)
+    ? extFromName
+    : mimeToExt(rawMime) || "jpg";
+
+  const safeBase =
+    original
+      .replace(/\.[^.]+$/, "")
+      .replace(/[^a-z0-9-_]+/g, "-")
+      .slice(0, 40) || "avatar";
+
   const path = `${userId}/${Date.now()}-${safeBase}.${ext}`;
 
-  // Upload to Storage
   const { error: upErr } = await supabase.storage
     .from(AVATAR_BUCKET)
-    .upload(path, file, { upsert: true, contentType: file.type });
-  if (upErr) throw upErr;
+    .upload(path, file, { upsert: true, contentType: rawMime });
 
-  // Get a public URL
+  if (upErr) {
+    console.error("Supabase upload error:", upErr);
+    throw new Error("Failed to upload avatar. Please try again.");
+  }
+
   const { data: pub } = supabase.storage.from(AVATAR_BUCKET).getPublicUrl(path);
   const publicUrl = pub?.publicUrl;
-  if (!publicUrl) throw new Error("Could not get public URL for avatar.");
+  if (!publicUrl) throw new Error("Could not create avatar URL.");
 
-  // Persist in profiles
   const { error: dbErr } = await supabase
     .from("profiles")
     .update({ avatar_url: publicUrl })
     .eq("id", userId);
+
   if (dbErr) {
-    // Best-effort cleanup of the just-uploaded file if DB update fails
-    try { await supabase.storage.from(AVATAR_BUCKET).remove([path]); } catch {}
-    throw dbErr;
+    try {
+      await supabase.storage.from(AVATAR_BUCKET).remove([path]);
+    } catch {}
+    throw new Error("Failed to save avatar. Please try again.");
   }
 
-  // Optional: remove previous avatar file if it was in the same bucket and under this user folder
+  // Cleanup old avatar
   if (opts.prevUrl) {
     const prevPath = extractPathFromPublicUrl(opts.prevUrl, AVATAR_BUCKET);
-    const belongsToUser = prevPath && prevPath.startsWith(`${userId}/`);
-    if (belongsToUser) {
-      try { await supabase.storage.from(AVATAR_BUCKET).remove([prevPath]); } catch {}
+    if (prevPath && prevPath.startsWith(`${userId}/`)) {
+      try {
+        await supabase.storage.from(AVATAR_BUCKET).remove([prevPath]);
+      } catch {}
     }
   }
 
   return publicUrl;
 }
 
-/** Map common image MIME types to extensions */
 function mimeToExt(mime) {
   switch (mime) {
     case "image/jpeg": return "jpg";
     case "image/png": return "png";
     case "image/webp": return "webp";
     case "image/gif": return "gif";
-    default: return null;
+    default: return "jpg";
   }
 }
 
-/**
- * Extract "<path>" from:
- * https://<project>.supabase.co/storage/v1/object/public/<bucket>/<path>
- */
 function extractPathFromPublicUrl(url, bucket) {
   if (!url || !bucket) return null;
   const marker = `/storage/v1/object/public/${bucket}/`;
@@ -89,4 +203,3 @@ function extractPathFromPublicUrl(url, bucket) {
   if (i === -1) return null;
   return url.slice(i + marker.length);
 }
-

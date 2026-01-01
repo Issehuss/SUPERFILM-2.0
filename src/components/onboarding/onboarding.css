@@ -1,0 +1,193 @@
+/* src/components/onboarding/onboarding.css */
+
+/* Fullscreen overlay */
+.onboard-wrapper {
+    position: fixed;      /* sits on top of the whole app */
+    inset: 0;             /* full viewport */
+    z-index: 9999;        /* above nav/footer */
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    color: white;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+  }
+  
+  /* Single slide container */
+  .onboard-slide {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-size: cover;        /* make still fill the screen */
+    background-position: center;
+    background-repeat: no-repeat;
+    opacity: 0;
+    transform: translateY(10px);
+    transition: opacity 0.6s ease, transform 0.6s ease;
+  }
+  
+  /* Active slide */
+  .onboard-slide.active {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  
+  /* Dark overlay over image */
+  .onboard-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.78);
+    backdrop-filter: blur(18px);
+  }
+  
+  /* Centered content */
+  .onboard-content {
+    position: absolute;
+    top: 50%;
+    width: 100%;
+    transform: translateY(-50%);
+    text-align: center;
+    padding: 0 30px;
+  }
+  
+  /* Title */
+  .onboard-title {
+    font-size: 32px;
+    margin-bottom: 12px;
+    letter-spacing: 1px;
+  }
+  
+  /* Body text */
+  .onboard-body {
+    font-size: 17px;
+    color: #c8c8c8;
+    max-width: 420px;
+    margin: 0 auto;
+  }
+  
+  /* Small note (e.g. “coming soon”) */
+  .onboard-note {
+    margin-top: 14px;
+    font-size: 13px;
+    color: #8b8b8b;
+    font-style: italic;
+  }
+  
+  /* Navigation controls (arrows + dots) */
+  .onboard-controls {
+    position: absolute;
+    bottom: 80px;
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 90px;
+  }
+  
+  /* Arrows */
+  .nav-arrow {
+    font-size: 30px;
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+  }
+  
+  /* Dots row */
+  .dots {
+    display: flex;
+    gap: 8px;
+  }
+  
+  /* Single dot */
+  .dot {
+    width: 10px;
+    height: 10px;
+    background: #2e2e2e;
+    border-radius: 50%;
+  }
+  
+  /* Active dot */
+  .active-dot {
+    background: #1f2d46; /* deep blue */
+  }
+  
+  /* Skip button */
+  .skip-btn {
+    position: absolute;
+    bottom: 30px;
+    left: 30px;
+    background: none;
+    border: none;
+    color: #9c9c9c;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  
+  /* Final CTA button (Find a Club) */
+  .cta-btn {
+    position: absolute;
+    bottom: 30px;
+    right: 30px;
+    background: transparent;
+    border: 1px solid #1f2d46;
+    padding: 10px 20px;
+    border-radius: 6px;
+    color: white;
+    font-size: 15px;
+    cursor: pointer;
+  }
+  
+  /* Fade-to-black overlay at the end */
+  .fade-black {
+    position: absolute;
+    inset: 0;
+    background: black;
+    animation: fade-in 0.5s forwards;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+  
+  /* “Let’s begin.” text */
+  .begin-text {
+    color: white;
+    font-size: 20px;
+    opacity: 0;
+    animation: text-fade 1s forwards 0.6s;
+  }
+  
+  /* Keyframes */
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  
+  @keyframes text-fade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  
+  /* Simple mobile tweaks */
+  @media (max-width: 640px) {
+    .onboard-title {
+      font-size: 24px;
+    }
+  
+    .onboard-body {
+      font-size: 15px;
+    }
+  
+    .onboard-controls {
+      bottom: 60px;
+      gap: 40px;
+    }
+  
+    .cta-btn,
+    .skip-btn {
+      font-size: 13px;
+      padding: 8px 16px;
+    }
+  }
+  

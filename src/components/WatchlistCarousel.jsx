@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import useWatchlist from "../hooks/useWatchlist";
+import TmdbImage from "./TmdbImage";
 
 export default function WatchlistCarousel({
   userId,
@@ -87,10 +88,11 @@ export default function WatchlistCarousel({
         aria-label={title ? `Open ${title}` : "Open movie"}
       >
         {poster ? (
-          <img
+          <TmdbImage
             src={poster}
             alt={title || "Poster"}
-            className="h-full object-cover transition-transform duration-500 group-hover:scale-[1.03]"
+            className="h-full w-full"
+            imgClassName="transition-transform duration-500 group-hover:scale-[1.03]"
           />
         ) : (
           <div className="w-full h-full grid place-items-center text-sm text-zinc-400">

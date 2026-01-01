@@ -5,7 +5,7 @@ import { useUser } from "../context/UserContext";
 import AccountMenu from "./AccountMenu";
 
 export default function NavActions({ className = "" }) {
-  const { user } = useUser();
+  const { user, isPremium } = useUser();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -18,6 +18,15 @@ export default function NavActions({ className = "" }) {
     // Already signed in → show your existing account menu
     return (
       <div className={`flex items-center gap-2 ${className}`}>
+        {!isPremium && (
+          <Link
+            to="/premium"
+            className="no-underline px-3 h-9 inline-flex items-center rounded-full border border-amber-300/40 bg-amber-400/15 hover:bg-amber-400/25 text-sm text-amber-100 transition"
+            style={{ textDecoration: "none" }}
+          >
+            Director’s Cut
+          </Link>
+        )}
         <AccountMenu />
       </div>
     );
@@ -46,4 +55,3 @@ export default function NavActions({ className = "" }) {
     </div>
   );
 }
-

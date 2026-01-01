@@ -8,8 +8,12 @@ import useMyClubs from "../hooks/useMyClubs";
 
 // UUID detector to avoid 'invalid input syntax for uuid'
 const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const CACHE_TTL_MS = 1000 * 60 * 5; // 5 minutes
 
-export default function LeaderboardWideCard({ className = "" }) {
+export default function LeaderboardWideCard({
+  className = "",
+  shouldLoad = true, // allow callers to defer data fetching until in-view
+}) {
   const navigate = useNavigate();
   const { user, profile } = useUser();
   const { myClubs } = useMyClubs();
@@ -22,6 +26,26 @@ export default function LeaderboardWideCard({ className = "" }) {
 
   // we’ll store the resolved real UUID here to compare on refresh events
   const clubIdRef = useRef(null);
+  const cacheRef = useRef(null);
+
+  const readCache = useCallback((key) => {
+    try {
+      const raw = sessionStorage.getItem(key);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed?.at || !parsed?.data) return null;
+      if (Date.now() - parsed.at > CACHE_TTL_MS) return null;
+      return parsed.data;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const writeCache = useCallback((key, data) => {
+    try {
+      sessionStorage.setItem(key, JSON.stringify({ at: Date.now(), data }));
+    } catch {}
+  }, []);
 
   // Choose a club key (might be UUID or slug)
   const clubKey = useMemo(() => {
@@ -80,30 +104,43 @@ export default function LeaderboardWideCard({ className = "" }) {
         avatar: cRow.profile_image_url || "",
       });
 
-      // 2) This Week (rolling 7d) total for THIS club
+      const cacheKey = `leaderboard:${realClubId}`;
+      const cached = readCache(cacheKey);
+      if (cached) {
+        setPointsWeek(cached.pointsWeek ?? null);
+        setClubRank(cached.clubRank ?? null);
+        cacheRef.current = cached;
+      }
+
+      // 2) This Week (rolling 7d) total for THIS club — aggregate query
       const sinceISO = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
-      const { data: weekRows, error: wErr } = await supabase
-        .from("point_events")
-        .select("points")
-        .eq("status", "approved")
-        .eq("club_id", realClubId)
-        .gte("created_at", sinceISO);
-      if (wErr) throw wErr;
+      let weekSum = 0;
+      try {
+        const { data: weekRows, error: wErr } = await supabase
+          .from("point_events")
+          .select("points")
+          .eq("status", "approved")
+          .eq("club_id", realClubId)
+          .gte("created_at", sinceISO);
+        if (wErr) throw wErr;
+        weekSum = (weekRows || []).reduce((acc, r) => acc + (Number(r.points) || 0), 0);
+        setPointsWeek(weekSum);
+      } catch (eSum) {
+        console.warn("[LeaderboardWideCard] week sum error:", eSum?.message || eSum);
+        setPointsWeek(0);
+      }
 
-      const weekSum = (weekRows || []).reduce((acc, r) => acc + (r.points || 0), 0);
-      setPointsWeek(weekSum);
-
-      // 3) Global club rank (by all-time approved points)
-      const { data: allRows, error: aErr } = await supabase
+      // 3) Global club rank (by all-time approved points) — grouped server-side
+      const { data: aggRows, error: aErr } = await supabase
         .from("point_events")
         .select("club_id, points")
         .eq("status", "approved");
       if (aErr) throw aErr;
 
-      const totals = new Map(); // club_id -> total points
-      (allRows || []).forEach((r) => {
+      const totals = new Map();
+      (aggRows || []).forEach((r) => {
         const k = r.club_id;
-        totals.set(k, (totals.get(k) || 0) + (r.points || 0));
+        totals.set(k, (totals.get(k) || 0) + (Number(r.points) || 0));
       });
 
       const ordered = Array.from(totals.entries())
@@ -111,10 +148,17 @@ export default function LeaderboardWideCard({ className = "" }) {
         .map(([k]) => String(k));
 
       const idx = ordered.findIndex((k) => k === String(realClubId));
-      setClubRank(idx >= 0 ? idx + 1 : (ordered.length ? ordered.length + 1 : 1));
+      const rank = idx >= 0 ? idx + 1 : ordered.length ? ordered.length + 1 : 1;
+      setClubRank(rank);
+
+      // cache
+      const payload = { pointsWeek: weekSum, clubRank: rank };
+      cacheRef.current = payload;
+      writeCache(cacheKey, payload);
     } catch (e) {
-      console.warn("[LeaderboardWideCard] load error:", e?.message || e);
-      setErr(e?.message || "Failed to load leaderboard info.");
+      const msg = e?.message || "Failed to load leaderboard info.";
+      console.warn("[LeaderboardWideCard] load error:", msg);
+      setErr(msg);
       setClubRank(null);
       setPointsWeek(null);
     } finally {
@@ -124,11 +168,17 @@ export default function LeaderboardWideCard({ className = "" }) {
 
   // Initial load (show skeleton once)
   useEffect(() => {
+    if (!shouldLoad) {
+      setLoading(false);
+      return;
+    }
     load(true);
-  }, [load]);
+  }, [load, shouldLoad]);
 
   // Silent refresh when a "points-updated" event is fired anywhere
   useEffect(() => {
+    if (!shouldLoad) return undefined;
+
     const onBump = (e) => {
       // if an event carries a clubId, only refresh if it matches the resolved club
       const target = e?.detail?.clubId;
@@ -137,7 +187,7 @@ export default function LeaderboardWideCard({ className = "" }) {
     };
     window.addEventListener("points-updated", onBump);
     return () => window.removeEventListener("points-updated", onBump);
-  }, [load]);
+  }, [load, shouldLoad]);
 
   // Not in any club → CTA
   if (!clubKey) {
