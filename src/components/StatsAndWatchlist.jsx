@@ -49,18 +49,6 @@ export default function StatsAndWatchlist({ statsData, userId, movieRoute = "/mo
 }>
 
           <div className="flex flex-col items-center gap-2">
-            {/* Clickable role pill (only if present) */}
-            {role ? (
-              <button
-                onClick={goClub}
-                className="cursor-pointer focus:outline-none"
-                title={roleClub?.club_name || "View club"}
-              >
-                <RolePill role={role} />
-              </button>
-            ) : null}
-
-            {/* Centered numbers */}
             <div className="mt-2 grid grid-cols-2 gap-6 text-center">
               <div>
                 <div className="text-zinc-400 text-xs uppercase tracking-wide">
