@@ -1,6 +1,6 @@
 // src/components/onboarding/OnboardingTutorial.jsx
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import slides from "./slideData";
 import Slide from "./Slide";
@@ -15,16 +15,36 @@ export default function OnboardingTutorial() {
   const { user } = useUser();
 
   const current = slides[index];
+  const lastIndex = slides.length - 1;
+
+  // Auto-rotate every 2s until the last slide
+  useEffect(() => {
+    if (finishing || index >= lastIndex) return;
+    const t = setInterval(() => {
+      setIndex((i) => {
+        if (i >= lastIndex) return i;
+        return i + 1;
+      });
+    }, 2000);
+    return () => clearInterval(t);
+  }, [index, lastIndex, finishing]);
 
   async function finishOnboarding() {
     setFinishing(true);
 
     // Update Supabase flag
     if (user) {
-      await supabase
-        .from("profiles")
-        .update({ has_seen_onboarding: true })
-        .eq("id", user.id);
+      const updates = [
+        supabase
+          .from("profiles")
+          .update({ has_seen_onboarding: true })
+          .eq("id", user.id),
+        supabase.auth.updateUser({
+          data: { has_seen_onboarding: true },
+        }),
+      ];
+
+      await Promise.allSettled(updates);
     }
     try {
       localStorage.setItem("sf:onboarding_seen", "1");
@@ -42,15 +62,22 @@ export default function OnboardingTutorial() {
     <div className="onboard-wrapper">
       {/* All Slides */}
       {slides.map((s, i) => (
-  <Slide
-    key={i}
-    title={s.title}
-    body={s.body}
-    note={s.note}
-    image={s.image}
-    isActive={i === index}      // 🔥 only active slide shows
-  />
-))}
+        <Slide
+          key={i}
+          title={s.title}
+          body={s.body}
+          note={s.note}
+          image={s.image}
+          isActive={i === index}      // 🔥 only active slide shows
+          ctaButton={
+            s.cta && i === index ? (
+              <button className="cta-btn inline" onClick={finishOnboarding}>
+                Find a Club
+              </button>
+            ) : null
+          }
+        />
+      ))}
 
 
       {/* Navigation */}
@@ -81,13 +108,6 @@ export default function OnboardingTutorial() {
       {index < slides.length - 1 && (
         <button className="skip-btn" onClick={finishOnboarding}>
           Skip
-        </button>
-      )}
-
-      {/* CTA button on final slide */}
-      {current.cta && (
-        <button className="cta-btn" onClick={finishOnboarding}>
-          Find a Club
         </button>
       )}
 

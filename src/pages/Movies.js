@@ -232,7 +232,7 @@ function Movies({ searchQuery = "" }) {
       </div>
 
       {loading && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-6">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 sm:gap-6">
           {Array.from({ length: 10 }).map((_, i) => (
             <div
               key={i}
@@ -251,7 +251,7 @@ function Movies({ searchQuery = "" }) {
       )}
 
       {!loading && !err && movies.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-6">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 sm:gap-6">
           {movies.map((movie) => {
             const isBusy = !!nominating[movie.id];
             return (

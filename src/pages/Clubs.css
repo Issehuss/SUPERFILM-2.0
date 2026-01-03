@@ -29,6 +29,13 @@
   display: none !important;
 }
 
+@media (max-width: 640px) {
+  .clubs2 .swiper-slide {
+    width: 82vw !important;
+    flex-basis: 82vw !important;
+  }
+}
+
 .preview-ghost {
   position: fixed;
   top: 0;
@@ -242,6 +249,20 @@
   }
   .event-go {
     display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .club-card {
+    border-radius: 12px;
+  }
+  .event-card {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding: 12px;
+  }
+  .event-card:hover {
+    transform: none;
   }
 }
 

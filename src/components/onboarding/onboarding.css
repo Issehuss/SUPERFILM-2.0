@@ -34,36 +34,41 @@
   }
   
   /* Dark overlay over image */
-  .onboard-overlay {
+.onboard-overlay {
     position: absolute;
     inset: 0;
-    background: rgba(0, 0, 0, 0.78);
-    backdrop-filter: blur(18px);
+    background: linear-gradient(180deg, rgba(0, 0, 0, 0.65) 0%, rgba(0, 0, 0, 0.82) 100%);
+    backdrop-filter: blur(14px);
   }
   
   /* Centered content */
-  .onboard-content {
+.onboard-content {
     position: absolute;
-    top: 50%;
+    top: 52%;
     width: 100%;
     transform: translateY(-50%);
     text-align: center;
-    padding: 0 30px;
+    padding: 0 24px;
+    max-width: 640px;
+    left: 50%;
+    translate: -50% 0;
   }
   
   /* Title */
-  .onboard-title {
-    font-size: 32px;
+.onboard-title {
+    font-size: 28px;
     margin-bottom: 12px;
-    letter-spacing: 1px;
+    letter-spacing: 0.4px;
+    line-height: 1.2;
   }
   
   /* Body text */
-  .onboard-body {
-    font-size: 17px;
+.onboard-body {
+    font-size: 16px;
     color: #c8c8c8;
-    max-width: 420px;
+    max-width: 460px;
     margin: 0 auto;
+    line-height: 1.5;
   }
   
   /* Small note (e.g. “coming soon”) */
@@ -75,22 +80,23 @@
   }
   
   /* Navigation controls (arrows + dots) */
-  .onboard-controls {
+.onboard-controls {
     position: absolute;
-    bottom: 80px;
+    bottom: 72px;
     width: 100%;
     display: flex;
     justify-content: center;
     align-items: center;
-    gap: 90px;
+    gap: 72px;
+    padding: 0 24px;
   }
   
   /* Arrows */
-  .nav-arrow {
-    font-size: 30px;
+.nav-arrow {
+    font-size: 28px;
     background: none;
     border: none;
-    color: rgba(255, 255, 255, 0.6);
+    color: rgba(255, 255, 255, 0.7);
     cursor: pointer;
   }
   
@@ -114,30 +120,37 @@
   }
   
   /* Skip button */
-  .skip-btn {
+.skip-btn {
     position: absolute;
-    bottom: 30px;
-    left: 30px;
+    bottom: 26px;
+    left: 24px;
     background: none;
     border: none;
-    color: #9c9c9c;
+    color: #c8c8c8;
     font-size: 14px;
     cursor: pointer;
   }
   
   /* Final CTA button (Find a Club) */
-  .cta-btn {
-    position: absolute;
-    bottom: 30px;
-    right: 30px;
-    background: transparent;
-    border: 1px solid #1f2d46;
-    padding: 10px 20px;
-    border-radius: 6px;
+.cta-btn {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    padding: 10px 18px;
+    border-radius: 10px;
     color: white;
     font-size: 15px;
     cursor: pointer;
+    backdrop-filter: blur(6px);
+    min-width: 180px;
   }
+.cta-btn.inline {
+    position: static;
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    margin-top: 18px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
   
   /* Fade-to-black overlay at the end */
   .fade-black {
@@ -170,24 +183,47 @@
   }
   
   /* Simple mobile tweaks */
-  @media (max-width: 640px) {
+@media (max-width: 640px) {
+    .onboard-content {
+      top: 56%;
+      padding: 0 18px;
+    }
+  
     .onboard-title {
-      font-size: 24px;
+      font-size: 23px;
+      letter-spacing: 0;
     }
   
     .onboard-body {
       font-size: 15px;
+      max-width: 360px;
     }
   
     .onboard-controls {
-      bottom: 60px;
-      gap: 40px;
+      bottom: 44px;
+      gap: 32px;
+    }
+  
+    .nav-arrow {
+      font-size: 24px;
+    }
+  
+    .dot {
+      width: 8px;
+      height: 8px;
     }
   
     .cta-btn,
     .skip-btn {
       font-size: 13px;
-      padding: 8px 16px;
+      padding: 8px 14px;
+      bottom: 16px;
+    }
+  
+    .cta-btn.inline {
+      width: 100%;
+      max-width: 260px;
+      margin: 16px auto 0 auto;
     }
   }
   

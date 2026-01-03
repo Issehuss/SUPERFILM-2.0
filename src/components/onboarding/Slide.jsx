@@ -2,7 +2,7 @@
 import React from "react";
 import "./onboarding.css";
 
-export default function Slide({ title, body, note, image, isActive }) {
+export default function Slide({ title, body, note, image, isActive, ctaButton }) {
   const isTmdb = typeof image === "string" && image.includes("image.tmdb.org");
   return (
     <div
@@ -18,6 +18,7 @@ export default function Slide({ title, body, note, image, isActive }) {
         <p className="onboard-body">{body}</p>
 
         {note && <p className="onboard-note">{note}</p>}
+        {ctaButton ? <div className="onboard-cta-inline">{ctaButton}</div> : null}
       </div>
     </div>
   );

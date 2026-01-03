@@ -843,21 +843,21 @@ export default function HomeSignedIn() {
   return (
     <div className="mx-auto w-full max-w-7xl px-4 md:px-6 py-8 text-white">
       {/* Welcome + Quick actions */}
-      <div className="flex items-center justify-between gap-4">
-        <div>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
+        <div className="w-full">
           <p className="text-sm text-zinc-400">Welcome back</p>
           <h1 className="text-2xl md:text-3xl font-bold">{displayName}</h1>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 w-full sm:w-auto">
           <Link
             to="/movies"
-            className="inline-flex items-center gap-2 rounded-full bg-yellow-500 px-4 py-2 text-black font-semibold hover:bg-yellow-400"
+            className="inline-flex justify-center items-center gap-2 rounded-full bg-yellow-500 px-4 py-2 text-black font-semibold hover:bg-yellow-400 w-full sm:w-auto"
           >
             <PlusCircle size={18} /> Add to Watchlist
           </Link>
           <Link
             to={club ? `/clubs/${club.slug || club.id}` : "/clubs"}
-            className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 hover:bg-white/15"
+            className="inline-flex justify-center items-center gap-2 rounded-full bg-white/10 px-4 py-2 hover:bg-white/15 w-full sm:w-auto"
           >
             <Users size={18} /> {club ? "Go to Club" : "Find a Club"}
           </Link>
@@ -891,7 +891,7 @@ export default function HomeSignedIn() {
         {/* Deck */}
         <div
           ref={deckRef}
-          className="relative mt-4 h-[38vh] min-h-[300px] overflow-hidden"
+          className="relative mt-4 h-[36vh] min-h-[240px] sm:min-h-[300px] overflow-hidden rounded-xl sm:rounded-2xl"
           onMouseEnter={() => {
             hoverRef.current = true;
             // pause rotation on hover

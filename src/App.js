@@ -321,25 +321,35 @@ function MainShell() {
 
   // Clears the onboarding "stuck" state if user already completed it (e.g., DB flag set) but local flag missing
   useEffect(() => {
-    if (profile?.has_seen_onboarding === true) {
+    if (profile?.has_seen_onboarding === true || user?.user_metadata?.has_seen_onboarding === true) {
       try {
         localStorage.setItem("sf:onboarding_seen", "1");
       } catch {}
     }
-  }, [profile?.has_seen_onboarding]);
+  }, [profile?.has_seen_onboarding, user?.user_metadata?.has_seen_onboarding]);
 
-  // ⬇️ Onboarding redirect: only show onboarding once
-useEffect(() => {
-  if (userLoading || !isReady) return;
-  // Treat missing flag as not seen yet
-  const seen =
-    profile?.has_seen_onboarding === true ||
-    (typeof window !== "undefined" &&
-      localStorage.getItem("sf:onboarding_seen") === "1");
-  if (user && !seen) {
-    navigate("/onboarding", { replace: true });
-  }
-}, [user, profile, navigate, userLoading, isReady]);
+  // ⬇️ Onboarding redirect: only show onboarding once (post-signup)
+  useEffect(() => {
+    if (userLoading || !isReady || !user) return;
+
+    const seenProfile = profile?.has_seen_onboarding === true;
+    const seenMeta = user?.user_metadata?.has_seen_onboarding === true;
+    const seenLocal =
+      typeof window !== "undefined" &&
+      localStorage.getItem("sf:onboarding_seen") === "1";
+
+    const seen = seenProfile || seenMeta || seenLocal;
+    if (!seen) {
+      navigate("/onboarding", { replace: true });
+    }
+  }, [
+    user,
+    profile?.has_seen_onboarding,
+    user?.user_metadata?.has_seen_onboarding,
+    navigate,
+    userLoading,
+    isReady,
+  ]);
 
 
   const [rawQuery, setRawQuery] = useState("");
