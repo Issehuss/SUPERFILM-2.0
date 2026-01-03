@@ -1,7 +1,6 @@
 // src/components/StatsAndWatchlist.jsx
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import RolePill from "./RolePill.jsx";
 import useWatchlist from "../hooks/useWatchlist";
 import TmdbImage from "./TmdbImage";
 
@@ -14,16 +13,11 @@ export default function StatsAndWatchlist({ statsData, userId, movieRoute = "/mo
   // ---- Stats inputs ----
   const followers = statsData?.followers ?? 0;
   const following = statsData?.following ?? 0;
-  const role = statsData?.role ?? null;
-  const roleClub = statsData?.roleClub ?? null; // { club_slug, club_name, club_id }
+  const role = null;
+  const roleClub = null;
 
   // ---- Watchlist ----
   const { items: watchlist = [] } = useWatchlist?.() ?? { items: [] };
-
-  const goClub = () => {
-    if (!roleClub?.club_slug) return;
-    navigate(`/clubs/${roleClub.club_slug}`);
-  };
 
   const posterUrl = (m) => {
     // accepts { poster_path } or direct url; supports { tmdb_id } if needed
