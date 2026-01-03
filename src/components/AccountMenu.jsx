@@ -27,6 +27,7 @@ export default function AccountMenu({ className = "" }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   const btnRef = useRef(null);
+  const [signingOut, setSigningOut] = useState(false);
 
   const displayName = useMemo(
     () => profile?.display_name || "Me",
@@ -120,13 +121,22 @@ export default function AccountMenu({ className = "" }) {
 
   // ✅ REAL sign-out handler
   const handleSignOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
     try {
       await logout();
+      setOpen(false);
+      navigate("/", { replace: true });
+      // Hard fallback in case routing is blocked
+      setTimeout(() => {
+        try {
+          window.location.assign("/");
+        } catch {}
+      }, 200);
     } catch (err) {
       console.error("Sign out failed:", err);
-    } finally {
       setOpen(false);
-      window.location.href = "/";
+      setSigningOut(false);
     }
   };
 
@@ -271,15 +281,20 @@ export default function AccountMenu({ className = "" }) {
 <div className="h-px bg-white/10 my-1" />
 
 {/* ✅ Sign out */}
-<button
-  type="button"
-  onClick={handleSignOut}
-  role="menuitem"
-  className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-white/10 rounded-2xl"
->
-  <LogOut className="h-4 w-4" />
-  <span>Sign out</span>
-</button>
+          <button
+            type="button"
+            onClick={handleSignOut}
+            role="menuitem"
+            disabled={signingOut}
+            className={`w-full flex items-center gap-2 px-3 py-2 text-sm rounded-2xl transition ${
+              signingOut
+                ? "opacity-60 cursor-not-allowed"
+                : "hover:bg-white/10"
+            }`}
+          >
+            <LogOut className="h-4 w-4" />
+            <span>{signingOut ? "Signing out..." : "Sign out"}</span>
+          </button>
 
         </div>
       )}
