@@ -10,7 +10,6 @@ import { useUser } from "../../context/UserContext";
 
 export default function OnboardingTutorial() {
   const [index, setIndex] = useState(0);
-  const [finishing, setFinishing] = useState(false);
   const navigate = useNavigate();
   const { user } = useUser();
 
@@ -30,7 +29,7 @@ export default function OnboardingTutorial() {
 
   // Auto-rotate every 2s until the last slide
   useEffect(() => {
-    if (finishing || index >= lastIndex) return;
+    if (index >= lastIndex) return;
     const t = setInterval(() => {
       setIndex((i) => {
         if (i >= lastIndex) return i;
@@ -38,12 +37,10 @@ export default function OnboardingTutorial() {
       });
     }, 5000);
     return () => clearInterval(t);
-  }, [index, lastIndex, finishing]);
+  }, [index, lastIndex]);
 
   async function finishOnboarding() {
-    setFinishing(true);
-
-    // Update Supabase flag
+    // Fire-and-forget profile flag updates
     if (user) {
       const updates = [
         supabase
@@ -54,20 +51,26 @@ export default function OnboardingTutorial() {
           data: { has_seen_onboarding: true },
         }),
       ];
-
-      await Promise.allSettled(updates);
+      Promise.allSettled(updates).catch(() => {});
     }
     try {
       localStorage.setItem("sf:onboarding_seen", "1");
-    } catch (e) {
+    } catch {
       // ignore storage errors
     }
 
-    // Navigate immediately; keep a tiny delay as a fallback
+    // Navigate immediately; fallback to hard redirect to avoid getting stuck
     navigate("/profile", { replace: true });
     setTimeout(() => {
-      navigate("/profile", { replace: true });
-    }, 400);
+      try {
+        navigate("/profile", { replace: true });
+      } catch {}
+    }, 200);
+    setTimeout(() => {
+      try {
+        window.location.assign("/profile");
+      } catch {}
+    }, 600);
   }
 
   return (
@@ -123,12 +126,6 @@ export default function OnboardingTutorial() {
         </button>
       )}
 
-      {/* Fade to black ending */}
-      {finishing && (
-        <div className="fade-black">
-          <span className="begin-text">Let’s begin.</span>
-        </div>
-      )}
     </div>
   );
 }
