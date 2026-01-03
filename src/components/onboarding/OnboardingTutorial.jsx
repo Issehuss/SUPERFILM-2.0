@@ -63,7 +63,8 @@ export default function OnboardingTutorial() {
       // ignore storage errors
     }
 
-    // Fade to black → then navigate
+    // Navigate immediately; keep a tiny delay as a fallback
+    navigate("/clubs", { replace: true });
     setTimeout(() => {
       navigate("/clubs", { replace: true });
     }, 500);

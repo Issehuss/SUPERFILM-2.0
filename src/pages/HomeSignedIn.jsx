@@ -848,16 +848,16 @@ export default function HomeSignedIn() {
           <p className="text-sm text-zinc-400">Welcome back</p>
           <h1 className="text-2xl md:text-3xl font-bold">{displayName}</h1>
         </div>
-        <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+        <div className="flex flex-row flex-wrap sm:flex-nowrap gap-2 w-full sm:w-auto">
           <Link
             to="/movies"
-            className="inline-flex justify-center items-center gap-2 rounded-full bg-yellow-500 px-4 py-2 text-black font-semibold hover:bg-yellow-400 w-full sm:w-auto"
+            className="inline-flex justify-center items-center gap-2 rounded-full bg-yellow-500 px-4 py-2 text-black font-semibold hover:bg-yellow-400 w-auto min-w-[150px]"
           >
             <PlusCircle size={18} /> Add to Watchlist
           </Link>
           <Link
             to={club ? `/clubs/${club.slug || club.id}` : "/clubs"}
-            className="inline-flex justify-center items-center gap-2 rounded-full bg-white/10 px-4 py-2 hover:bg-white/15 w-full sm:w-auto"
+            className="inline-flex justify-center items-center gap-2 rounded-full bg-white/10 px-4 py-2 hover:bg-white/15 w-auto min-w-[150px]"
           >
             <Users size={18} /> {club ? "Go to Club" : "Find a Club"}
           </Link>

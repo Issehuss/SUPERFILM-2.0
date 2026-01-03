@@ -37,8 +37,8 @@
 .onboard-overlay {
     position: absolute;
     inset: 0;
-    background: linear-gradient(180deg, rgba(0, 0, 0, 0.65) 0%, rgba(0, 0, 0, 0.82) 100%);
-    backdrop-filter: blur(14px);
+    background: linear-gradient(180deg, rgba(0, 0, 0, 0.45) 0%, rgba(0, 0, 0, 0.68) 100%);
+    backdrop-filter: blur(6px);
   }
   
   /* Centered content */
