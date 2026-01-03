@@ -17,6 +17,17 @@ export default function OnboardingTutorial() {
   const current = slides[index];
   const lastIndex = slides.length - 1;
 
+  // Preload slide images ASAP for faster first render
+  useEffect(() => {
+    const imgs = slides
+      .map((s) => s.image)
+      .filter(Boolean);
+    imgs.forEach((src) => {
+      const img = new Image();
+      img.src = src;
+    });
+  }, []);
+
   // Auto-rotate every 2s until the last slide
   useEffect(() => {
     if (finishing || index >= lastIndex) return;
@@ -25,7 +36,7 @@ export default function OnboardingTutorial() {
         if (i >= lastIndex) return i;
         return i + 1;
       });
-    }, 2000);
+    }, 5000);
     return () => clearInterval(t);
   }, [index, lastIndex, finishing]);
 
@@ -55,7 +66,7 @@ export default function OnboardingTutorial() {
     // Fade to black → then navigate
     setTimeout(() => {
       navigate("/clubs", { replace: true });
-    }, 1000);
+    }, 500);
   }
 
   return (

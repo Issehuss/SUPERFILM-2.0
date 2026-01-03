@@ -4,11 +4,13 @@ import "./onboarding.css";
 
 export default function Slide({ title, body, note, image, isActive, ctaButton }) {
   const isTmdb = typeof image === "string" && image.includes("image.tmdb.org");
+  const preloadHint = isTmdb ? { backgroundColor: "#0a0a0a" } : {};
   return (
     <div
       className={`onboard-slide ${isActive ? "active" : ""} ${isTmdb ? "tmdb-credit" : ""}`}
       style={{
-        backgroundImage: `url(${image})`
+        backgroundImage: `url(${image})`,
+        ...preloadHint
       }}
     >
       <div className="onboard-overlay" />
