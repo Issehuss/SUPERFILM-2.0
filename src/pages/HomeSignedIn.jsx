@@ -10,6 +10,8 @@ import {
   ListChecks,
   ChevronLeft,
   ChevronRight,
+  Home as HomeIcon,
+  User as UserIcon,
 } from "lucide-react";
 import { useUser } from "../context/UserContext";
 import supabase from "../supabaseClient.js";
@@ -841,7 +843,7 @@ export default function HomeSignedIn() {
 
   /* ============ render ============ */
   return (
-    <div className="mx-auto w-full max-w-7xl px-4 md:px-6 py-8 text-white">
+    <div className="mx-auto w-full max-w-7xl px-4 md:px-6 py-8 pb-24 sm:pb-8 text-white">
       {/* Welcome + Quick actions */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
         <div className="w-full">
@@ -891,7 +893,7 @@ export default function HomeSignedIn() {
         {/* Deck */}
         <div
           ref={deckRef}
-          className="relative mt-4 h-[36vh] min-h-[240px] sm:min-h-[300px] overflow-hidden rounded-xl sm:rounded-2xl"
+          className="relative mt-4 h-[32vh] min-h-[220px] sm:h-[36vh] sm:min-h-[300px] overflow-hidden rounded-xl sm:rounded-2xl"
           onMouseEnter={() => {
             hoverRef.current = true;
             // pause rotation on hover
@@ -1011,36 +1013,38 @@ export default function HomeSignedIn() {
         {/* Actions + description */}
         {!deckLoading && currentMovie && (
           <>
-            <div className="mt-4 flex items-center justify-center gap-4 text-sm text-zinc-300">
-              <span className="font-medium">{currentMovie.title}</span>
+            <div className="mt-4 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4 text-sm sm:text-base text-zinc-300 px-2 text-center sm:text-left">
+              <span className="font-medium text-base sm:text-lg">{currentMovie.title}</span>
               {currentMovie.release_date && (
-                <span>
+                <span className="text-zinc-400 text-sm sm:text-base">
                   • releases {new Date(currentMovie.release_date).toLocaleDateString()}
                 </span>
               )}
-              <button
-                onClick={() =>
-                  currentIsSaved
-                    ? removeFromWatchlist(currentMovie.id)
-                    : addToWatchlist(currentMovie)
-                }
-                className={`px-3 py-1 rounded-full font-semibold ${
-                  currentIsSaved
-                    ? "bg-white/15 text-white hover:bg-white/20"
-                    : "bg-yellow-500 text-black hover:bg-yellow-400"
-                }`}
-              >
-                {currentIsSaved ? "Remove" : "Add to Watchlist"}
-              </button>
-              <button
-                onClick={() => navigate(`/movie/${currentMovie.id}`)}
-                className="px-3 py-1 rounded-full bg-white/10 hover:bg-white/15"
-              >
-                Open details
-              </button>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <button
+                  onClick={() =>
+                    currentIsSaved
+                      ? removeFromWatchlist(currentMovie.id)
+                      : addToWatchlist(currentMovie)
+                  }
+                  className={`px-4 py-2 rounded-full font-semibold min-w-[150px] ${
+                    currentIsSaved
+                      ? "bg-white/15 text-white hover:bg-white/20"
+                      : "bg-yellow-500 text-black hover:bg-yellow-400"
+                  }`}
+                >
+                  {currentIsSaved ? "Remove" : "Add to Watchlist"}
+                </button>
+                <button
+                  onClick={() => navigate(`/movie/${currentMovie.id}`)}
+                  className="px-4 py-2 rounded-full bg-white/10 hover:bg-white/15 min-w-[140px]"
+                >
+                  Open details
+                </button>
+              </div>
             </div>
             {currentMovie.overview && (
-              <p className="mt-2 max-w-3xl mx-auto text-center text-zinc-400 text-sm leading-relaxed">
+              <p className="mt-2 max-w-3xl mx-auto text-center sm:text-left text-zinc-400 text-sm sm:text-base leading-relaxed px-3">
                 {currentMovie.overview}
               </p>
             )}
@@ -1257,5 +1261,30 @@ export default function HomeSignedIn() {
         </Link>
       </div>
     </div>
+
+    {/* Mobile bottom nav */}
+    <nav
+      className="sm:hidden fixed bottom-0 inset-x-0 z-40 bg-black/80 backdrop-blur-xl border-t border-white/10"
+      style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 8px)" }}
+    >
+      <div className="mx-auto max-w-5xl px-4 py-2 flex items-center justify-around text-zinc-200">
+        <Link to="/" className="flex flex-col items-center gap-1 text-xs">
+          <HomeIcon size={18} />
+          <span>Home</span>
+        </Link>
+        <Link to="/clubs" className="flex flex-col items-center gap-1 text-xs">
+          <Users size={18} />
+          <span>Clubs</span>
+        </Link>
+        <Link to="/movies" className="flex flex-col items-center gap-1 text-xs">
+          <Film size={18} />
+          <span>Movies</span>
+        </Link>
+        <Link to="/profile" className="flex flex-col items-center gap-1 text-xs">
+          <UserIcon size={18} />
+          <span>Profile</span>
+        </Link>
+      </div>
+    </nav>
   );
 }
