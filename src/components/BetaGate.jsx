@@ -27,6 +27,7 @@ export default function BetaGate({ children }) {
   const [remember, setRemember] = useState(true);
   const [error, setError] = useState("");
   const [forceGate, setForceGate] = useState(false);
+  const [handoff, setHandoff] = useState(false);
 
   useEffect(() => {
     if (!betaPass || bypass) {
@@ -68,6 +69,8 @@ export default function BetaGate({ children }) {
     }
     setAllowed(true);
     setForceGate(false);
+    setHandoff(true);
+    setTimeout(() => setHandoff(false), 1800);
   };
 
   const onReset = () => {
@@ -94,6 +97,11 @@ export default function BetaGate({ children }) {
           >
             View beta gate
           </button>
+        )}
+        {handoff && (
+          <div className="beta-gate__handoff">
+            Loading... if you don’t see the app, please refresh.
+          </div>
         )}
       </>
     );

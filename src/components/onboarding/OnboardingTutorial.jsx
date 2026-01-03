@@ -64,10 +64,10 @@ export default function OnboardingTutorial() {
     }
 
     // Navigate immediately; keep a tiny delay as a fallback
-    navigate("/clubs", { replace: true });
+    navigate("/profile", { replace: true });
     setTimeout(() => {
-      navigate("/clubs", { replace: true });
-    }, 500);
+      navigate("/profile", { replace: true });
+    }, 400);
   }
 
   return (
@@ -84,7 +84,7 @@ export default function OnboardingTutorial() {
           ctaButton={
             s.cta && i === index ? (
               <button className="cta-btn inline" onClick={finishOnboarding}>
-                Find a Club
+                Set up your profile
               </button>
             ) : null
           }

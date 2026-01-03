@@ -159,6 +159,19 @@
   text-align: center;
 }
 
+.beta-gate__handoff {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5, 5, 9, 0.96);
+  color: #e5e7eb;
+  z-index: 9999;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
 .beta-gate__link {
   color: #facc15;
   text-decoration: none;
