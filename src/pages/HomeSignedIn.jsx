@@ -843,6 +843,7 @@ export default function HomeSignedIn() {
 
   /* ============ render ============ */
   return (
+    <>
     <div className="mx-auto w-full max-w-7xl px-4 md:px-6 py-8 pb-24 sm:pb-8 text-white">
       {/* Welcome + Quick actions */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
@@ -1286,5 +1287,6 @@ export default function HomeSignedIn() {
         </Link>
       </div>
     </nav>
+    </>
   );
 }
