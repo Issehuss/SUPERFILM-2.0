@@ -280,6 +280,8 @@ function mapRowToClub(row) {
 
   return {
     id: `db-${String(row.id)}`,
+    slug: row.slug || null,
+    path: row.slug || String(row.id),
     rawId: row.id,
     name: row.name ?? "Untitled Club",
     image:
@@ -909,7 +911,7 @@ export default function Clubs() {
                   return (
                     <SwiperSlide key={`popular-${club.id}-${index}`} className="!w-[210px]">
                       <Link
-                        to={`/club/${club.id}`}
+                        to={`/clubs/${club.path || club.slug || club.rawId || club.id}`}
                         className="club-card group block"
                         onMouseEnter={(e) => handleEnter(e, club, index)}
                         onMouseLeave={handleLeave}
