@@ -937,7 +937,7 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
       style={themeStyle}
       data-theme={themeId}
     >
-      <div className="w-full max-w-full bg-black overflow-hidden sm:max-w-6xl sm:mx-auto sm:rounded-2xl sm:shadow-lg">
+      <div className="w-full max-w-none mx-0 bg-black overflow-hidden sm:max-w-6xl sm:mx-auto sm:rounded-2xl sm:shadow-lg">
         <Banner />
 
         <StatsAndWatchlist

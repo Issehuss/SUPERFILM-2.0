@@ -39,7 +39,7 @@ export default function StatsAndWatchlist({ statsData, userId, movieRoute = "/mo
   };
 
   return (
-    <div className="px-0 sm:px-6 pt-4 sm:pt-6">
+    <div className="w-full px-0 sm:px-6 pt-4 sm:pt-6">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-6">
         {/* LEFT: Stats (centered) */}
         <div
