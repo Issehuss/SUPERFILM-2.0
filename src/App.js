@@ -565,7 +565,7 @@ function MainShell() {
 
       {/* ===== Main ===== */}
 
-      <main className="flex-1 p-6 max-w-6xl mx-auto w-full">
+      <main className="flex-1 w-full p-0 sm:p-6 max-w-none sm:max-w-6xl sm:mx-auto">
         <Suspense fallback={<Splash />}>
           <Routes>
             <Route
