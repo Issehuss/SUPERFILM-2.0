@@ -22,17 +22,16 @@ export default function LandingPage() {
   const { heading, subheading, image } = carouselSlides[index];
 
   return (
-    <div className="relative w-full h-[calc(100vh-120px)] overflow-hidden flex items-center justify-center bg-black text-white">
+    <div className="relative w-full h-[calc(100vh-120px)] sm:h-[calc(100vh-140px)] overflow-hidden flex items-center justify-center bg-black text-white">
       {/* Centered cinematic card — rounded, no side fades */}
       <section className="relative w-full">
         <div
           className="
-            relative mx-auto overflow-hidden rounded-[28px] shadow-2xl ring-1 ring-white/10
-            max-w-[100vw] sm:max-w-[99vw] md:max-w-[98vw] lg:max-w-[96vw] xl:max-w-[92vw]
+            relative mx-auto overflow-hidden rounded-2xl sm:rounded-[28px] shadow-2xl ring-1 ring-white/10
+            max-w-[96vw] sm:max-w-[94vw] md:max-w-[90vw] lg:max-w-[96vw] xl:max-w-[92vw]
           "
           style={{
-            // ⬅️ Fix: give the card its own height so it doesn't collapse
-            height: 'clamp(600px, 95vh, 960px)',
+            height: 'clamp(520px, 90vh, 960px)',
           }}
         >
           {/* Film still */}
@@ -63,16 +62,16 @@ export default function LandingPage() {
 
           {/* Content */}
           <div className="relative z-10 flex h-full items-center justify-center">
-            <div className="mx-auto max-w-3xl text-center px-6 transition-all duration-700 ease-in-out">
-              <h1 className="text-5xl lg:text-6xl font-extrabold mb-6 leading-tight text-white drop-shadow-xl">
+            <div className="mx-auto max-w-2xl sm:max-w-3xl text-center px-5 sm:px-6 transition-all duration-700 ease-in-out">
+              <h1 className="text-3xl sm:text-4xl lg:text-6xl font-extrabold mb-4 sm:mb-6 leading-tight text-white drop-shadow-xl">
                 {heading}
               </h1>
-              <p className="text-lg sm:text-xl text-zinc-300 mb-8 leading-relaxed">
+              <p className="text-base sm:text-lg lg:text-xl text-zinc-300 mb-6 sm:mb-8 leading-relaxed max-w-2xl mx-auto">
                 {subheading}
               </p>
               <Link
                 to="/clubs"
-                className="bg-yellow-500 text-black font-semibold px-6 py-3 rounded-full shadow-md hover:bg-yellow-400 transition"
+                className="inline-flex items-center justify-center bg-yellow-500 text-black font-semibold px-5 py-2.5 sm:px-6 sm:py-3 rounded-full shadow-md hover:bg-yellow-400 transition"
               >
                 Join SuperFilm
               </Link>
@@ -83,6 +82,5 @@ export default function LandingPage() {
     </div>
   );
 }
-
 
 
