@@ -14,6 +14,7 @@ import debounce from "lodash.debounce";
 import { Toaster } from "react-hot-toast";
 import { trackPageView } from "./lib/analytics";
 import BetaBanner from "./components/BetaBanner";
+import { Home as HomeIcon, Users, Film, User as UserIcon } from "lucide-react";
 
 import "./styles/glows.css";
 import NavActions from "./components/NavActions";
@@ -730,6 +731,65 @@ function MainShell() {
       <Suspense fallback={null}>
         <SuperFilmFooter />
       </Suspense>
+      <MobileNav />
     </div>
+  );
+}
+
+/* ==================== MOBILE NAV (GLOBAL) ==================== */
+function MobileNav() {
+  const location = useLocation();
+  const { user } = useUser();
+
+  // Always show on small screens; keep a minimal set of primary destinations
+  return (
+    <nav
+      className="sm:hidden fixed bottom-0 inset-x-0 z-50 bg-black/85 backdrop-blur-xl border-t border-white/10"
+      style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 8px)" }}
+      aria-label="Mobile navigation"
+    >
+      <div className="mx-auto max-w-5xl px-4 py-2 flex items-center justify-around text-zinc-200 text-xs">
+        <NavLink
+          to="/"
+          className={({ isActive }) =>
+            `flex flex-col items-center gap-1 ${isActive ? "text-white" : "text-zinc-300"}`
+          }
+          aria-label="Home"
+        >
+          <HomeIcon size={18} />
+          <span>Home</span>
+        </NavLink>
+        <NavLink
+          to="/clubs"
+          className={({ isActive }) =>
+            `flex flex-col items-center gap-1 ${isActive ? "text-white" : "text-zinc-300"}`
+          }
+          aria-label="Clubs"
+        >
+          <Users size={18} />
+          <span>Clubs</span>
+        </NavLink>
+        <NavLink
+          to="/movies"
+          className={({ isActive }) =>
+            `flex flex-col items-center gap-1 ${isActive ? "text-white" : "text-zinc-300"}`
+          }
+          aria-label="Movies"
+        >
+          <Film size={18} />
+          <span>Movies</span>
+        </NavLink>
+        <NavLink
+          to={user ? "/profile" : "/auth"}
+          className={({ isActive }) =>
+            `flex flex-col items-center gap-1 ${isActive ? "text-white" : "text-zinc-300"}`
+          }
+          aria-label="Profile"
+        >
+          <UserIcon size={18} />
+          <span>{user ? "Profile" : "Sign in"}</span>
+        </NavLink>
+      </div>
+    </nav>
   );
 }
