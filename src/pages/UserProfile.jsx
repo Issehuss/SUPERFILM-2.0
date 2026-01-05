@@ -804,14 +804,14 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
         }
       : {};
     return (
-      <div className="relative w-full h-[500px] group" style={style}>
+      <div className="relative w-full h-[520px] sm:h-[500px] group rounded-none sm:rounded-2xl overflow-hidden" style={style}>
         {!bannerUrl && (
           <div className="absolute inset-0 grid place-items-center bg-zinc-800 text-zinc-400">
             No banner selected yet
           </div>
         )}
-        <div className="absolute inset-0 bg-black/40 group-hover:bg-black/60 transition" />
-        <div className="absolute bottom-0 left-0 w-full h-32 bg-gradient-to-b from-transparent to-black pointer-events-none" />
+        <div className="absolute inset-0 bg-black/30 group-hover:bg-black/50 transition" />
+        <div className="absolute bottom-0 left-0 w-full h-40 bg-gradient-to-b from-transparent via-black/60 to-black pointer-events-none" />
 
         <div className="absolute top-4 right-4 z-20">
           {viewingOwn ? (
@@ -933,7 +933,7 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
   /* ---------------- render ---------------- */
   return (
     <div
-      className="sf-theme w-full text-white py-8 px-0 bg-black"
+      className="sf-theme w-full text-white py-4 sm:py-8 px-0 bg-black"
       style={themeStyle}
       data-theme={themeId}
     >
@@ -990,7 +990,7 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
         )}
 
         {/* FILM TAKES — Preview (first 3 only) */}
-        <section className="mt-8 px-0 sm:px-6">
+        <section className="mt-5 sm:mt-8 px-0 sm:px-6">
           <div className="rounded-none border-t border-b border-zinc-900 bg-black/30 p-4 sm:rounded-2xl sm:border sm:border-zinc-800">
             <div className="flex items-center mb-3 px-1 sm:px-0">
               <h3 className="text-sm font-semibold text-white">Film Takes</h3>
