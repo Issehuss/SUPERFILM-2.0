@@ -39,41 +39,45 @@ export default function StatsAndWatchlist({ statsData, userId, movieRoute = "/mo
   };
 
   return (
-    <div className="px-6 pt-6">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div className="px-0 sm:px-6 pt-4 sm:pt-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-6">
         {/* LEFT: Stats (centered) */}
-        <div className={
-  isPremium 
-    ? "themed-card themed-outline forge rounded-2xl p-5"
-    : "rounded-2xl border border-zinc-800 bg-black/50 p-5"
-}>
+        <div
+          className={
+            isPremium
+              ? "themed-card themed-outline forge rounded-none sm:rounded-2xl p-4 sm:p-5 w-full"
+              : "rounded-none border-t border-b border-zinc-900 bg-black/50 p-4 sm:p-5 sm:rounded-2xl sm:border sm:border-zinc-800"
+          }
+        >
 
           <div className="flex flex-col items-center gap-2">
-            <div className="mt-2 grid grid-cols-2 gap-6 text-center">
+            <div className="mt-1 grid grid-cols-2 gap-4 sm:gap-6 text-center">
               <div>
                 <div className="text-zinc-400 text-xs uppercase tracking-wide">
                   Followers
                 </div>
-                <div className="text-2xl font-semibold">{followers}</div>
+                <div className="text-xl sm:text-2xl font-semibold">{followers}</div>
               </div>
               <div>
                 <div className="text-zinc-400 text-xs uppercase tracking-wide">
                   Following
                 </div>
-                <div className="text-2xl font-semibold">{following}</div>
+                <div className="text-xl sm:text-2xl font-semibold">{following}</div>
               </div>
             </div>
           </div>
         </div>
 
         {/* RIGHT: Watchlist */}
-        <div className={
-  isPremium 
-    ? "themed-card themed-outline forge rounded-2xl p-5"
-    : "rounded-2xl border border-zinc-800 bg-black/50 p-5"
-}>
+        <div
+          className={
+            isPremium
+              ? "themed-card themed-outline forge rounded-none sm:rounded-2xl p-4 sm:p-5 w-full"
+              : "rounded-none border-t border-b border-zinc-900 bg-black/50 p-4 sm:p-5 sm:rounded-2xl sm:border sm:border-zinc-800"
+          }
+        >
 
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between mb-2 sm:mb-3">
             <h3 className="text-sm font-semibold text-white/90">Watchlist</h3>
             <span className="text-xs text-zinc-400">{watchlist.length}</span>
           </div>
@@ -115,7 +119,7 @@ export default function StatsAndWatchlist({ statsData, userId, movieRoute = "/mo
               })}
             </div>
           ) : (
-            <div className="h-[108px] grid place-items-center text-sm text-zinc-400">
+            <div className="h-[96px] sm:h-[108px] grid place-items-center text-sm text-zinc-400">
               Your watchlist is empty.
             </div>
           )}

@@ -59,9 +59,9 @@ export default function TasteCard({
       : undefined;
 
   return (
-    <div className={`rounded-2xl border border-white/10 p-4 bg-black/30 ${className}`}>
+    <div className={`rounded-2xl border border-white/10 p-3 sm:p-4 bg-black/30 ${className}`}>
       <div
-        className="relative rounded-xl p-5 h-32 grid place-items-center text-center"
+        className="relative rounded-xl p-4 sm:p-5 h-28 sm:h-32 grid place-items-center text-center"
         style={cardStyle}
       >
         <div className="text-[10px] uppercase tracking-wide text-zinc-400 mb-1">
@@ -74,7 +74,6 @@ export default function TasteCard({
     </div>
   );
 }
-
 
 
 

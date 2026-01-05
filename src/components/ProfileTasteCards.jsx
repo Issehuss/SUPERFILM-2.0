@@ -66,18 +66,21 @@ export default function ProfileTasteCards({ cards = [], globalGlow }) {
   if (clean.length === 0) return null;
 
   return (
-    <div className="w-full max-w-5xl mx-auto px-4 py-8 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 md:gap-5">
-      {clean.map((card, idx) => {
-        const color = pickCardColor(card, resolvedGlobal);
-        return (
-          <TasteCard
-            key={card.id || `${card.presetId || "card"}-${idx}`}
-            question={card.question}
-            answer={card.answer}
-            glowColor={color}
-          />
-        );
-      })}
+    <div className="w-full px-4 sm:px-6 py-6">
+      <div className="flex gap-3 overflow-x-auto no-scrollbar sm:grid sm:grid-cols-2 md:grid-cols-4 sm:gap-4 md:gap-5">
+        {clean.map((card, idx) => {
+          const color = pickCardColor(card, resolvedGlobal);
+          return (
+            <TasteCard
+              key={card.id || `${card.presetId || "card"}-${idx}`}
+              question={card.question}
+              answer={card.answer}
+              glowColor={color}
+              className="min-w-[140px] max-w-[160px] sm:min-w-0 sm:max-w-none"
+            />
+          );
+        })}
+      </div>
     </div>
   );
 }

@@ -933,11 +933,11 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
   /* ---------------- render ---------------- */
   return (
     <div
-      className="sf-theme w-full text-white py-8 px-4 bg-black"
+      className="sf-theme w-full text-white py-8 px-0 bg-black"
       style={themeStyle}
       data-theme={themeId}
     >
-      <div className="max-w-6xl mx-auto bg-black rounded-2xl overflow-hidden shadow-lg">
+      <div className="w-full max-w-full bg-black overflow-hidden sm:max-w-6xl sm:mx-auto sm:rounded-2xl sm:shadow-lg">
         <Banner />
 
         <StatsAndWatchlist
@@ -955,7 +955,7 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
 
         {/* Avatar cropper removed; direct file upload handles images now */}
 
-        <div className="px-6 pt-6">
+        <div className="px-0 sm:px-6 pt-6">
           <div ref={moodboardAnchorRef} id="moodboard">
             <Moodboard
               profileId={viewProfile?.id}
@@ -967,9 +967,9 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
 
         {/* Taste Cards — view */}
         {!editMode && liveTasteCards.length > 0 && (
-          <section className="mt-6 px-6">
-            <div className="themed-card themed-outline forge rounded-2xl border bg-black/40">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+          <section className="mt-6 px-0 sm:px-6">
+            <div className="rounded-none border-t border-b border-zinc-900 bg-black/40 sm:rounded-2xl sm:border sm:border-zinc-800">
+              <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-zinc-900 sm:border-zinc-800">
                 <h3 className="text-sm font-semibold text-white">Taste Cards</h3>
               </div>
               <ProfileTasteCards cards={liveTasteCards} globalGlow={liveGlobalGlow} />
@@ -979,9 +979,9 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
 
         {/* Rating language — view (premium users' phrase groups) */}
         {!editMode && viewScheme?.tags?.length > 0 && (
-          <section className="mt-6 px-6">
-            <div className="themed-card themed-outline forge rounded-2xl border bg-black/40">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
+          <section className="mt-6 px-0 sm:px-6">
+            <div className="rounded-none border-t border-b border-zinc-900 bg-black/40 sm:rounded-2xl sm:border sm:border-zinc-800">
+              <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-zinc-900 sm:border-zinc-800">
                 <h3 className="text-sm font-semibold text-white">Rating Language</h3>
               </div>
               <RatingSchemeView scheme={viewScheme} />
@@ -990,14 +990,14 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
         )}
 
         {/* FILM TAKES — Preview (first 3 only) */}
-        <section className="mt-8 px-6">
-          <div className="themed-card themed-outline forge rounded-2xl border border-zinc-800 bg-black/30 p-4">
-            <div className="flex items-center mb-3">
+        <section className="mt-8 px-0 sm:px-6">
+          <div className="rounded-none border-t border-b border-zinc-900 bg-black/30 p-4 sm:rounded-2xl sm:border sm:border-zinc-800">
+            <div className="flex items-center mb-3 px-1 sm:px-0">
               <h3 className="text-sm font-semibold text-white">Film Takes</h3>
             </div>
 
             {filmTakesLoading ? (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                 {Array.from({ length: 3 }).map((_, i) => (
                   <div
                     key={i}
@@ -1008,7 +1008,7 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
             ) : filmTakes.length === 0 ? (
               <p className="text-xs text-zinc-500">No takes yet.</p>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                 {filmTakes.slice(0, 3).map((take) => (
                   <div
                     key={take.id}
