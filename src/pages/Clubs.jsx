@@ -138,7 +138,7 @@ function enrichClubs(list) {
 const swiperConfig = {
   modules: [Navigation, Mousewheel, Keyboard],
   slidesPerView: "auto",
-  spaceBetween: 20,
+  spaceBetween: 14,
   navigation: false,
   loop: true,
   grabCursor: true,
@@ -654,19 +654,16 @@ export default function Clubs() {
       : `${filters.genres[0]} +${filters.genres.length - 1}`;
 
   return (
-    <div
-      className="clubs2 w-screen relative left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] min-h-screen"
-      style={{ background: "transparent" }}
-    >
-      <main className="relative max-w-7xl mx-auto px-6 pt-8 pb-10">
-        <header className="mb-8 flex flex-col gap-3">
+    <div className="clubs2 w-screen relative left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] min-h-screen">
+      <main className="relative max-w-7xl mx-auto px-3 pt-6 pb-8 sm:px-6 sm:pt-8 sm:pb-10">
+        <header className="mb-6 sm:mb-8 flex flex-col gap-2 sm:gap-3">
           <div>
-            <p className="text-[0.65rem] tracking-[0.35em] uppercase text-zinc-500">Clubs</p>
-            <h1 className="mt-2 text-3xl sm:text-4xl font-semibold text-[rgb(var(--brand-yellow))]">
+            <p className="text-[0.6rem] tracking-[0.32em] uppercase text-zinc-500">Clubs</p>
+            <h1 className="mt-1 sm:mt-2 text-2xl sm:text-4xl font-semibold text-[rgb(var(--brand-yellow))]">
               Discover film communities
             </h1>
           </div>
-          <p className="max-w-2xl text-sm text-zinc-400">
+          <p className="max-w-3xl text-[13px] sm:text-sm text-zinc-400">
             {loadingClubs
               ? "Loading clubs…"
               : "Join clubs that match your taste in films, genres and watch habits."}
