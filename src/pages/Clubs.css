@@ -532,15 +532,16 @@
 @media (max-width: 640px) {
   .clubs-filter-shell {
     width: 100%;
+    align-items: stretch;
   }
   .clubs-filter-pill {
-    padding: 2px 4px;
+    padding: 3px 6px;
     border-radius: 16px;
     min-width: 0;
     width: 100%;
   }
   .clubs-filter-segment {
-    padding: 6px 8px;
+    padding: 7px 9px;
     border-right-width: 1px;
   }
   .clubs-filter-label {
@@ -549,7 +550,7 @@
   }
   .clubs-filter-value,
   .clubs-search-input {
-    font-size: 11px;
+    font-size: 12px;
   }
   .clubs-filter-count-pill {
     font-size: 10px;
@@ -560,5 +561,14 @@
   }
   .club-thumb {
     padding-top: 150%;
+  }
+  .clubs-quick-actions {
+    width: 100%;
+  }
+  .mobile-actions-trigger .nav-pill {
+    width: 100%;
+  }
+  .mobile-actions-menu .nav-pill {
+    width: 100%;
   }
 }
