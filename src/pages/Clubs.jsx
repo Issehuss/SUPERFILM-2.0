@@ -673,8 +673,8 @@ export default function Clubs() {
         </header>
 
         <section className="mb-8">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex-1 flex justify-center">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex-1 w-full flex justify-center sm:justify-start">
               <div className="clubs-filter-shell" ref={panelRef}>
                 <div className="clubs-filter-pill">
                   <div className="clubs-filter-segment clubs-filter-search">
