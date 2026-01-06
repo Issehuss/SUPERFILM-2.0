@@ -653,6 +653,8 @@ export default function Clubs() {
       ? filters.genres[0]
       : `${filters.genres[0]} +${filters.genres.length - 1}`;
 
+  const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
+
   return (
     <div className="clubs2 w-screen relative left-1/2 right-1/2 -ml-[50vw] -mr-[50vw] min-h-screen">
       <main className="relative max-w-7xl mx-auto px-3 pt-6 pb-8 sm:px-6 sm:pt-8 sm:pb-10">
@@ -868,24 +870,59 @@ export default function Clubs() {
             </div>
 
             <div className="clubs-quick-actions">
-              <button className="nav-pill" onClick={() => navigate("/myclub")}>
-                <Users className="nav-pill-icon" />
-                <span>My Club</span>
-              </button>
-              <button className="nav-pill" onClick={() => navigate("/events")}>
-                <CalendarDays className="nav-pill-icon" />
-                <span>Events</span>
-              </button>
-              <button className="nav-pill" onClick={() => navigate("/leaderboard")}>
-                <Trophy className="nav-pill-icon" />
-                <span>Leaderboard</span>
-              </button>
-              {!userHasClub && (
-                <button className="nav-pill nav-pill-accent" onClick={() => navigate("/create-club")}>
-                  <PlusCircle className="nav-pill-icon" />
-                  <span>Create club</span>
+              <div className="mobile-actions-trigger">
+                <button
+                  type="button"
+                  className="nav-pill w-full justify-center"
+                  onClick={() => setMobileActionsOpen((v) => !v)}
+                >
+                  <Users className="nav-pill-icon" />
+                  <span>Actions</span>
                 </button>
-              )}
+                {mobileActionsOpen && (
+                  <div className="mobile-actions-menu">
+                    <button className="nav-pill" onClick={() => navigate("/myclub")}>
+                      <Users className="nav-pill-icon" />
+                      <span>My Club</span>
+                    </button>
+                    <button className="nav-pill" onClick={() => navigate("/events")}>
+                      <CalendarDays className="nav-pill-icon" />
+                      <span>Events</span>
+                    </button>
+                    <button className="nav-pill" onClick={() => navigate("/leaderboard")}>
+                      <Trophy className="nav-pill-icon" />
+                      <span>Leaderboard</span>
+                    </button>
+                    {!userHasClub && (
+                      <button className="nav-pill nav-pill-accent" onClick={() => navigate("/create-club")}>
+                        <PlusCircle className="nav-pill-icon" />
+                        <span>Create club</span>
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="desktop-actions">
+                <button className="nav-pill" onClick={() => navigate("/myclub")}>
+                  <Users className="nav-pill-icon" />
+                  <span>My Club</span>
+                </button>
+                <button className="nav-pill" onClick={() => navigate("/events")}>
+                  <CalendarDays className="nav-pill-icon" />
+                  <span>Events</span>
+                </button>
+                <button className="nav-pill" onClick={() => navigate("/leaderboard")}>
+                  <Trophy className="nav-pill-icon" />
+                  <span>Leaderboard</span>
+                </button>
+                {!userHasClub && (
+                  <button className="nav-pill nav-pill-accent" onClick={() => navigate("/create-club")}>
+                    <PlusCircle className="nav-pill-icon" />
+                    <span>Create club</span>
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </section>

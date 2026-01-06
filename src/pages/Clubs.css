@@ -498,6 +498,31 @@
     flex-basis: 100%;
     justify-content: center;
   }
+
+  .desktop-actions {
+    display: none;
+  }
+  .mobile-actions-trigger {
+    display: block;
+    width: 100%;
+  }
+  .mobile-actions-menu {
+    margin-top: 10px;
+    display: grid;
+    gap: 10px;
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 641px) {
+  .mobile-actions-trigger {
+    display: none;
+  }
+  .desktop-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
 }
 
 @media (max-width: 640px) {
