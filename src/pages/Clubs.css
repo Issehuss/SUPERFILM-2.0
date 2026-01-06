@@ -31,8 +31,8 @@
 
 @media (max-width: 640px) {
   .clubs2 .swiper-slide {
-    width: 68vw !important;
-    flex-basis: 68vw !important;
+    width: 60vw !important;
+    flex-basis: 60vw !important;
   }
 }
 
@@ -487,12 +487,12 @@
   .nav-pill {
     flex: 1 1 calc(50% - 8px);
     justify-content: center;
-    font-size: 13px;
-    padding: 10px 12px;
+    font-size: 12px;
+    padding: 8px 10px;
   }
   .nav-pill-icon {
-    width: 14px;
-    height: 14px;
+    width: 13px;
+    height: 13px;
   }
   .nav-pill-accent {
     flex-basis: 100%;
@@ -511,6 +511,10 @@
     display: grid;
     gap: 10px;
     grid-template-columns: 1fr;
+    width: 100%;
+  }
+  .mobile-actions-menu .nav-pill {
+    flex: 1 1 100%;
   }
 }
 
@@ -526,22 +530,26 @@
 }
 
 @media (max-width: 640px) {
+  .clubs-filter-shell {
+    width: 100%;
+  }
   .clubs-filter-pill {
-    padding: 2px 6px;
-    border-radius: 18px;
+    padding: 2px 4px;
+    border-radius: 16px;
     min-width: 0;
+    width: 100%;
   }
   .clubs-filter-segment {
-    padding: 8px 10px;
+    padding: 6px 8px;
     border-right-width: 1px;
   }
   .clubs-filter-label {
-    font-size: 9px;
-    letter-spacing: 0.06em;
+    font-size: 8.5px;
+    letter-spacing: 0.05em;
   }
   .clubs-filter-value,
   .clubs-search-input {
-    font-size: 12px;
+    font-size: 11px;
   }
   .clubs-filter-count-pill {
     font-size: 10px;
