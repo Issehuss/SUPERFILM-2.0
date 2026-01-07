@@ -15,6 +15,16 @@ export async function requestToJoinClub(clubId) {
 
     // Notify club presidents about the new request
     try {
+      // If the SECURITY DEFINER RPC exists, prefer it (bypasses RLS safely)
+      const { error: rpcNotifyErr } = await supabase.rpc("notify_membership_request", {
+        p_club_id: clubId,
+        p_requester_id: userId,
+      });
+      if (!rpcNotifyErr) {
+        return { ok: true };
+      }
+
+      // Fallback to client-side notification inserts (may be blocked by RLS)
       const { data: clubRow } = await supabase
         .from("clubs")
         .select("id, name, slug, created_by")
