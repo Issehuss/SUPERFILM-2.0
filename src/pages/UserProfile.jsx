@@ -844,7 +844,7 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
               <div
                 className={
                   isPremiumProfile
-                    ? "absolute inset-0 rounded-full themed-card themed-outline forge opacity-90"
+                    ? "absolute inset-0 rounded-full themed-outline forge opacity-90 border border-transparent shadow-none"
                     : "absolute inset-0 rounded-full bg-[radial-gradient(circle_at_30%_20%,rgba(255,215,0,0.28),rgba(0,0,0,0.9))] opacity-70 pointer-events-none"
                 }
               />
@@ -853,7 +853,7 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
                 alt="Avatar"
                 className={
                   isPremiumProfile
-                    ? "w-full h-full rounded-full border border-yellow-200/40 object-cover shadow-[0_0_0_1px_rgba(250,204,21,0.35),0_14px_30px_rgba(0,0,0,0.45)]"
+                    ? "w-full h-full rounded-full border border-white/15 object-cover shadow-[0_10px_24px_rgba(0,0,0,0.35)]"
                     : "w-full h-full rounded-full border border-white/20 object-cover shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_14px_30px_rgba(0,0,0,0.45)]"
                 }
                 onError={(e) => {
