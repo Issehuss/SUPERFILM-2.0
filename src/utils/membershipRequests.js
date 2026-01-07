@@ -1,4 +1,5 @@
 import supabase from "../supabaseClient";
+import { createNotification } from "./notify";
 
 export async function requestToJoinClub(clubId) {
     const { data: auth } = await supabase.auth.getUser();
@@ -11,5 +12,40 @@ export async function requestToJoinClub(clubId) {
     });
   
     if (error) throw error;
+
+    // Notify club presidents about the new request
+    try {
+      const { data: clubRow } = await supabase
+        .from("clubs")
+        .select("id, name, slug")
+        .eq("id", clubId)
+        .maybeSingle();
+
+      const { data: staffRows } = await supabase
+        .from("club_staff")
+        .select("user_id, role")
+        .eq("club_id", clubId)
+        .eq("role", "president");
+
+      const recipients = (staffRows || []).map((r) => r.user_id).filter(Boolean);
+      await Promise.all(
+        recipients.map((rid) =>
+          createNotification({
+            userId: rid,
+            type: "club.membership.pending",
+            clubId,
+            data: {
+              club_name: clubRow?.name || "Your club",
+              slug: clubRow?.slug || clubId,
+              href: `/clubs/${clubRow?.slug || clubId}`,
+              message: "New membership request",
+            },
+          })
+        )
+      );
+    } catch (notifyErr) {
+      console.warn("[membership request notify] failed", notifyErr?.message || notifyErr);
+    }
+
     return { ok: true };
   }
