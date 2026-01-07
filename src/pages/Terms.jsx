@@ -5,109 +5,121 @@ export default function TermsPage() {
   return (
     <div className="min-h-screen bg-black text-white">
       <div className="max-w-5xl mx-auto px-4 py-10">
-        <h1 className="text-3xl font-bold mb-2">SuperFilm – Terms and Conditions</h1>
-        <p className="text-sm text-zinc-400 mb-6">Last updated: 01/01/2026</p>
+        <h1 className="text-3xl font-bold mb-2">SuperFilm — Terms and Conditions</h1>
+        <p className="text-sm text-zinc-400 mb-6">Last updated: 2025-01-01</p>
 
         <article className="prose prose-invert prose-sm max-w-none space-y-6">
           <Section title="Introduction & Acceptance">
             <p>
-              Hello all! Welcome to SuperFilm’s user agreement (“Terms”). By accessing or using SuperFilm.UK and any other application, API, site, service, or product operated by SuprFilm Ltd (“SuperFilm”, “we”, “us”, “our”), you agree to be bound by these Terms. If you do not consent, you are not permitted to access or use the Services.
+              Hello all! Welcome to SuperFilm’s user agreement (“Terms”). By accessing or using SuperFilm.UK and any other application, API, site, service, or product operated by SuprFilm Ltd (“SuperFilm”, “we”, “us”, “our”), you agree to be bound by these Terms. If you do not wish to consent, you are not permitted to access or use the Services.
             </p>
             <p>
-              No individual under 18 is permitted to use the Services. By using the Services, you represent and warrant that you are at least 18, have legal capacity, are not barred by applicable laws, have not been permanently removed or currently suspended, and you accept these Terms on behalf of any entity only if you have authority to bind that entity.
+              No individual under the age of 18 is permitted to use the Services. By using the Services, you represent and warrant that you are at least 18, have the legal capacity to form a contract, are not barred by applicable laws, have not been permanently suspended or currently suspended, and if you accept on behalf of an entity you have full authority to bind that entity.
             </p>
           </Section>
 
           <Section title="Eligibility & Accounts">
             <p>
-              You may create an account if you meet the above requirements. You are responsible for your credentials and all activity on your account. Use a strong password and notify us immediately if compromised. Do not sell, transfer, or license your account without SuperFilm’s written approval. Roles (Club President, Vice President, Member) define feature access but confer no ownership; SuperFilm may suspend or revoke roles at its discretion.
+              You are eligible to create an account if you meet Section 1.2. To create an account, you will share a username and password (stored securely per Section 12). You are responsible for your account information and all activity under it. If compromised, notify SuperFilm immediately. Use a strong password and never sell, transfer, or license your account without written approval.
             </p>
+          </Section>
+
+          <Section title="Roles">
+            <p>Users may hold roles (Club President, Vice President, Member) that define features and responsibilities but confer no ownership. SuperFilm may suspend accounts, revoke roles, or restrict access at its discretion.</p>
+            <ul>
+              <li><strong>Club President:</strong> Enhanced cosmetic controls and event hosting; responsible for representing members; cannot remove members (removal reserved to SuperFilm).</li>
+              <li><strong>Club Vice President:</strong> Same authority expectations as Club President; must align with the club.</li>
+              <li><strong>Member:</strong> Access to Services, clubs, events, and interactions; must follow respectful behaviour (see Section 4 and 11).</li>
+            </ul>
           </Section>
 
           <Section title="User Generated Content">
             <p>
-              You may upload, post, or share text, links, photos, videos, audio, images, or other materials (“User Content”). You warrant you have rights to it and grant SuperFilm a non-exclusive, worldwide, royalty-free licence to host, display, reproduce, and distribute it within the Services. You are solely responsible for your User Content. SuperFilm does not endorse or guarantee its accuracy and may remove content that violates these Terms or law.
+              You may upload or share text, links, photos, videos, audio, images, or other materials (“User Content”). You warrant you own or have rights to it and grant SuperFilm a non-exclusive, worldwide, royalty-free licence to host, display, reproduce, and distribute it within the Services. You are solely responsible for your User Content. SuperFilm does not endorse or guarantee its accuracy and may review/remove content that violates these Terms or law.
             </p>
           </Section>
 
-          <Section title="Content Standards & Prohibited Conduct">
-            <ul>
-              <li>Content must be respectful, lawful, relevant, and not misrepresent facts, people, or organisations.</li>
-              <li>No defamatory, obscene, hateful, discriminatory, harassing, or threatening material; no violence, self-harm, illegal activity, inappropriate nudity, IP/privacy infringement, or malware.</li>
-              <li>Do not access others’ accounts, bypass security, scrape/harvest data without consent, spam, impersonate, use the Services for illegal/fraudulent purposes, harm minors, or upload copyrighted material without permission.</li>
-              <li>Report violations to Hussein@superfilm.info or Kacper@superfilm.info.</li>
-            </ul>
+          <Section title="Content Standards and Prohibited Conduct">
+            <p>Content must be respectful, lawful, relevant, and must not misrepresent facts, people, or organisations. Do not post defamatory, obscene, hateful, discriminatory, harassing, or threatening material; promote violence, self-harm, illegal activity, or inappropriate nudity; infringe IP/privacy rights; or include malware.</p>
+            <p>Prohibited conduct includes: accessing others’ accounts; bypassing security; scraping/harvesting data without consent; spam/scams/unsolicited ads; impersonation; illegal/fraudulent use; organising illegal events; uploading copyrighted material without permission; harming minors. Report issues to support@superfilm.uk.</p>
           </Section>
 
           <Section title="Event Listings and Meet Ups">
-            <p>
-              Events are user-led unless SuperFilm states otherwise. Listings are not endorsements. Hosts must comply with law and venue rules, provide accurate details, manage safety, and handle attendee data lawfully. Attendees are responsible for their conduct, travel, and property. Participation is at your own risk; see the full Event terms above for responsibilities, assumptions of risk, refunds, cancellations, and incident reporting. Nothing here excludes liability where unlawful to do so.
-            </p>
+            <ul className="list-disc pl-4 space-y-1">
+              <li>Events are user-led unless SuperFilm states otherwise; listings are not endorsements.</li>
+              <li>Hosts must comply with law/venue rules, provide clear details, manage safety/capacity, handle attendee data lawfully, and present refund/cancellation policies.</li>
+              <li>Attendees are responsible for conduct, travel, and property; participation is at your own risk.</li>
+              <li>SuperFilm may restrict/remove risky listings; age/verification may apply (18+).</li>
+              <li>Assumption of risk: you accept risks of events/meetups. Release/indemnity applies to event conduct to the fullest extent permitted by English law.</li>
+            </ul>
           </Section>
 
           <Section title="Verification and Safety">
             <p>
-              Services are 18+. SuperFilm does not run background checks and has no duty to vet users. We may request ID/verification at any time and may restrict features until complete. You assume risks of online/offline interactions and events; follow sensible safety practices. Misrepresenting age/identity or being under 18 is a material breach.
+              Services are 18+. SuperFilm does not conduct background checks and has no duty to vet users. We may request verification (e.g., ID or selfie) and may restrict features until complete. Online/offline interactions carry risk; follow safety practices and contact emergency services if needed. Misrepresenting age/identity or being under 18 is a material breach.
             </p>
           </Section>
 
           <Section title="Intellectual Property Rights">
             <p>
-              All Service content, features, and branding are owned by SuprFilm Ltd. You receive a limited, revocable, non-transferable, non-sublicensable licence for personal, non-commercial use. Do not exploit, copy, or misuse our IP. User Content ownership is unaffected (see User Generated Content). SuperFilm logos/names must not be used without permission except as explicitly allowed.
+              All content, features, and functionality of the Services are owned by SuprFilm Ltd and licensors. You receive a limited, non-exclusive, revocable, non-transferable, non-sublicensable licence for personal, non-commercial use. Do not copy, exploit, or misuse our IP. User Content ownership remains yours, subject to the licence in Section 3. Branding use is restricted (see Section 10).
             </p>
           </Section>
 
-          <Section title="Payments and Fees (Director’s Cut)">
+          <Section title="Payments And Fees">
             <p>
-              Director’s Cut is an optional premium subscription processed via Stripe. Monthly auto-renew until cancelled. One 14-day free trial per user; charges apply after the trial unless cancelled before it ends. Cancel anytime; access continues until period end. Prices may change with notice. Payments are generally non-refundable except where required by law. Director’s Cut is ad-free.
+              Director’s Cut is optional premium membership. Payments are processed by Stripe; Stripe terms apply. Subscriptions auto-renew monthly until cancelled; one 14-day free trial per user. Cancel anytime; no refunds for partial periods unless required by law. Prices may change with notice. Premium users do not see third-party ads.
             </p>
           </Section>
 
           <Section title="Advertising & Sponsorship">
             <p>
-              Ads or sponsored content may appear and will be labelled. Director’s Cut members do not see third-party ads. Sponsors may receive aggregated/anonymised analytics; no personal data is shared without consent. Advertisers must comply with applicable law; SuperFilm may reject or remove ads at its discretion.
+              Ads/sponsored content may appear and will be labelled. Director’s Cut users do not see third-party ads. Sponsors may receive aggregated/anonymised analytics; no personal data shared without consent. SuperFilm may reject or remove ads at its discretion.
             </p>
           </Section>
 
           <Section title="Use Of Our Logo">
             <p>
-              The SuperFilm name, logo, and design elements are the property of SuprFilm Ltd. Limited, truthful references are allowed; no alteration, resale, confusing use, or implication of endorsement without written consent. Permissions may be withdrawn at any time. Requests: Hussein@superfilm.info or Kacper@superfilm.info.
+              The SuperFilm name, logo, and design elements are property of SuprFilm Ltd. Limited truthful references are allowed; no alteration, resale, confusing use, or implication of endorsement without written consent. Permissions can be withdrawn. Requests: support@superfilm.uk.
             </p>
           </Section>
 
           <Section title="Moderation">
             <p>
-              SuperFilm may review or disclose content when reported, when unlawful/harmful conduct is suspected, or when required by law. Actions may include removal, warnings, suspension, or termination. Decisions are final; appeals are at SuperFilm’s discretion. Moderation data (reports, IDs, message content) is stored for safety/legal reasons.
+              SuperFilm may review/disclose content when reported, when unlawful/harmful conduct is suspected, or when required by law. Actions may include removal, warnings, suspension, or termination. Decisions are final; appeals are at our discretion. Moderation data (reports, IDs, message content) is stored for safety/legal purposes.
             </p>
           </Section>
 
           <Section title="Data and Privacy">
             <p>
-              SuperFilm complies with UK GDPR/Data Protection Act 2018. We collect account info, user content, limited technical data, transactional data (via Stripe), and moderation data. No under-18 data. Lawful bases include contract, legitimate interests, consent (cookies), and legal obligations. Supabase hosts data; Stripe processes payments. Aggregated, non-identifiable analytics may be shared; no personal data to sponsors/advertisers without consent. Data is retained while active and up to 90 days post-deletion unless required longer. You have rights to access, correct, delete, object, restrict, and port. Contact Hussein@superfilm.info or Kacper@superfilm.info. Cookies are used for sessions, preferences, and limited analytics.
+              SuperFilm complies with UK GDPR/Data Protection Act 2018. We collect account info, User Content, limited technical data, transactional data (via Stripe), and moderation data. No under-18 data. Lawful bases: contract, legitimate interests, consent (cookies), legal obligation. Supabase hosts data; Stripe processes payments. Aggregated, non-identifiable analytics may be shared; no personal data to sponsors/advertisers without consent.
+            </p>
+            <p>
+              Data retained while active and up to 90 days post-deletion unless required longer. Rights: access, correction, deletion, objection/restriction, portability. Contact support@superfilm.uk. Cookies are used for sessions, preferences, limited analytics; manage via browser settings.
             </p>
           </Section>
 
           <Section title="Third Party Links and Integrations">
             <p>
-              Third-party links or integrations are used at your own risk; SuperFilm is not responsible for third-party content or services. Contracts with third parties are solely between you and them.
+              Third-party links/integrations are at your own risk; SuperFilm is not responsible for third-party content or services. Contracts with third parties are solely between you and them.
             </p>
           </Section>
 
           <Section title="Liability & Disclaimers">
             <p>
-              Services are provided “as is/as available.” We exclude indirect and consequential damages to the fullest extent permitted by English law. Liability caps at the greater of amounts paid in the last 12 months or £100, where not legally excluded. Nothing limits liability for death/personal injury caused by negligence, fraud, or other non-excludable liability.
+              Services are provided “as is/as available.” To the fullest extent permitted by English law, we exclude indirect, consequential, and certain damages. Aggregate liability (where not excluded) is capped at the greater of amounts paid in the last 12 months or £100. Nothing limits liability for death/personal injury caused by negligence, fraud, or other non-excludable liability.
             </p>
           </Section>
 
           <Section title="Indemnity">
             <p>
-              You agree to indemnify SuperFilm for claims arising from your use, User Content, events, breaches of these Terms, misuse of branding, or reliance on third parties. You will cooperate with our defence and not settle without consent. Obligations survive account termination.
+              You agree to indemnify SuperFilm for claims arising from your use, User Content, events, breaches of these Terms, misuse of branding, or reliance on third parties. Cooperate with our defence; do not settle without consent. Obligations survive account termination.
             </p>
           </Section>
 
           <Section title="Governing Law & Jurisdiction">
             <p>
-              These Terms are governed by the laws of England and Wales; courts of England and Wales have exclusive jurisdiction (UK consumers may also use local courts). Mandatory local rights remain unaffected. English controls.
+              These Terms are governed by the laws of England and Wales; courts of England and Wales have exclusive jurisdiction (UK consumers may also use local courts). Mandatory local rights remain unaffected. English prevails.
             </p>
           </Section>
 
@@ -118,7 +130,7 @@ export default function TermsPage() {
           </Section>
 
           <Section title="Contact Information">
-            <p>Email: Hussein@superfilm.info &amp; Kacper@superfilm.info</p>
+            <p>Email: support@superfilm.uk</p>
             <p>SuprFilm Ltd, London, United Kingdom</p>
           </Section>
         </article>
