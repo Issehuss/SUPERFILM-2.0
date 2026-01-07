@@ -34,8 +34,8 @@ export default function ProfileFollows() {
 
         // load profile by slug or id
         const { data: profile } = await supabase
-          .from("profiles")
-          .select("*")
+          .from("public_profiles")
+          .select("id, display_name, slug, username, avatar_url")
           .or(`slug.eq.${identifier},id.eq.${identifier}`)
           .maybeSingle();
         if (!profile) {
@@ -70,7 +70,7 @@ export default function ProfileFollows() {
 
         // fetch profiles for those ids
         const { data: profs, error: pErr } = await supabase
-          .from("profiles")
+          .from("public_profiles")
           .select("id, display_name, slug, username, avatar_url")
           .in("id", ids);
         if (pErr) throw pErr;
