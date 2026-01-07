@@ -17,7 +17,7 @@ export async function requestToJoinClub(clubId) {
     try {
       const { data: clubRow } = await supabase
         .from("clubs")
-        .select("id, name, slug")
+        .select("id, name, slug, created_by")
         .eq("id", clubId)
         .maybeSingle();
 
@@ -27,7 +27,20 @@ export async function requestToJoinClub(clubId) {
         .eq("club_id", clubId)
         .eq("role", "president");
 
-      const recipients = (staffRows || []).map((r) => r.user_id).filter(Boolean);
+      const { data: memberRows } = await supabase
+        .from("club_members")
+        .select("user_id, role")
+        .eq("club_id", clubId)
+        .eq("role", "president");
+
+      const recipients = [
+        ...(staffRows || []).map((r) => r.user_id),
+        ...(memberRows || []).map((r) => r.user_id),
+        clubRow?.created_by || null,
+      ]
+        .filter(Boolean)
+        .filter((v, i, arr) => arr.indexOf(v) === i);
+
       await Promise.all(
         recipients.map((rid) =>
           createNotification({
