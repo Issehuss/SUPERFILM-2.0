@@ -193,7 +193,7 @@ export default function NotificationsBell() {
                 created_at: payload.new.created_at || new Date().toISOString(),
                 data: {
                   message: "New membership request",
-                  href: `/clubs/${adminClubs.find((c) => c.club_id === payload.new.club_id)?.slug || payload.new.club_id}`,
+                  href: `/clubs/${adminClubs.find((c) => c.club_id === payload.new.club_id)?.slug || payload.new.club_id}/requests`,
                 },
               },
               ...prev,

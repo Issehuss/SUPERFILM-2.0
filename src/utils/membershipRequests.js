@@ -60,8 +60,8 @@ export async function requestToJoinClub(clubId) {
             data: {
               club_name: clubRow?.name || "Your club",
               slug: clubRow?.slug || clubId,
-              href: `/clubs/${clubRow?.slug || clubId}`,
-              message: "New membership request",
+              href: `/clubs/${clubRow?.slug || clubId}/requests`,
+              message: "New membership request awaiting approval",
             },
           })
         )
