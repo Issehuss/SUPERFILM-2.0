@@ -841,15 +841,21 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
         <div className="absolute bottom-0 left-0 w-full px-6 pb-6 z-10 flex items-end">
           <div className="flex items-end space-x-4 max-w-3xl w-full">
             <div className="relative w-24 h-24 shrink-0">
-              <div className={isPremiumProfile ? "absolute inset-0 rounded-full border border-yellow-400/50 shadow-[0_0_0_1px_rgba(250,204,21,0.35),0_0_22px_rgba(250,204,21,0.25)]" : "absolute inset-0 rounded-full bg-[radial-gradient(circle_at_30%_20%,rgba(255,215,0,0.28),rgba(0,0,0,0.9))] opacity-70 pointer-events-none"} />
+              <div
+                className={
+                  isPremiumProfile
+                    ? "absolute inset-0 rounded-full themed-card themed-outline forge opacity-90"
+                    : "absolute inset-0 rounded-full bg-[radial-gradient(circle_at_30%_20%,rgba(255,215,0,0.28),rgba(0,0,0,0.9))] opacity-70 pointer-events-none"
+                }
+              />
               <img
                 src={avatarUrl}
                 alt="Avatar"
-                onError={(e) => {
-                  e.currentTarget.onerror = null;
-                  e.currentTarget.src = "/avatars/default.jpg";
-                }}
-              className="w-full h-full rounded-full border border-white/20 object-cover shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_14px_30px_rgba(0,0,0,0.45)]"
+                className={
+                  isPremiumProfile
+                    ? "w-full h-full rounded-full border border-yellow-200/40 object-cover shadow-[0_0_0_1px_rgba(250,204,21,0.35),0_14px_30px_rgba(0,0,0,0.45)]"
+                    : "w-full h-full rounded-full border border-white/20 object-cover shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_14px_30px_rgba(0,0,0,0.45)]"
+                }
                 onError={(e) => {
                   e.currentTarget.onerror = null;
                   e.currentTarget.src = "/default-avatar.svg";
