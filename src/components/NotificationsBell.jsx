@@ -44,6 +44,8 @@ export default function NotificationsBell() {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   const navigate = useNavigate();
+  const [syntheticItems, setSyntheticItems] = useState([]);
+  const [syntheticUnread, setSyntheticUnread] = useState(0);
 
   // Admin/Staff clubs with pending join requests
   const [adminClubs, setAdminClubs] = useState([]); // [{club_id, name, slug, pending}]
@@ -168,6 +170,22 @@ export default function NotificationsBell() {
                 c.club_id === payload.new.club_id ? { ...c, pending: c.pending + 1 } : c
               )
             );
+
+            // also push a synthetic notification so the bell shows it even if RLS blocks inserts
+            setSyntheticItems((prev) => [
+              {
+                id: `synthetic-${payload.new.id}`,
+                type: "club.membership.pending",
+                club_id: payload.new.club_id,
+                created_at: payload.new.created_at || new Date().toISOString(),
+                data: {
+                  message: "New membership request",
+                  href: `/clubs/${adminClubs.find((c) => c.club_id === payload.new.club_id)?.slug || payload.new.club_id}`,
+                },
+              },
+              ...prev,
+            ]);
+            setSyntheticUnread((u) => Math.min(99, (u || 0) + 1));
           }
         }
       )
@@ -184,6 +202,9 @@ export default function NotificationsBell() {
                     : c
                 )
               );
+
+              setSyntheticItems((prev) => prev.filter((n) => n.id !== `synthetic-${payload.new.id}`));
+              setSyntheticUnread((u) => Math.max(0, (u || 0) - 1));
             }
           }
         }
@@ -200,6 +221,11 @@ export default function NotificationsBell() {
   // 🔒 If not signed in, hide bell entirely (no markup rendered)
   if (!user) return null;
 
+  const mergedItems = [...syntheticItems, ...items].sort(
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  );
+  const totalUnread = (unread || 0) + (syntheticUnread || 0);
+
   return (
     <div className="relative" ref={ref}>
       <button
@@ -208,15 +234,15 @@ export default function NotificationsBell() {
         className={
           `relative inline-flex items-center justify-center h-9 w-9 rounded-full
            bg-white/10 hover:bg-white/15 ring-1 ring-white/10
-           ${unread > 0 ? "animate-[pulse_1.5s_ease-in-out_infinite] ring-yellow-400" : ""}`
+           ${totalUnread > 0 ? "animate-[pulse_1.5s_ease-in-out_infinite] ring-yellow-400" : ""}`
         }
         
         aria-label="Open notifications"
       >
         <Bell size={18} />
-        {unread > 0 && (
+        {totalUnread > 0 && (
           <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-yellow-500 text-black text-[11px] font-bold leading-[18px] text-center">
-            {unread > 9 ? "9+" : unread}
+            {totalUnread > 9 ? "9+" : totalUnread}
           </span>
         )}
       </button>
@@ -275,12 +301,12 @@ export default function NotificationsBell() {
           )}
 
           {/* User notifications list */}
-          {items.length === 0 ? (
+          {mergedItems.length === 0 ? (
             <div className="px-4 py-10 text-sm text-zinc-400">You’re all caught up.</div>
           ) : (
             <ul className="divide-y divide-white/10">
-              {items.slice(0, 12).map((n) => {
-                const isUnread = !n.read_at;
+              {mergedItems.slice(0, 12).map((n) => {
+                const isUnread = !n.read_at && !n.id?.startsWith("synthetic-");
                 const d = n.data || {};
                 const clubName =
                   d.club_name || d.group_name || d.chat_name || d.title || "Club chat";
@@ -300,7 +326,9 @@ export default function NotificationsBell() {
                     key={n.id}
                     className={`px-4 py-3 text-sm ${isUnread ? "bg-white/[0.03]" : ""}`}
                     onClick={async () => {
-                      await markItemRead(n.id);
+                      if (!n.id?.startsWith("synthetic-")) {
+                        await markItemRead(n.id);
+                      }
                       setOpen(false);
                       navigate(href);
                     }}
