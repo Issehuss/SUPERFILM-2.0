@@ -658,6 +658,12 @@ title: t.film_title,      // <-- THIS fixes missing names in FilmTakeCard
       }
     }
 
+    if (Object.prototype.hasOwnProperty.call(patch, "avatar_url")) {
+      const nextAvatar = patch.avatar_url || null;
+      setAvatar(nextAvatar || "/default-avatar.svg");
+      setViewProfile((prev) => (prev ? { ...prev, avatar_url: nextAvatar } : prev));
+    }
+
     if (typeof patch.banner_url === "string" && patch.banner_url) {
       setBannerOverride(patch.banner_url);
       try {
@@ -843,8 +849,12 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
                   e.currentTarget.onerror = null;
                   e.currentTarget.src = "/avatars/default.jpg";
                 }}
-                className="w-full h-full rounded-full border border-white/20 object-cover shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_14px_30px_rgba(0,0,0,0.45)]"
-             />
+              className="w-full h-full rounded-full border border-white/20 object-cover shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_14px_30px_rgba(0,0,0,0.45)]"
+                onError={(e) => {
+                  e.currentTarget.onerror = null;
+                  e.currentTarget.src = "/default-avatar.svg";
+                }}
+              />
              {editMode && viewingOwn && (
                 <div className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center opacity-0 hover:opacity-100 transition">
                   <label
@@ -976,7 +986,11 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
         {/* Taste Cards — view */}
         {!editMode && liveTasteCards.length > 0 && (
           <section className="mt-6 px-0 sm:px-6">
-            <div className="rounded-none border-t border-b border-zinc-900 bg-black/40 sm:rounded-2xl sm:border sm:border-zinc-800">
+            <div className={
+              isPremiumProfile
+                ? "themed-card themed-outline forge rounded-none sm:rounded-2xl border-t border-b border-zinc-900 sm:border sm:border-zinc-800 bg-black/40"
+                : "rounded-none border-t border-b border-zinc-900 bg-black/40 sm:rounded-2xl sm:border sm:border-zinc-800"
+            }>
               <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-zinc-900 sm:border-zinc-800">
                 <h3 className="text-sm font-semibold text-white">Taste Cards</h3>
               </div>
@@ -988,7 +1002,11 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
         {/* Rating language — view (premium users' phrase groups) */}
         {!editMode && viewScheme?.tags?.length > 0 && (
           <section className="mt-6 px-0 sm:px-6">
-            <div className="rounded-none border-t border-b border-zinc-900 bg-black/40 sm:rounded-2xl sm:border sm:border-zinc-800">
+            <div className={
+              isPremiumProfile
+                ? "themed-card themed-outline forge rounded-none sm:rounded-2xl border-t border-b border-zinc-900 sm:border sm:border-zinc-800 bg-black/40"
+                : "rounded-none border-t border-b border-zinc-900 bg-black/40 sm:rounded-2xl sm:border sm:border-zinc-800"
+            }>
               <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-zinc-900 sm:border-zinc-800">
                 <h3 className="text-sm font-semibold text-white">Rating Language</h3>
               </div>
@@ -999,7 +1017,11 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
 
         {/* FILM TAKES — Preview (first 3 only) */}
         <section className="mt-5 sm:mt-8 px-0 sm:px-6">
-          <div className="rounded-none border-t border-b border-zinc-900 bg-black/30 p-4 sm:rounded-2xl sm:border sm:border-zinc-800">
+          <div className={
+            isPremiumProfile
+              ? "themed-card themed-outline forge rounded-none sm:rounded-2xl border-t border-b border-zinc-900 sm:border sm:border-zinc-800 bg-black/30 p-4"
+              : "rounded-none border-t border-b border-zinc-900 bg-black/30 p-4 sm:rounded-2xl sm:border sm:border-zinc-800"
+          }>
             <div className="flex items-center mb-3 px-1 sm:px-0">
               <h3 className="text-sm font-semibold text-white">Film Takes</h3>
             </div>
