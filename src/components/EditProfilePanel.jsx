@@ -953,12 +953,12 @@ async function handleSaveAll() {
         {/* Main */}
         <div className="flex-1 overflow-y-auto">
           {/* Header */}
-          <div className="sticky top-0 z-10 flex items-center justify-between border-b border-zinc-800 bg-zinc-950/95 px-4 py-3">
-            <h2 className="text-base font-semibold text-white">Edit Profile</h2>
+          <div className="sticky top-0 z-10 flex items-center justify-between border-b border-zinc-800 bg-zinc-950/95 px-3 py-2 sm:px-4 sm:py-3">
+            <h2 className="text-sm sm:text-base font-semibold text-white">Edit Profile</h2>
             <button
               type="button"
               onClick={handlePanelClose}
-              className="inline-flex items-center gap-2 rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-white hover:bg-zinc-900"
+              className="inline-flex items-center gap-2 rounded-lg border border-zinc-700 px-3 py-1 text-xs sm:text-sm text-white hover:bg-zinc-900"
             >
               <X className="h-4 w-4" />
               Close
@@ -966,7 +966,7 @@ async function handleSaveAll() {
           </div>
 
           {/* Sections */}
-          <div className="p-4 space-y-8">
+          <div className="p-3 sm:p-4 space-y-6 sm:space-y-8">
             {/* PROFILE */}
             {active === "profile" && (
               <section>
@@ -1330,8 +1330,8 @@ async function handleSaveAll() {
           </div> {/* end .p-4.space-y-8 */}
 
           {/* Taste Cards Save Reminder */}
-<div className="px-4 py-3 border-t border-zinc-800 bg-black/50">
-  <p className="text-xs text-zinc-400 leading-snug">
+<div className="px-3 sm:px-4 py-3 border-t border-zinc-800 bg-black/50">
+  <p className="text-[11px] sm:text-xs text-zinc-400 leading-snug">
     💡 Tip: After editing your <span className="text-yellow-400 font-medium">Taste Cards</span>, 
     press <span className="text-white font-semibold">Save</span> in that section first, 
     then use the final <span className="text-yellow-400 font-medium">Save changes</span> button below 
@@ -1341,9 +1341,9 @@ async function handleSaveAll() {
 
 
           {/* Sticky bottom save bar */}
-          <div className="sticky bottom-0 z-10 border-t border-zinc-800 bg-zinc-950/95 px-4 py-3">
-            <div className="flex items-center justify-between">
-              <div className="text-sm">
+          <div className="sticky bottom-0 z-10 border-t border-zinc-800 bg-zinc-950/95 px-3 py-2 sm:px-4 sm:py-3">
+            <div className="flex items-center justify-between gap-2 sm:gap-4">
+              <div className="text-xs sm:text-sm">
                 {allSave.success ? (
                   <span className="text-emerald-400">All changes saved!</span>
                 ) : (
@@ -1354,7 +1354,7 @@ async function handleSaveAll() {
                 <button
                   type="button"
                   onClick={handlePanelClose}
-                  className="rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-white hover:bg-zinc-900"
+                  className="rounded-lg border border-zinc-700 px-3 py-1 text-xs sm:text-sm text-white hover:bg-zinc-900"
                 >
                   Cancel
                 </button>
@@ -1364,7 +1364,7 @@ async function handleSaveAll() {
   disabled={allSave.saving || savingRef.current}
   aria-busy={(allSave.saving || savingRef.current) ? "true" : "false"}
   className={[
-    "rounded-lg px-3 py-1.5 text-sm font-semibold",
+    "rounded-lg px-3 py-1 text-xs sm:text-sm font-semibold",
     (allSave.saving || savingRef.current)
       ? "bg-yellow-500/70 text-black cursor-wait pointer-events-none"
       : "bg-yellow-500 text-black hover:bg-yellow-400"
