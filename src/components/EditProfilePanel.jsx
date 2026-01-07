@@ -1012,12 +1012,15 @@ async function handleSaveAll() {
               <section>
                 <h3 className="mb-3 text-sm font-semibold text-zinc-300">Avatar</h3>
                 <div className="flex items-center gap-4">
-                  <img
-                    src={avatarUrl}
-                  alt="Current avatar"
-                  className="h-20 w-20 rounded-full border border-zinc-800 object-cover"
-                    onError={(e) => { e.currentTarget.src = "/default-avatar.svg"; }}
-                  />
+                  <div className="relative">
+                    <div className="absolute inset-0 rounded-full border border-white/10 shadow-[0_0_0_1px_rgba(255,255,255,0.08)]" />
+                    <img
+                      src={avatarUrl}
+                      alt="Current avatar"
+                      className="h-20 w-20 rounded-full object-cover relative z-10"
+                      onError={(e) => { e.currentTarget.src = "/default-avatar.svg"; }}
+                    />
+                  </div>
                   <button
                     type="button"
                     className="inline-flex items-center gap-2 rounded-md border border-zinc-700 px-3 py-1.5 text-sm text-white hover:bg-zinc-900"
@@ -1031,13 +1034,16 @@ async function handleSaveAll() {
                     className="inline-flex items-center gap-2 rounded-md border border-zinc-700 px-3 py-1.5 text-sm text-zinc-200 hover:bg-red-500/10 hover:border-red-400"
                     onClick={async () => {
                       try {
-                        await supabase
+                        const { error } = await supabase
                           .from("profiles")
                           .update({ avatar_url: null })
                           .eq("id", profileId);
+                        if (error) throw error;
                         onUpdated?.({ avatar_url: null });
+                        toast.success("Avatar removed");
                       } catch (e) {
                         console.warn("remove avatar failed", e?.message || e);
+                        toast.error("Couldn't remove avatar");
                       }
                     }}
                     disabled={!profile?.avatar_url}
