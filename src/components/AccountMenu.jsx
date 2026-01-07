@@ -153,7 +153,7 @@ export default function AccountMenu({ className = "" }) {
         className="inline-flex items-center gap-2 rounded-full ring-1 ring-white/10 bg-white/10 hover:bg-white/15 px-2 py-1 transition"
       >
         <img
-          src={profile?.avatar_url || avatar || "/avatars/default.jpg"}
+          src={profile?.avatar_url || avatar || "/default-avatar.svg"}
           alt=""
           className="h-8 w-8 rounded-full object-cover"
           draggable={false}

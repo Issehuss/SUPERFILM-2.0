@@ -128,12 +128,12 @@ export default function ProfileFollows() {
                   className="flex items-center gap-3 rounded-xl border border-zinc-800 bg-white/5 px-4 py-3"
                 >
                   <img
-                    src={p.avatar_url || "/avatars/default.jpg"}
+                    src={p.avatar_url || "/default-avatar.svg"}
                     alt={p.display_name || handle}
                     className="w-10 h-10 rounded-full object-cover border border-white/10"
                     onError={(e) => {
                       e.currentTarget.onerror = null;
-                      e.currentTarget.src = "/avatars/default.jpg";
+                      e.currentTarget.src = "/default-avatar.svg";
                     }}
                   />
                   <div className="flex-1 min-w-0">

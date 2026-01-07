@@ -207,7 +207,7 @@ const TicketCard = ({ title, tagline, location, datetime, onClick }) => (
 ------------------------------*/
 const fallbackNext = '/fallback-next.jpg';
 const fallbackBanner = '/fallback-banner.jpg';
-const fallbackAvatar = '/avatars/default.jpg';
+const fallbackAvatar = '/default-avatar.svg';
 const fallbackLegacy = '/fallback-next.jpg'; // replaces any old test.jpg/blob fallback
 
 const isBadPoster = (src) => {

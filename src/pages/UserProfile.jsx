@@ -781,7 +781,7 @@ title: t.film_title,      // <-- THIS fixes missing names in FilmTakeCard
   const username = viewProfile?.slug || viewProfile?.username || "username";
   const bio = viewProfile?.bio || "";
   const clubName = viewProfile?.club_tag || "";
-  const avatarUrl = viewProfile?.avatar_url || "/avatars/default.jpg";
+  const avatarUrl = viewProfile?.avatar_url || "/default-avatar.svg";
 
   const bannerUrl =
     bannerOverride ?? viewProfile?.banner_url ?? viewProfile?.banner_image ?? "";

@@ -323,7 +323,7 @@ export default function ProfileQuickEditor({ onUpdated }) {
 function AvatarPreview() {
   const { user, avatar } = useUser();
   // Prefer DB avatar from context (user.profileAvatarUrl), fallback to local override
-  const src = user?.profileAvatarUrl || avatar || "/avatars/default.jpg";
+  const src = user?.profileAvatarUrl || avatar || "/default-avatar.svg";
   const alt = user?.name || "Avatar";
 
   return (
@@ -334,4 +334,3 @@ function AvatarPreview() {
     />
   );
 }
-

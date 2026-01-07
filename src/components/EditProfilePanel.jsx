@@ -165,7 +165,7 @@ function getProfileViewPath() {
   }, [open, profile?.display_name, profile?.slug, profile?.bio]);
 
   /* ───────────────────────────────── Avatar ───────────────────────────────── */
-  const avatarUrl = profile?.avatar_url || "/avatars/default.jpg";
+  const avatarUrl = profile?.avatar_url || "/default-avatar.svg";
   const fileInputRef = useRef(null);
 
   const handleAvatarUpload = async (e) => {
@@ -1014,9 +1014,9 @@ async function handleSaveAll() {
                 <div className="flex items-center gap-4">
                   <img
                     src={avatarUrl}
-                    alt="Current avatar"
-                    className="h-20 w-20 rounded-full border border-zinc-800 object-cover"
-                    onError={(e) => { e.currentTarget.src = "/avatars/default.jpg"; }}
+                  alt="Current avatar"
+                  className="h-20 w-20 rounded-full border border-zinc-800 object-cover"
+                    onError={(e) => { e.currentTarget.src = "/default-avatar.svg"; }}
                   />
                   <button
                     type="button"
@@ -1025,6 +1025,25 @@ async function handleSaveAll() {
                   >
                     <Upload className="h-4 w-4" />
                     Upload new
+                  </button>
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-2 rounded-md border border-zinc-700 px-3 py-1.5 text-sm text-zinc-200 hover:bg-red-500/10 hover:border-red-400"
+                    onClick={async () => {
+                      try {
+                        await supabase
+                          .from("profiles")
+                          .update({ avatar_url: null })
+                          .eq("id", profileId);
+                        onUpdated?.({ avatar_url: null });
+                      } catch (e) {
+                        console.warn("remove avatar failed", e?.message || e);
+                      }
+                    }}
+                    disabled={!profile?.avatar_url}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Remove avatar
                   </button>
                   <input
                     ref={fileInputRef}
