@@ -75,18 +75,31 @@ export default function NotificationsBell() {
       }
       setLoadingAdminPending(true);
 
-      // 1) clubs where user is staff
+      // 1) clubs where user is staff (president)
       const { data: staffClubs } = await supabase
         .from("club_staff")
         .select("club_id, role, clubs:clubs!inner(id, name, slug)")
         .eq("user_id", user.id);
 
-      // Filter to allowed staff roles
       let allowedClubs =
         (staffClubs || [])
           .filter((r) => REQUEST_ROLES.includes(String(r.role || "").toLowerCase()))
           .map((r) => r.clubs)
           .filter(Boolean);
+
+      // 1b) clubs where user is member with president role
+      const { data: memberPres } = await supabase
+        .from("club_members")
+        .select("club_id, role, clubs:clubs!inner(id, name, slug)")
+        .eq("user_id", user.id)
+        .eq("role", "president");
+
+      if (memberPres?.length) {
+        allowedClubs = [
+          ...allowedClubs,
+          ...memberPres.map((r) => r.clubs).filter(Boolean),
+        ];
+      }
 
       // Fallback: profile_roles with an array "roles"
       if (!allowedClubs.length) {
