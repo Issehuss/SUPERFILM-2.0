@@ -74,6 +74,7 @@ const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const UserSearchPage = lazy(() => import("./pages/UserSearchPage.jsx"));
 const TermsPage = lazy(() => import("./pages/Terms.jsx"));
+const ProfileFollows = lazy(() => import("./pages/ProfileFollows.jsx"));
 
 // Premium/president-only pages
 const ClubSettings = lazy(() => import("./pages/ClubSettings.jsx"));
@@ -670,6 +671,7 @@ function MainShell() {
               path="/clubs/:clubParam/requests"
               element={<ClubRequests />}
             />
+            <Route path="/u/:slug/:mode(followers|following)" element={<ProfileFollows />} />
             <Route path="/auth" element={<AuthPage />} />
 
             {/* Premium routing */}

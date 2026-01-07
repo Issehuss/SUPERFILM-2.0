@@ -951,6 +951,14 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
           
           userId={viewProfile?.id}
           movieRoute="/movie"
+          onFollowersClick={() => {
+            const handle = viewProfile?.slug || viewProfile?.id;
+            if (handle) navigate(`/u/${handle}/followers`);
+          }}
+          onFollowingClick={() => {
+            const handle = viewProfile?.slug || viewProfile?.id;
+            if (handle) navigate(`/u/${handle}/following`);
+          }}
         />
 
         {/* Avatar cropper removed; direct file upload handles images now */}

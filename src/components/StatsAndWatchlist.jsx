@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import useWatchlist from "../hooks/useWatchlist";
 import TmdbImage from "./TmdbImage";
 
-export default function StatsAndWatchlist({ statsData, userId, movieRoute = "/movies" }) {
+export default function StatsAndWatchlist({ statsData, userId, movieRoute = "/movies", onFollowersClick, onFollowingClick }) {
     // premium check (passed implicitly via theme)
     const isPremium = Boolean(statsData?.isPremium);
 
@@ -52,18 +52,26 @@ export default function StatsAndWatchlist({ statsData, userId, movieRoute = "/mo
 
           <div className="flex flex-col items-center gap-2">
             <div className="mt-1 grid grid-cols-2 gap-4 sm:gap-6 text-center">
-              <div>
+              <button
+                type="button"
+                onClick={onFollowersClick}
+                className="flex flex-col items-center gap-1 focus:outline-none"
+              >
                 <div className="text-zinc-400 text-xs uppercase tracking-wide">
                   Followers
                 </div>
                 <div className="text-xl sm:text-2xl font-semibold">{followers}</div>
-              </div>
-              <div>
+              </button>
+              <button
+                type="button"
+                onClick={onFollowingClick}
+                className="flex flex-col items-center gap-1 focus:outline-none"
+              >
                 <div className="text-zinc-400 text-xs uppercase tracking-wide">
                   Following
                 </div>
                 <div className="text-xl sm:text-2xl font-semibold">{following}</div>
-              </div>
+              </button>
             </div>
           </div>
         </div>
