@@ -104,6 +104,9 @@ export default function ProfileFollows() {
             {targetProfile.display_name || targetProfile.username || targetProfile.slug || "User"}
           </p>
         )}
+        {!targetProfile && !loading && !error && (
+          <p className="text-sm text-red-400 mb-6">Profile not found.</p>
+        )}
 
         {loading ? (
           <div className="space-y-3">

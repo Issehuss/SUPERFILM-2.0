@@ -672,6 +672,7 @@ function MainShell() {
               element={<ClubRequests />}
             />
             <Route path="/u/:slug/:mode(followers|following)" element={<ProfileFollows />} />
+            <Route path="/profile/:id/:mode(followers|following)" element={<ProfileFollows />} />
             <Route path="/auth" element={<AuthPage />} />
 
             {/* Premium routing */}
