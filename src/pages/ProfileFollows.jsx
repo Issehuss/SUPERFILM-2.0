@@ -45,9 +45,10 @@ export default function ProfileFollows() {
         if (!cancelled) setTargetProfile(profile);
 
         // load follows
+        // fetch follow rows with ids
         let query = supabase
           .from("profile_follows")
-          .select("follower_id, followee_id, follower:follower_id(id, display_name, slug, username, avatar_url), followee:followee_id(id, display_name, slug, username, avatar_url)")
+          .select("follower_id, followee_id, created_at")
           .order("created_at", { ascending: false });
 
         if (modeKey === "following") {
@@ -58,11 +59,29 @@ export default function ProfileFollows() {
 
         const { data, error: qErr } = await query;
         if (qErr) throw qErr;
-        const mapped =
-          data?.map((r) =>
-            modeKey === "following" ? r.followee : r.follower
-          )?.filter(Boolean) || [];
-        if (!cancelled) setRows(mapped);
+
+        const ids =
+          (data || []).map((r) => (modeKey === "following" ? r.followee_id : r.follower_id)).filter(Boolean);
+
+        if (!ids.length) {
+          if (!cancelled) setRows([]);
+          return;
+        }
+
+        // fetch profiles for those ids
+        const { data: profs, error: pErr } = await supabase
+          .from("profiles")
+          .select("id, display_name, slug, username, avatar_url")
+          .in("id", ids);
+        if (pErr) throw pErr;
+
+        // preserve order of ids
+        const profMap = new Map((profs || []).map((p) => [p.id, p]));
+        const ordered = ids
+          .map((id) => profMap.get(id))
+          .filter(Boolean);
+
+        if (!cancelled) setRows(ordered);
       } catch (e) {
         if (!cancelled) setError(e.message || "Unable to load follows.");
       } finally {
