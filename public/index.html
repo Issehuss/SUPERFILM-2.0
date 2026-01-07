@@ -11,7 +11,7 @@
     <meta name="theme-color" content="#000000" />
     <meta
       name="description"
-      content="SuperFilm — clubs, screenings, and film discovery."
+      content="SuperFilm — discover film clubs, share takes, and follow friends' favorites."
     />
     <!-- Google tag (GA4) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-31DENXY7Z3"></script>
@@ -36,7 +36,42 @@
       work correctly both with client-side routing and a non-root public URL.
       Learn how to configure a non-root public URL by running `npm run build`.
     -->
-    <title>SuperFilm</title>
+    <title>SuperFilm — Film clubs, takes, and watchlists</title>
+
+    <!-- Open Graph / Twitter -->
+    <meta property="og:title" content="SuperFilm — Film clubs, takes, and watchlists" />
+    <meta property="og:description" content="Join SuperFilm to discover film clubs, share takes, and track your watchlist with friends." />
+    <meta property="og:image" content="https://superfilm.uk/og-image.jpg" />
+    <meta property="og:url" content="https://superfilm.uk" />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <!-- Structured data -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "Organization",
+        "name": "SuperFilm",
+        "url": "https://superfilm.uk",
+        "logo": "https://superfilm.uk/logo-512.png",
+        "sameAs": [
+          "https://twitter.com/yourhandle",
+          "https://instagram.com/yourhandle"
+        ]
+      }
+    </script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "url": "https://superfilm.uk",
+        "name": "SuperFilm",
+        "potentialAction": {
+          "@type": "SearchAction",
+          "target": "https://superfilm.uk/search?q={search_term_string}",
+          "query-input": "required name=search_term_string"
+        }
+      }
+    </script>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
