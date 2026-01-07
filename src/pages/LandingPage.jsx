@@ -70,7 +70,7 @@ export default function LandingPage() {
                 {subheading}
               </p>
               <Link
-                to="/clubs"
+                to="/auth?mode=signup"
                 className="inline-flex items-center justify-center bg-yellow-500 text-black font-semibold px-5 py-2.5 sm:px-6 sm:py-3 rounded-full shadow-md hover:bg-yellow-400 transition"
               >
                 Join SuperFilm
@@ -82,5 +82,4 @@ export default function LandingPage() {
     </div>
   );
 }
-
 
