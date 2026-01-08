@@ -233,7 +233,13 @@ export default function Moodboard({
   }
 
   return (
-    <div className={`rounded-2xl border border-zinc-800 bg-black/40 p-4 ${className}`}>
+    <div
+      className={
+        isOwner && typeof window !== "undefined" && window?.document?.body?.dataset?.theme === "premium"
+          ? `themed-card themed-outline forge rounded-2xl p-4 ${className}`
+          : `rounded-2xl border border-zinc-800 bg-black/40 p-4 ${className}`
+      }
+    >
       <div className="mb-2 flex items-center justify-between">
         <h3 className="text-lg font-semibold text-white">Moodboard</h3>
         <div className="flex items-center gap-2">
