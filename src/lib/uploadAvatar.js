@@ -3,7 +3,7 @@ import supabase from "../supabaseClient";
 import heic2any from "heic2any";
 
 const AVATAR_BUCKET = "user-avatars";
-const MAX_BYTES = 5 * 1024 * 1024;
+const MAX_BYTES = 10 * 1024 * 1024;
 
 // Formats Supabase supports without issues (after conversion)
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
@@ -120,7 +120,7 @@ export default async function uploadAvatar(file, userId, opts = {}) {
   console.log("[Avatar] final MIME =", rawMime);
 
   if (file.size > MAX_BYTES) {
-    throw new Error("File too large. Max 5MB.");
+    throw new Error("File too large. Max 10MB.");
   }
 
   if (!ALLOWED_TYPES.includes(rawMime)) {
