@@ -15,6 +15,7 @@ import RatingSchemeView from "./RatingSchemeView.jsx";
 import useSaveFeedback from "../hooks/useSaveFeedback"
 import { searchStills } from "../lib/stills";
 import { toast } from "react-hot-toast";
+import AvatarCropper from "./AvatarCropper";
 import useEntitlements from "../hooks/useEntitlements";
 import { PROFILE_THEMES } from "../theme/profileThemes";
 import uploadAvatar from "../lib/uploadAvatar";
@@ -165,8 +166,11 @@ function getProfileViewPath() {
   }, [open, profile?.display_name, profile?.slug, profile?.bio]);
 
   /* ───────────────────────────────── Avatar ───────────────────────────────── */
-  const avatarUrl = profile?.avatar_url || "/default-avatar.svg";
-  const fileInputRef = useRef(null);
+const avatarUrl = profile?.avatar_url || "/default-avatar.svg";
+const fileInputRef = useRef(null);
+const [showAvatarCropper, setShowAvatarCropper] = useState(false);
+const [rawAvatarImage, setRawAvatarImage] = useState(null);
+const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   const handleAvatarUpload = async (e) => {
     const file = e.target.files?.[0];
@@ -174,18 +178,13 @@ function getProfileViewPath() {
       e.target.value = "";
       return;
     }
-    try {
-      const publicUrl = await uploadAvatar(file, user.id, {
-        prevUrl: profile?.avatar_url || null,
-      });
-      onUpdated?.({ avatar_url: publicUrl });
-      toast.success("Avatar updated");
-    } catch (err) {
-      console.error("Avatar upload failed:", err);
-      toast.error(err?.message || "Could not upload avatar.");
-    } finally {
-      e.target.value = "";
-    }
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setRawAvatarImage(reader.result);
+      setShowAvatarCropper(true);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
   };
 
 /* ───────────────────────────── Banner (+TMDB) ───────────────────────────── */
@@ -1025,9 +1024,33 @@ async function handleSaveAll() {
                     type="button"
                     className="inline-flex items-center gap-2 rounded-md border border-zinc-700 px-3 py-1.5 text-sm text-white hover:bg-zinc-900"
                     onClick={() => fileInputRef.current?.click()}
+                    disabled={uploadingAvatar}
                   >
                     <Upload className="h-4 w-4" />
                     Upload new
+                  </button>
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-2 rounded-md border border-zinc-700 px-3 py-1.5 text-sm text-white hover:bg-zinc-900 disabled:opacity-60"
+                    onClick={async () => {
+                      if (!avatarUrl || avatarUrl.endsWith("default-avatar.svg")) return;
+                      try {
+                        const res = await fetch(avatarUrl);
+                        const blob = await res.blob();
+                        const reader = new FileReader();
+                        reader.onloadend = () => {
+                          setRawAvatarImage(reader.result);
+                          setShowAvatarCropper(true);
+                        };
+                        reader.readAsDataURL(blob);
+                      } catch (e) {
+                        toast.error("Couldn't load avatar to crop.");
+                      }
+                    }}
+                    disabled={!profile?.avatar_url || uploadingAvatar}
+                  >
+                    <CropIcon className="h-4 w-4" />
+                    Crop / Adjust
                   </button>
                   <button
                     type="button"
@@ -1403,6 +1426,35 @@ async function handleSaveAll() {
           </div>
         </div> {/* end .flex-1 */}
       </div>   {/* end right panel */}
+
+      {/* Avatar cropper modal */}
+      {showAvatarCropper && rawAvatarImage && (
+        <AvatarCropper
+          imageSrc={rawAvatarImage}
+          variant="avatar"
+          onCancel={() => {
+            setShowAvatarCropper(false);
+            setRawAvatarImage(null);
+          }}
+          onCropComplete={async (blob) => {
+            try {
+              setUploadingAvatar(true);
+              const publicUrl = await uploadAvatar(blob, user.id, {
+                prevUrl: profile?.avatar_url || null,
+              });
+              onUpdated?.({ avatar_url: publicUrl });
+              toast.success("Avatar updated");
+            } catch (err) {
+              console.error("Avatar upload failed:", err);
+              toast.error(err?.message || "Could not upload avatar.");
+            } finally {
+              setUploadingAvatar(false);
+              setShowAvatarCropper(false);
+              setRawAvatarImage(null);
+            }
+          }}
+        />
+      )}
     </div>     
   );
 }
