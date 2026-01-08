@@ -473,7 +473,7 @@ function MembersDialog({
             .map((m) => {
               const p = m.profiles || {};
               const name = p.display_name || "Member";
-              const avatar = safeImageSrc(p.avatar_url, "/avatar_placeholder.png");
+              const avatar = safeImageSrc(p.avatar_url, "/default-avatar.svg");
               const role = m.role;
 
               return (
@@ -487,7 +487,7 @@ function MembersDialog({
                     className="h-10 w-10 rounded-full"
                     onError={(e) => {
                       e.currentTarget.onerror = null;
-                      e.currentTarget.src = "/avatar_placeholder.png";
+                      e.currentTarget.src = "/default-avatar.svg";
                     }}
                   />
                   <div className="min-w-0 flex-1">
