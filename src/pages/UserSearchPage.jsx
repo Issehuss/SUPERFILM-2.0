@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { useLocation, Link } from "react-router-dom";
 import supabase from "../supabaseClient";
+import { profileHref } from "../utils/profileHref";
 
 function useQueryParam(name) {
   const { search } = useLocation();
@@ -24,7 +25,7 @@ export default function UserSearchPage() {
 
       const { data, error } = await supabase
         .from("profiles")
-        .select("id, username, display_name, avatar_url")
+        .select("id, username, display_name, avatar_url, slug")
         .or(`username.ilike.%${q}%,display_name.ilike.%${q}%`)
         .limit(30);
 
@@ -73,7 +74,7 @@ function UserSearchResultCard({ profile }) {
 
   return (
     <Link
-      to={`/u/${username}`}
+      to={profileHref(profile)}
       className="flex items-center justify-between bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 hover:border-yellow-400 hover:bg-zinc-900 transition-colors"
     >
       <div className="flex items-center gap-3">
