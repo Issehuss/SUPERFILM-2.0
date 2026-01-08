@@ -297,7 +297,7 @@ function NavClubSwitch() {
       "relative px-2 py-1 text-zinc-300 hover:text-white transition-colors",
       "after:absolute after:left-0 after:-bottom-1 after:h-[2px] after:w-0 after:bg-yellow-400",
       "after:transition-[width] after:duration-300 hover:after:w-full",
-      isActive ? "text-white after:w-full" : "",
+      isActive ? "text-white" : "",
     ].join(" ");
 
   if (checking) {
@@ -405,7 +405,7 @@ function MainShell() {
       "relative px-2 py-1 text-zinc-300 hover:text-white transition-colors",
       "after:absolute after:left-0 after:-bottom-1 after:h-[2px] after:w-0 after:bg-yellow-400",
       "after:transition-[width] after:duration-300 hover:after:w-full",
-      isActive ? "text-white after:w-full" : "",
+      isActive ? "text-white" : "",
     ].join(" ");
 
   if (!isReady) {
@@ -658,6 +658,7 @@ function MainShell() {
             />
 
             <Route path="/search" element={<SearchResults />} />
+            <Route path="/search/users" element={<UserSearchPage />} />
 
             {/* NEW wrappers */}
             <Route path="/create-club" element={<CreateClubPage />} />

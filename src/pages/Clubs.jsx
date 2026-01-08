@@ -995,18 +995,6 @@ export default function Clubs() {
                 })}
               </Swiper>
 
-              {hasMore && (
-                <div className="flex justify-center mt-6">
-                  <button
-                    type="button"
-                    onClick={() => fetchClubsPage(page + 1, true)}
-                    disabled={loadingMore}
-                    className="rounded-full bg-white/10 px-4 py-2 text-sm font-semibold text-white hover:bg-white/15 disabled:opacity-60"
-                  >
-                    {loadingMore ? "Loading…" : "Load more clubs"}
-                  </button>
-                </div>
-              )}
             </>
           )}
         </section>

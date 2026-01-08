@@ -130,10 +130,10 @@ export default function EventDetails() {
   /* ===================== Load RSVPs ===================== */
   useEffect(() => {
     if (userLoading) return;
-    if (!user || !clubId) {
+    if (!user) {
       setRsvps([]);
       setRsvpLoading(false);
-      setRsvpError(!user ? "Sign in to see RSVPs." : "This event is missing a club.");
+      setRsvpError("Sign in to see RSVPs.");
       return;
     }
     if (!eventId) {
@@ -142,16 +142,7 @@ export default function EventDetails() {
       setRsvpError("Event is missing an ID.");
       return;
     }
-    if (isClubMember === false) {
-      setRsvps([]);
-      setRsvpLoading(false);
-      setRsvpError("Join this club to view RSVPs.");
-      return;
-    }
-    if (isClubMember === null) {
-      setRsvpLoading(true);
-      return;
-    }
+    setRsvpError("");
 
     let cancelled = false;
 
@@ -168,7 +159,7 @@ export default function EventDetails() {
           return { data, error, status, usedClub: withClub };
         };
 
-        let attempt = await loadWithClub(true);
+        let attempt = await loadWithClub(Boolean(clubId));
         if (attempt.error && isMissingClubColumn(attempt.error)) {
           attempt = await loadWithClub(false);
         }
@@ -331,24 +322,6 @@ export default function EventDetails() {
 
     try {
       setRsvpError("");
-      if (!clubId) {
-        setRsvpError("This event is missing a club. Please contact the organiser.");
-        alert("This event is missing a club. Please contact the organiser.");
-        return;
-      }
-
-      if (isClubMember === null) {
-        setRsvpError("Checking your club membership. Try again in a moment.");
-        alert("Checking your club membership. Please try again in a moment.");
-        return;
-      }
-
-      if (isClubMember === false) {
-        setRsvpError("Join this club to RSVP.");
-        alert("Join this club to RSVP.");
-        return;
-      }
-
       const checkExisting = async (withClub) => {
         let q = supabase
           .from("event_rsvps")
@@ -361,7 +334,7 @@ export default function EventDetails() {
         return { data, error, status, usedClub: withClub };
       };
 
-      let existingRes = await checkExisting(true);
+      let existingRes = await checkExisting(Boolean(clubId));
       if (existingRes.error && isMissingClubColumn(existingRes.error)) {
         existingRes = await checkExisting(false);
       }
@@ -655,7 +628,7 @@ export default function EventDetails() {
               {user ? (
                 <button
                   onClick={handleToggleRsvp}
-                  disabled={rsvpLoading || !clubId || isClubMember !== true}
+                  disabled={rsvpLoading}
                   className={[
                     "px-4 py-2 rounded-full font-semibold transition",
                     isGoing
@@ -663,15 +636,7 @@ export default function EventDetails() {
                       : "bg-black/40 border border-yellow-400/60 text-yellow-300 hover:bg-yellow-500/10",
                   ].join(" ")}
                 >
-                  {!clubId
-                    ? "Club missing"
-                    : isClubMember === null
-                    ? "Checking…"
-                    : isClubMember === false
-                    ? "Join club to RSVP"
-                    : isGoing
-                    ? "Not going"
-                    : "RSVP: Going?"}
+                  {rsvpLoading ? "Working…" : isGoing ? "Not going" : "RSVP: Going?"}
                 </button>
               ) : (
                 <Link

@@ -526,7 +526,7 @@ async function handleDeleteMessage(arg) {
 
 
   return (
-    <div className="min-h-[calc(100vh-88px)] bg-gradient-to-b from-black via-zinc-950 to-black">
+    <div className="relative min-h-[calc(100vh-88px)] bg-gradient-to-b from-black via-zinc-950 to-black pb-28">
       {/* Header */}
       <div className="sticky top-0 z-10 mx-auto max-w-3xl px-4 pt-4">
         <div className="rounded-2xl border border-zinc-800 bg-black/50 backdrop-blur px-4 py-3 flex items-center gap-3">
@@ -583,8 +583,8 @@ async function handleDeleteMessage(arg) {
       </div>
 
       {/* Composer – docked */}
-      <div className="fixed bottom-0 left-0 right-0 z-20 pb-[env(safe-area-inset-bottom)]">
-        <div className="mx-auto max-w-3xl px-4 pb-4">
+      <div className="sticky bottom-0 left-0 right-0 z-20 pb-[env(safe-area-inset-bottom)] bg-gradient-to-t from-black via-black/80 to-transparent">
+        <div className="mx-auto max-w-3xl px-4 pb-4 pointer-events-auto">
           <div className="rounded-2xl border border-zinc-800 bg-black/70 backdrop-blur px-3 py-3">
             {/* Attach preview */}
             {imageObjectUrl && (

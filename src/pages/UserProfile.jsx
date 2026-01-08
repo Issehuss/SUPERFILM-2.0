@@ -981,7 +981,8 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
             <Moodboard
               profileId={viewProfile?.id}
               isOwner={viewingOwn}
-              className="themed-card themed-outline forge w-full"
+              className="w-full"
+              usePremiumTheme={isPremiumProfile}
             />
           </div>
         </div>

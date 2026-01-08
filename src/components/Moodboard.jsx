@@ -20,6 +20,7 @@ export default function Moodboard({
   isOwner = false,
   className = "",
   maxPreview = 6,
+  usePremiumTheme = false,
 }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -225,8 +226,16 @@ export default function Moodboard({
   const preview = useMemo(() => items.slice(0, maxPreview), [items, maxPreview]);
 
   if (loading) {
-    return (
-      <div className={`rounded-2xl border border-zinc-800 bg-black/40 p-4 ${className}`}>
+  const themed = usePremiumTheme || isPremium;
+
+  return (
+    <div
+      className={
+        themed
+          ? `themed-card themed-outline forge rounded-2xl p-4 ${className}`
+          : `rounded-2xl border border-zinc-800 bg-black/40 p-4 ${className}`
+      }
+    >
         <div className="h-40 animate-pulse rounded-xl bg-zinc-900" />
       </div>
     );
