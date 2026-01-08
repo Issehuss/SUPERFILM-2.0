@@ -1160,6 +1160,7 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
               profile={viewProfile}
               profileId={viewProfile?.id}
               isOwner={viewingOwn}
+              disablePremiumTheme={!isPremiumProfile}
             />,
             document.body
           )}
