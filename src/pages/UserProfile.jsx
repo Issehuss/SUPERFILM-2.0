@@ -294,11 +294,15 @@ const UserProfile = () => {
 
     // Editing a single take (owner only)
     const [editingTake, setEditingTake] = useState(null);
-    const [editingTakeDraft, setEditingTakeDraft] = useState({
+  const [editingTakeDraft, setEditingTakeDraft] = useState({
       rating_5: 0,
       take: "",
     });
     const [editingTakeSaving, setEditingTakeSaving] = useState(false);
+
+  // Avatar cropper state
+  const [showAvatarCropper, setShowAvatarCropper] = useState(false);
+  const [rawAvatarImage, setRawAvatarImage] = useState(null);
   
 
 
@@ -613,20 +617,13 @@ title: t.film_title,      // <-- THIS fixes missing names in FilmTakeCard
       e.target.value = "";
       return;
     }
-    setUploadingAvatar(true);
-    try {
-      const publicUrl = await uploadAvatar(file, user.id, {
-        prevUrl: viewProfile?.avatar_url || undefined,
-      });
-      await saveProfilePatch({ avatar_url: publicUrl });
-      setAvatar(publicUrl);
-      setViewProfile((prev) => (prev ? { ...prev, avatar_url: publicUrl } : prev));
-    } catch (err) {
-      console.error("Failed to save avatar:", err);
-    } finally {
-      setUploadingAvatar(false);
-      e.target.value = "";
-    }
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setRawAvatarImage(reader.result);
+      setShowAvatarCropper(true);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
   };
 
   const handlePanelUpdated = async (patch) => {
@@ -1067,11 +1064,11 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
           <div className="fixed inset-0 z-40 flex items-center justify-center">
             <div
               className="absolute inset-0 bg-black/60"
-              onClick={handleCloseEditTake}
-            />
-            <div className="relative z-50 w-full max-w-md rounded-2xl border border-zinc-800 bg-black/90 p-4">
-              <div className="mb-3 flex items-center justify-between">
-                <h3 className="text-sm font-semibold text-white">
+            onClick={handleCloseEditTake}
+          />
+          <div className="relative z-50 w-full max-w-md rounded-2xl border border-zinc-800 bg-black/90 p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-white">
                   Edit Film Take
                 </h3>
                 <button
@@ -1166,6 +1163,35 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
             />,
             document.body
           )}
+
+        {/* Avatar cropper modal */}
+        {showAvatarCropper && rawAvatarImage && (
+          <AvatarCropper
+            imageSrc={rawAvatarImage}
+            variant="avatar"
+            onCancel={() => {
+              setShowAvatarCropper(false);
+              setRawAvatarImage(null);
+            }}
+            onCropComplete={async (blob, previewUrl) => {
+              try {
+                setUploadingAvatar(true);
+                const publicUrl = await uploadAvatar(blob, user.id, {
+                  prevUrl: viewProfile?.avatar_url || undefined,
+                });
+                await saveProfilePatch({ avatar_url: publicUrl });
+                setAvatar(publicUrl);
+                setViewProfile((prev) => (prev ? { ...prev, avatar_url: publicUrl } : prev));
+              } catch (err) {
+                console.error("Failed to save avatar:", err);
+              } finally {
+                setUploadingAvatar(false);
+                setShowAvatarCropper(false);
+                setRawAvatarImage(null);
+              }
+            }}
+          />
+        )}
       </div>
     </div>
   );
