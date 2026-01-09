@@ -64,8 +64,8 @@ export default function AboutPage() {
 
 export function SuperFilmFooter() {
   return (
-    <footer className="w-full border-t border-zinc-800 text-xs text-zinc-500 py-4 px-6 flex justify-center mt-10 bg-black">
-      <div className="max-w-6xl w-full flex flex-col md:flex-row items-center justify-between gap-3">
+    <footer className="w-full border-t border-zinc-800 text-xs text-zinc-500 py-4 mt-10 bg-black">
+      <div className="mx-auto max-w-6xl w-full px-4 flex flex-col md:flex-row items-center justify-between gap-3">
         {/* Left side: links */}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <Link to="/about" className="hover:text-superfilm-yellow">
