@@ -438,14 +438,27 @@ const UserProfile = () => {
   }, [location.search, viewProfile?.taste_cards]);
 
   /* =========================================================
-     5. Restore banner from localStorage (for own profile)
+     5. Restore banner from localStorage (for own profile only)
      ========================================================= */
   useEffect(() => {
+    const isOwnProfile = !!(user?.id && viewProfile?.id === user.id);
+    if (!isOwnProfile) {
+      setBannerOverride(null);
+      setBannerGradientOverride(null);
+      return;
+    }
+
     try {
-      const ls = localStorage.getItem("userBanner");
+      const key = `sf.userBanner:${user.id}`;
+      let ls = localStorage.getItem(key);
+      if (!ls) {
+        // Fallback from legacy key (pre per-user storage)
+        ls = localStorage.getItem("userBanner");
+        if (ls) localStorage.setItem(key, ls);
+      }
       if (ls && !bannerOverride) setBannerOverride(ls);
     } catch {}
-  }, [bannerOverride]);
+  }, [bannerOverride, user?.id, viewProfile?.id]);
 
   /* =========================================================
      6. Exit edit mode when panel broadcasts close
@@ -661,15 +674,21 @@ title: t.film_title,      // <-- THIS fixes missing names in FilmTakeCard
       setViewProfile((prev) => (prev ? { ...prev, avatar_url: nextAvatar } : prev));
     }
 
+    const isOwnProfile = !!(user?.id && viewProfile?.id === user.id);
+
     if (typeof patch.banner_url === "string" && patch.banner_url) {
       setBannerOverride(patch.banner_url);
       try {
-        localStorage.setItem("userBanner", patch.banner_url);
+        if (isOwnProfile) {
+          localStorage.setItem(`sf.userBanner:${user.id}`, patch.banner_url);
+        }
       } catch {}
     } else if (typeof patch.banner_image === "string" && patch.banner_image) {
       setBannerOverride(patch.banner_image);
       try {
-        localStorage.setItem("userBanner", patch.banner_image);
+        if (isOwnProfile) {
+          localStorage.setItem(`sf.userBanner:${user.id}`, patch.banner_image);
+        }
       } catch {}
     }
     if (typeof patch.banner_gradient === "string") {
