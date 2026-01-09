@@ -702,70 +702,26 @@ export default function EventDetails() {
           </div>
         </div>
 
-   {/* ===== Attendees (creator only) ===== */}
-{isCreator && (
-  <div className="mt-10 bg-black/40 border border-white/10 backdrop-blur rounded-2xl p-6 shadow-lg">
-    <h2 className="text-2xl font-semibold mb-4">
-      Attendees
-      {rsvps.length > 0 && (
-        <span className="text-sm text-zinc-400 ml-2">
-          • {rsvps.length} going
-        </span>
-      )}
-    </h2>
+        {/* ===== Attendance (signed-in only) ===== */}
+        {user && (
+          <div className="mt-10 bg-black/40 border border-white/10 backdrop-blur rounded-2xl p-6 shadow-lg">
+            <h2 className="text-2xl font-semibold mb-3">Attendance</h2>
 
-    {rsvpLoading ? (
-      <div className="text-zinc-400 text-sm">Loading RSVPs…</div>
-    ) : rsvps.length === 0 ? (
-      <div className="text-zinc-500 text-sm">
-        No one has RSVP’d yet. Once members mark themselves as going,
-        you’ll see them here.
-      </div>
-    ) : (
-      <ul className="space-y-3">
-        {rsvps.map((r) => (
-          <li key={r.user_id}>
-            <Link
-              to={`/u/${r.user_id}`}
-              className="
-                flex items-center gap-3 p-2 rounded-xl
-                hover:bg-zinc-800/40 transition
-              "
-            >
-              {/* Avatar */}
-              <div
-                className="
-                  h-8 w-8 rounded-full bg-zinc-800 overflow-hidden
-                  flex items-center justify-center text-xs text-zinc-300
-                "
-              >
-                {r.avatar_url ? (
-                  <img
-                    src={r.avatar_url}
-                    alt={r.name}
-                    className="h-full w-full object-cover"
-                  />
-                ) : (
-                  r.name?.[0]?.toUpperCase() || "?"
-                )}
+            {rsvpLoading ? (
+              <div className="text-zinc-400 text-sm">Loading RSVPs…</div>
+            ) : (
+              <div className="text-zinc-300">
+                <span className="text-3xl font-bold text-yellow-400">
+                  {rsvps.filter((r) => (r.status || "going") === "going").length}
+                </span>{" "}
+                people are going
+                <div className="text-sm text-zinc-400 mt-1">
+                  Join them and make this event even better.
+                </div>
               </div>
-
-              {/* Name + Role */}
-              <div className="flex flex-col">
-                <span className="text-sm text-zinc-100">{r.name}</span>
-                {r.role && (
-                  <span className="text-[11px] uppercase tracking-wide text-yellow-400">
-                    {r.role}
-                  </span>
-                )}
-              </div>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    )}
-  </div>
-)}
+            )}
+          </div>
+        )}
 
 
 

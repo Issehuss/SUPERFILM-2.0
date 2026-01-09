@@ -1099,6 +1099,12 @@ async function handleSaveAll() {
           placeholder="Search films…"
           value={tmdbQuery}
           onChange={(e) => setTmdbQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              searchTMDB();
+            }
+          }}
         />
         <button
           type="button"
