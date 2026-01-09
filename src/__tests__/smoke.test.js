@@ -23,8 +23,8 @@ describe("Smoke tests", () => {
         <SuperFilmFooter />
       </MemoryRouter>
     );
+    expect(screen.getByRole("link", { name: /about us/i })).toHaveAttribute("href", "/about");
     expect(screen.getByRole("link", { name: /terms/i })).toHaveAttribute("href", "/terms");
-    expect(screen.getByRole("link", { name: /privacy/i })).toHaveAttribute("href", "/privacy");
   });
 
   it("catches errors via ErrorBoundary", () => {

@@ -66,10 +66,6 @@ const OnboardingTutorial = lazy(() =>
   import("./components/onboarding/OnboardingTutorial.jsx")
 );
 const AboutPage = lazy(() => import("./pages/AboutPage.jsx"));
-const CookiesPage = lazy(() => import("./pages/CookiesPage.jsx"));
-const CommunityGuidelines = lazy(() =>
-  import("./pages/CommunityGuidelines.jsx")
-);
 const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const UserSearchPage = lazy(() => import("./pages/UserSearchPage.jsx"));
@@ -713,8 +709,6 @@ function MainShell() {
             <Route path="/me/club" element={<MyClub />} />
             <Route path="/clubs" element={<Clubs />} />
             <Route path="/about" element={<AboutPage />} />
-            <Route path="/cookies" element={<CookiesPage />} />
-            <Route path="/guidelines" element={<CommunityGuidelines />} />
             <Route path="/terms" element={<TermsPage />} />
             <Route path="/auth/forgot" element={<ForgotPassword />} />
 <Route path="/auth/reset" element={<ResetPassword />} />

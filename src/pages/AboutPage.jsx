@@ -71,17 +71,8 @@ export function SuperFilmFooter() {
           <Link to="/about" className="hover:text-superfilm-yellow">
             About Us
           </Link>
-          <Link to="/privacy" className="hover:text-superfilm-yellow">
-            Privacy Policy
-          </Link>
           <Link to="/terms" className="hover:text-superfilm-yellow">
             Terms &amp; Conditions
-          </Link>
-          <Link to="/cookies" className="hover:text-superfilm-yellow">
-            Cookies Policy
-          </Link>
-          <Link to="/guidelines" className="hover:text-superfilm-yellow">
-            Community Guidelines
           </Link>
         </div>
 

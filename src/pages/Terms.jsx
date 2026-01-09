@@ -41,7 +41,7 @@ export default function TermsPage() {
 
           <Section title="Content Standards and Prohibited Conduct">
             <p>Content must be respectful, lawful, relevant, and must not misrepresent facts, people, or organisations. Do not post defamatory, obscene, hateful, discriminatory, harassing, or threatening material; promote violence, self-harm, illegal activity, or inappropriate nudity; infringe IP/privacy rights; or include malware.</p>
-            <p>Prohibited conduct includes: accessing others’ accounts; bypassing security; scraping/harvesting data without consent; spam/scams/unsolicited ads; impersonation; illegal/fraudulent use; organising illegal events; uploading copyrighted material without permission; harming minors. Report issues to support@superfilm.uk.</p>
+            <p>Prohibited conduct includes: accessing others’ accounts; bypassing security; scraping/harvesting data without consent; spam/scams/unsolicited ads; impersonation; illegal/fraudulent use; organising illegal events; uploading copyrighted material without permission; harming minors. Report issues to Kacper@superfilm.info.</p>
           </Section>
 
           <Section title="Event Listings and Meet Ups">
@@ -80,7 +80,7 @@ export default function TermsPage() {
 
           <Section title="Use Of Our Logo">
             <p>
-              The SuperFilm name, logo, and design elements are property of SuprFilm Ltd. Limited truthful references are allowed; no alteration, resale, confusing use, or implication of endorsement without written consent. Permissions can be withdrawn. Requests: support@superfilm.uk.
+              The SuperFilm name, logo, and design elements are property of SuprFilm Ltd. Limited truthful references are allowed; no alteration, resale, confusing use, or implication of endorsement without written consent. Permissions can be withdrawn. Requests: Kacper@superfilm.info.
             </p>
           </Section>
 
@@ -95,7 +95,7 @@ export default function TermsPage() {
               SuperFilm complies with UK GDPR/Data Protection Act 2018. We collect account info, User Content, limited technical data, transactional data (via Stripe), and moderation data. No under-18 data. Lawful bases: contract, legitimate interests, consent (cookies), legal obligation. Supabase hosts data; Stripe processes payments. Aggregated, non-identifiable analytics may be shared; no personal data to sponsors/advertisers without consent.
             </p>
             <p>
-              Data retained while active and up to 90 days post-deletion unless required longer. Rights: access, correction, deletion, objection/restriction, portability. Contact support@superfilm.uk. Cookies are used for sessions, preferences, limited analytics; manage via browser settings.
+              Data retained while active and up to 90 days post-deletion unless required longer. Rights: access, correction, deletion, objection/restriction, portability. Contact Kacper@superfilm.info. Cookies are used for sessions, preferences, limited analytics; manage via browser settings.
             </p>
           </Section>
 
@@ -130,7 +130,7 @@ export default function TermsPage() {
           </Section>
 
           <Section title="Contact Information">
-            <p>Email: support@superfilm.uk</p>
+            <p>Email: Kacper@superfilm.info</p>
             <p>SuprFilm Ltd, London, United Kingdom</p>
           </Section>
         </article>
