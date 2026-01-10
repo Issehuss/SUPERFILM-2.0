@@ -38,7 +38,7 @@ const AvatarCropper = ({
         initialZoom: 1,
         minZoom: 1,
         maxZoom: 4,
-        panelHeightClass: "h-[48vh]", // taller space to feel cinematic
+        panelHeightClass: "h-[60vh]", // taller space to feel cinematic
         title: "Crop banner",
       };
     }
@@ -63,6 +63,7 @@ const AvatarCropper = ({
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(effInitialZoom);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
+  const [saving, setSaving] = useState(false);
 
   const onCropAreaComplete = useCallback((_, croppedPixels) => {
     setCroppedAreaPixels(croppedPixels);
@@ -70,36 +71,47 @@ const AvatarCropper = ({
 
   const handleCropAndSave = async () => {
     try {
+      if (saving) return;
+      setSaving(true);
       const { blob, previewUrl } = await getCroppedImg(imageSrc, croppedAreaPixels);
-      onCropComplete(blob, previewUrl);
+      await Promise.resolve(onCropComplete(blob, previewUrl));
     } catch (e) {
       console.error("Cropping failed:", e);
+    } finally {
+      setSaving(false);
     }
   };
 
   return (
     <div className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center">
+      <style>{`
+        .sf-avatar-cropper .reactEasyCrop_CropArea {
+          border: 2px solid rgba(250, 204, 21, 0.6);
+          box-shadow: 0 0 0 9999px rgba(0,0,0,0.35);
+        }
+      `}</style>
       <div className="bg-zinc-900 w-[min(92vw,720px)] rounded-2xl shadow-xl text-white">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800">
           <h3 className="font-semibold text-base">{defaults.title}</h3>
           <button
             onClick={onCancel}
-            className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm"
+            disabled={saving}
+            className="px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-sm disabled:opacity-50"
           >
             Cancel
           </button>
         </div>
 
         {/* Crop area */}
-        <div className={`relative ${defaults.panelHeightClass} bg-black`}>
+        <div className={`sf-avatar-cropper relative ${defaults.panelHeightClass} bg-black`}>
           <Cropper
             image={imageSrc}
             crop={crop}
             zoom={zoom}
             aspect={effAspect}
             cropShape={effCropShape}
-            showGrid={false}
+            showGrid={variant === "banner"}
             restrictPosition={true}
             zoomWithScroll={true}
             onCropChange={setCrop}
@@ -123,15 +135,17 @@ const AvatarCropper = ({
           <div className="flex justify-end gap-3 mt-4">
             <button
               onClick={onCancel}
-              className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg"
+              disabled={saving}
+              className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg disabled:opacity-50"
             >
               Cancel
             </button>
             <button
               onClick={handleCropAndSave}
-              className="px-4 py-2 bg-yellow-400 text-black font-semibold rounded-lg hover:bg-yellow-400"
+              disabled={saving}
+              className="px-4 py-2 bg-yellow-400 text-black font-semibold rounded-lg hover:bg-yellow-400 disabled:opacity-60"
             >
-              Crop & Save
+              {saving ? "Saving…" : "Crop & Save"}
             </button>
           </div>
 

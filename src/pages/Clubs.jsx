@@ -263,13 +263,14 @@ function passesFilters(meta, f) {
 
 /* Supabase row → UI club mapper */
 function mapRowToClub(row) {
+  const genreFocus = Array.isArray(row.genre_focus) ? row.genre_focus : undefined;
   const metaFromRow =
     row.meta && typeof row.meta === "object"
-      ? row.meta
+      ? { ...row.meta }
       : {
           size: row.size ?? undefined,
           location: row.location ?? undefined,
-          genres: Array.isArray(row.genres) ? row.genres : undefined,
+          genres: Array.isArray(row.genres) ? row.genres : genreFocus,
           members: typeof row.members === "number" ? row.members : undefined,
           isNew: typeof row.is_new === "boolean" ? row.is_new : undefined,
           activeThisWeek: typeof row.active_this_week === "boolean" ? row.active_this_week : undefined,
@@ -277,6 +278,15 @@ function mapRowToClub(row) {
           summary: row.summary ?? undefined,
           tagline: row.tagline ?? undefined,
         };
+
+  if (typeof row.is_official === "boolean") metaFromRow.is_official = row.is_official;
+  if (typeof row.is_superfilm === "boolean") metaFromRow.is_superfilm = row.is_superfilm;
+  if (typeof row.is_curated === "boolean") metaFromRow.is_curated = row.is_curated;
+  if (typeof row.join_policy === "string") metaFromRow.join_policy = row.join_policy;
+  if (typeof row.privacy_mode === "string" && !metaFromRow.join_policy) {
+    metaFromRow.join_policy = row.privacy_mode;
+  }
+  if (typeof row.type === "string") metaFromRow.type = row.type;
 
   return {
     id: `db-${String(row.id)}`,
@@ -320,7 +330,7 @@ export default function Clubs() {
   const [showTip, setShowTip] = useState(false);
   const [tipData, setTipData] = useState(null);
   const timerRef = useRef(null);
-  const swiperRef = useRef(null);
+  const swiperRefs = useRef([]);
 
   const clearTipTimer = () => {
     if (timerRef.current) {
@@ -346,16 +356,17 @@ export default function Clubs() {
     window.addEventListener("scroll", onScroll, true);
     window.addEventListener("keydown", onKey);
 
-    const swiper = swiperRef.current;
     const detach = [];
-    if (swiper && swiper.on && swiper.off) {
-      const bind = (evt) => {
-        const fn = () => cancelHover();
-        swiper.on(evt, fn);
-        detach.push(() => swiper.off(evt, fn));
-      };
-      ["touchStart", "sliderMove", "transitionStart", "slideChange"].forEach(bind);
-    }
+    swiperRefs.current.forEach((swiper) => {
+      if (swiper && swiper.on && swiper.off) {
+        const bind = (evt) => {
+          const fn = () => cancelHover();
+          swiper.on(evt, fn);
+          detach.push(() => swiper.off(evt, fn));
+        };
+        ["touchStart", "sliderMove", "transitionStart", "slideChange"].forEach(bind);
+      }
+    });
     return () => {
       window.removeEventListener("wheel", onWheel);
       window.removeEventListener("scroll", onScroll, true);
@@ -390,6 +401,7 @@ export default function Clubs() {
 
   const [upcomingEvents, setUpcomingEvents] = useState([]);
   const [loadingEvents, setLoadingEvents] = useState(true);
+  const [nextScreeningByClub, setNextScreeningByClub] = useState({});
 
   const saveCache = useCallback((list) => {
     try {
@@ -542,19 +554,59 @@ export default function Clubs() {
     };
   }, [loadingClubs, liveClubs]);
 
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const ids = (liveClubs || [])
+        .map((c) => c.rawId)
+        .filter(Boolean);
+      if (!ids.length) {
+        if (mounted) setNextScreeningByClub({});
+        return;
+      }
+
+      try {
+        const { data, error } = await supabase
+          .from("club_next_screening_v")
+          .select("club_id, film_title, screening_at, location")
+          .in("club_id", ids);
+        if (error) throw error;
+
+        const map = {};
+        (data || []).forEach((row) => {
+          if (!row?.club_id) return;
+          map[row.club_id] = row;
+        });
+        if (mounted) setNextScreeningByClub(map);
+      } catch (e) {
+        if (mounted) setNextScreeningByClub({});
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [liveClubs]);
+
   const getTooltipData = useCallback(
     (club) => {
       const m = club.meta || {};
       const firstEvent = upcomingEvents.find((ev) => ev.clubId === club.id);
+      const nextRow = nextScreeningByClub[club.rawId];
+      const upcoming =
+        nextRow?.screening_at
+          ? `${nextRow.film_title || "Screening"} — ${formatEventDateTime(nextRow.screening_at)}`
+          : firstEvent
+          ? `${firstEvent.title} — ${formatEventDateTime(firstEvent.starts_at)}`
+          : "No upcoming events scheduled.";
 
       return {
         members: m.members ?? null,
         summary: m.summary || m.tagline || null,
-        upcoming: firstEvent ? `${firstEvent.title} — ${formatEventDateTime(firstEvent.starts_at)}` : "No upcoming events scheduled.",
+        upcoming,
         fav: Array.isArray(m.genres) && m.genres.length ? m.genres.join(", ") : null,
       };
     },
-    [upcomingEvents]
+    [upcomingEvents, nextScreeningByClub]
   );
 
   const handleEnter = useCallback(
@@ -571,6 +623,10 @@ export default function Clubs() {
   const handleLeave = useCallback(() => cancelHover(), [cancelHover]);
 
   const combined = enrichClubs(liveClubs);
+  const isOfficialClub = useCallback((club) => {
+    const m = club?.meta || {};
+    return m.type === "superfilm_curated";
+  }, []);
 
   const activeCount =
     (filters.size !== "any") + (filters.location !== "any") + (filters.genres.length > 0 ? 1 : 0);
@@ -591,7 +647,15 @@ export default function Clubs() {
 
   const filteredByFilters = combined.filter((c) => passesFilters(c.meta || {}, filters));
   const filtered = filteredByFilters.filter(matchesSearch);
-  const baseForCarousel = filtered.length > 0 ? filtered : combined;
+
+  const curatedClubs = combined.filter(isOfficialClub);
+  const communityClubs = combined.filter((c) => !isOfficialClub(c));
+  const filteredCurated = curatedClubs.filter((c) => filtered.includes(c));
+  const filteredCommunity = communityClubs.filter((c) => filtered.includes(c));
+
+  const baseCurated = filteredCurated.length > 0 ? filteredCurated : curatedClubs;
+  const baseForCarousel = filteredCommunity.length > 0 ? filteredCommunity : communityClubs;
+  const noMatches = !loadingClubs && combined.length > 0 && filtered.length === 0;
 
   useEffect(() => {
     if (!openFilter) return;
@@ -931,16 +995,84 @@ export default function Clubs() {
           {!loadingClubs && combined.length === 0 && (
             <div className="mb-4 text-sm text-zinc-400">No clubs yet. Create the first one!</div>
           )}
-          {!loadingClubs && combined.length > 0 && filtered.length === 0 && (
+          {noMatches && (
             <div className="mb-4 text-sm text-zinc-400">
               No clubs match your search/filters. Showing all clubs instead.
             </div>
           )}
 
-          {combined.length > 0 && (
+          {baseCurated.length > 0 && (
+            <div className="mb-8">
+              <div className="mb-3">
+                <h3 className="text-xl font-semibold text-[rgb(var(--brand-yellow))]">
+                  SuperFilm Clubs
+                </h3>
+                <p className="text-sm text-zinc-400">
+                  Hand-picked clubs for instant movie community.{" "}
+                  <span className="text-zinc-500">Everyone can join — no requests needed.</span>
+                </p>
+              </div>
+              <Swiper {...swiperConfig} onSwiper={(s) => (swiperRefs.current[0] = s)} className="!w-full">
+                {(baseCurated.length > 4 ? [...baseCurated, ...baseCurated] : baseCurated).map(
+                  (club, index) => {
+                    const m = club.meta || {};
+                    return (
+                      <SwiperSlide key={`curated-${club.id}-${index}`} className="!w-[210px]">
+                        <Link
+                          to={`/clubs/${club.path || club.slug || club.rawId || club.id}`}
+                          className="club-card group block"
+                          onMouseEnter={(e) => handleEnter(e, club, index)}
+                          onMouseLeave={handleLeave}
+                        >
+                          <div className="club-thumb">
+                            <img
+                              src={safeClubImage(club.image)}
+                              alt={club.name}
+                              loading="lazy"
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                e.currentTarget.src = CLUB_PLACEHOLDER;
+                              }}
+                            />
+                            <div className="club-badges">
+                              <span className="badge">
+                                <span className="badge-dot" />
+                                Official
+                              </span>
+                            </div>
+                          </div>
+                          <div className="p-3">
+                            <div className="text-sm font-semibold text-white truncate">{club.name}</div>
+                            {Array.isArray(m.genres) && m.genres.length > 0 && (
+                              <div className="mt-1 text-[0.7rem] uppercase tracking-wide text-zinc-400 truncate">
+                                {m.genres.join(" • ")}
+                              </div>
+                            )}
+                          </div>
+                        </Link>
+                      </SwiperSlide>
+                    );
+                  }
+                )}
+              </Swiper>
+            </div>
+          )}
+
+          {baseForCarousel.length > 0 && (
             <>
-              <Swiper {...swiperConfig} onSwiper={(s) => (swiperRef.current = s)} className="!w-full">
-                {[...(baseForCarousel || []), ...(baseForCarousel || [])].map((club, index) => {
+              <div className="mb-3">
+                <h3 className="text-xl font-semibold text-[rgb(var(--brand-yellow))]">
+                  Member-Created Clubs
+                </h3>
+                <p className="text-sm text-zinc-400">
+                  Clubs made by the community, for the community.
+                </p>
+              </div>
+              <Swiper {...swiperConfig} onSwiper={(s) => (swiperRefs.current[1] = s)} className="!w-full">
+                {(baseForCarousel.length > 4
+                  ? [...baseForCarousel, ...baseForCarousel]
+                  : baseForCarousel
+                ).map((club, index) => {
                   const m = club.meta || {};
                   return (
                     <SwiperSlide key={`popular-${club.id}-${index}`} className="!w-[210px]">

@@ -1,5 +1,5 @@
 // src/pages/CreateClubWizard.jsx
-import React, { useEffect, useMemo, useState, useCallback } from "react";
+import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import supabase from "../supabaseClient.js";
 import { useUser } from "../context/UserContext";
@@ -112,7 +112,6 @@ const CITY_OPTIONS = [
   "Accra",
   "Johannesburg",
   "Cape Town",
-  "Mogadishu",
   "Abuja",
   "Addis Ababa",
   "Kigali",
@@ -241,7 +240,7 @@ function CinematicBackdrop({ path, priority = false, objectPosition = "50% 50%" 
 --------------------------------- */
 export default function CreateClubWizard() {
   const navigate = useNavigate();
-  const { user } = useUser();
+  const { user, isPartner } = useUser();
 
   // Steps: 1 name, 2 tagline, 3 about, 4 location, 5 tone-film (optional), 6 welcome + launch
   const FIRST_STEP = 1;
@@ -261,6 +260,7 @@ export default function CreateClubWizard() {
 
   // Welcome message (optional)
   const [welcomeMessage, setWelcomeMessage] = useState("");
+  const [isCurated, setIsCurated] = useState(false);
 
   const finalLocation = useMemo(
     () =>
@@ -275,6 +275,14 @@ export default function CreateClubWizard() {
       : CITY_OPTIONS.includes(location);
 
   const [submitting, setSubmitting] = useState(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Preload backdrops (just prime the cache; LQIP ensures instant paint)
   useEffect(() => {
@@ -317,31 +325,24 @@ export default function CreateClubWizard() {
      DB helpers (RLS-aware)
   --------------------------------- */
   async function createClubRow(payload) {
-    // Prefer returning
-    const { data, error } = await supabase
-      .from("clubs")
-      .insert(payload)
-      .select("id, slug")
-      .single();
+    const baseSlug = payload.slug;
+    let slug = baseSlug;
 
-    if (error) {
-      // Fallback: plain insert then lookup
-      const { error: insErr } = await supabase.from("clubs").insert(payload);
-      if (insErr) throw insErr;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const { error } = await supabase.from("clubs").insert({ ...payload, slug });
+      if (!error) return { id: null, slug };
 
-      const { data: lookup } = await supabase
-        .from("clubs")
-        .select("id, slug")
-        .eq("owner_id", payload.owner_id)
-        .eq("slug", payload.slug)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const msg = String(error.message || "").toLowerCase();
+      const isDup =
+        error.code === "23505" ||
+        msg.includes("clubs_slug_key") ||
+        msg.includes("duplicate key");
+      if (!isDup) throw error;
 
-      return lookup ?? { id: null, slug: payload.slug, _fallback: true };
+      slug = `${baseSlug}-${attempt + 2}`;
     }
 
-    return data;
+    throw new Error("Could not create club (slug already exists).");
   }
 
   async function upsertPresidentMembership(clubId, userId) {
@@ -379,6 +380,7 @@ export default function CreateClubWizard() {
     }
 
     setSubmitting(true);
+    const t0 = typeof performance !== "undefined" ? performance.now() : Date.now();
     try {
       const safeName = name.trim();
       const safeSlug = slugify(safeName);
@@ -400,40 +402,75 @@ export default function CreateClubWizard() {
         throw new Error("owner_id must be a uuid");
       }
 
+      const isCuratedClub = Boolean(isPartner && isCurated);
+      const locationForSave = isCuratedClub ? "Online / Virtual" : finalLocation;
+
       const payload = {
         name: safeName,
         slug: safeSlug,
         tagline: tagline.trim(),
         about: about.trim(),
-        location: finalLocation,
+        location: locationForSave,
         owner_id: user.id,
         president_user_id: user.id,
         created_by: user.id,
         next_screening_id: null,
         is_published: false,
         welcome_message: (welcomeMessage || "").trim() || null,
+        ...(isCuratedClub
+          ? {
+              privacy_mode: "open",
+              type: "superfilm_curated",
+              visibility: "open",
+              is_private: false,
+            }
+          : {}),
       };
 
       const created = await createClubRow(payload);
-      const clubId = created?.id ?? null;
+      const t1 = typeof performance !== "undefined" ? performance.now() : Date.now();
+      console.info(
+        "[CreateClubWizard] createClubRow(ms)",
+        Math.round(t1 - t0),
+        { curated: isCuratedClub }
+      );
       const clubSlug = created?.slug ?? safeSlug;
 
-      if (clubId) {
-        await upsertPresidentMembership(clubId, user.id);
-      }
-
-      try {
-        if (clubId) localStorage.setItem("activeClubId", String(clubId));
-        if (clubSlug) localStorage.setItem("activeClubSlug", clubSlug);
-      } catch {}
-
       navigate(`/clubs/${clubSlug}`, { replace: true });
+
+      setTimeout(() => {
+        (async () => {
+          let clubId = null;
+          for (let attempt = 0; attempt < 5; attempt += 1) {
+            const { data } = await supabase
+              .from("clubs")
+              .select("id, slug")
+              .eq("slug", clubSlug)
+              .order("created_at", { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            if (data?.id) {
+              clubId = data.id;
+              break;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 350));
+          }
+
+          if (clubId) {
+            await upsertPresidentMembership(clubId, user.id);
+          }
+          try {
+            if (clubId) localStorage.setItem("activeClubId", String(clubId));
+            if (clubSlug) localStorage.setItem("activeClubSlug", clubSlug);
+          } catch {}
+        })();
+      }, 0);
     } catch (e) {
       console.error("[CreateClubWizard] create failed:", e);
 alert("ERROR: " + (e?.message || JSON.stringify(e)));
 
     } finally {
-      setSubmitting(false);
+      if (mountedRef.current) setSubmitting(false);
     }
   }
 
@@ -689,12 +726,53 @@ alert("ERROR: " + (e?.message || JSON.stringify(e)));
                     aria-label="Welcome message"
                     autoFocus
                   />
+                  {isPartner && (
+                    <div className="mt-4 rounded-xl border border-white/10 bg-black/40 p-4">
+                      <div className="text-sm font-semibold text-zinc-200">
+                        SuperFilm curated club?
+                      </div>
+                      <p className="mt-1 text-xs text-zinc-400">
+                        Curated clubs appear in the SuperFilm Clubs carousel. They’re open to everyone and set to
+                        Online / Virtual by default.
+                      </p>
+                      <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                        <button
+                          type="button"
+                          onClick={() => setIsCurated(true)}
+                          className={[
+                            "rounded-full border px-4 py-2 text-sm font-semibold transition",
+                            isCurated
+                              ? "border-yellow-400 bg-yellow-400 text-black"
+                              : "border-white/15 text-zinc-200 hover:border-yellow-400/60",
+                          ].join(" ")}
+                        >
+                          Yes, SuperFilm curated
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setIsCurated(false)}
+                          className={[
+                            "rounded-full border px-4 py-2 text-sm font-semibold transition",
+                            !isCurated
+                              ? "border-yellow-400 bg-yellow-400 text-black"
+                              : "border-white/15 text-zinc-200 hover:border-yellow-400/60",
+                          ].join(" ")}
+                        >
+                          No, community club
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   <div className="flex justify-between items-center">
                     <button onClick={back} className="text-zinc-300 hover:text-white">
                       ← Back
                     </button>
                     <button
-                      onClick={handleCreate}
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        handleCreate();
+                      }}
                       disabled={submitting}
                       className="bg-yellow-400 text-black font-bold text-lg px-8 py-3 rounded-full shadow-[0_0_40px_rgba(255,220,120,0.4)] hover:scale-105 active:scale-95 transition disabled:opacity-40"
                       aria-label="Create club"

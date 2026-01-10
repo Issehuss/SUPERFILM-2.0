@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import supabase from "../supabaseClient";
 import { searchMovies } from "../lib/tmdbClient";
-import { Plus, X } from "lucide-react";
+import { Plus, Save, X } from "lucide-react";
+import { toast } from "react-hot-toast";
 
 /**
  * Props:
@@ -17,10 +18,35 @@ export default function FeaturedFilms({ club, canEdit, showSearch, onChange }) {
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [dirty, setDirty] = useState(false);
 
   useEffect(() => {
     setFilms(Array.isArray(club?.featuredFilms) ? club.featuredFilms : []);
+    setDirty(false);
   }, [club?.featuredFilms]);
+
+  useEffect(() => {
+    if (!club?.id || !showSearch) return;
+    try {
+      const raw = localStorage.getItem(`sf.club.featuredDraft:${club.id}`);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed?.data)) return;
+      setFilms(parsed.data);
+      setDirty(true);
+    } catch {}
+  }, [club?.id, showSearch]);
+
+  useEffect(() => {
+    if (!club?.id || !showSearch) return;
+    if (!dirty) return;
+    try {
+      localStorage.setItem(
+        `sf.club.featuredDraft:${club.id}`,
+        JSON.stringify({ at: Date.now(), data: films })
+      );
+    } catch {}
+  }, [films, dirty, showSearch, club?.id]);
 
   async function persist(next) {
     if (!club?.id) return;
@@ -33,9 +59,14 @@ export default function FeaturedFilms({ club, canEdit, showSearch, onChange }) {
       if (error) throw error;
       setFilms(next);
       onChange?.(next);
+      toast.success("Featured films saved.");
+      setDirty(false);
+      try {
+        localStorage.removeItem(`sf.club.featuredDraft:${club.id}`);
+      } catch {}
     } catch (e) {
       console.error(e);
-      alert("Could not save featured films.");
+      toast.error("Could not save featured films.");
     } finally {
       setBusy(false);
     }
@@ -65,14 +96,16 @@ export default function FeaturedFilms({ club, canEdit, showSearch, onChange }) {
   async function addPoster(url) {
     if (!url) return;
     const next = films.includes(url) ? films : [...films, url];
-    await persist(next);
+    setFilms(next);
+    setDirty(true);
     setResults([]);
     setQuery("");
   }
 
   async function removePoster(url) {
     const next = films.filter(p => p !== url);
-    await persist(next);
+    setFilms(next);
+    setDirty(true);
   }
 
   const hasFilms = films.length > 0;
@@ -83,8 +116,16 @@ export default function FeaturedFilms({ club, canEdit, showSearch, onChange }) {
       <div className="flex items-center justify-between mb-3">
         <h2 className="text-lg font-bold text-yellow-400">Featured Films</h2>
 
-        {canEdit && showSearch && hasFilms && (
+        {canEdit && showSearch && (
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => persist(films)}
+              disabled={busy || !dirty}
+              className="inline-flex items-center gap-2 rounded-lg bg-yellow-500 px-3 py-1.5 text-sm font-semibold text-black disabled:opacity-50"
+            >
+              {busy ? "Saving…" : <><Save size={16} /> Save</>}
+            </button>
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}

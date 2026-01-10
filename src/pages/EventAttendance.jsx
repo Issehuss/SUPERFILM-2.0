@@ -243,7 +243,6 @@ export default function EventAttendance() {
       if (!sid) {
         sid = await ensureScreening();
         if (!sid) {
-          alert("You don’t have permission to create events for this club. Ask a president/mod to create the screening.");
           return;
         }
       }
@@ -332,7 +331,7 @@ export default function EventAttendance() {
 
       <button
         onClick={toggleAttendance}
-        disabled={busy || loading}
+        disabled={busy || loading || (!screeningId && !canCreate)}
         className={`mt-4 px-4 py-2 rounded-lg font-semibold ${
           isGoing ? "bg-red-500 hover:bg-red-400" : "bg-yellow-500 hover:bg-yellow-400"
         } disabled:opacity-60`}
@@ -340,9 +339,9 @@ export default function EventAttendance() {
         {isGoing ? "Leave Attendance" : "Join Attendance"}
       </button>
 
-      {!loading && !screeningId && !canCreate && (
+      {!loading && !screeningId && (
         <p className="mt-3 text-sm text-zinc-400">
-          You don’t have permission to create events for this club. Ask a president/mod to create the screening.
+          Attendance opens once a screening is scheduled.
         </p>
       )}
 

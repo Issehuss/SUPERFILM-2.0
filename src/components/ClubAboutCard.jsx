@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef } from "react";
+import { toast } from "react-hot-toast";
 import supabase from "../supabaseClient";
 import { MapPin, Info, X, Plus } from "lucide-react";
 
 export default function ClubAboutCard({ club, isEditing, canEdit, onSaved }) {
   const [about, setAbout] = useState(club?.about || "");
+  const [tagline, setTagline] = useState(club?.tagline || "");
   const [location, setLocation] = useState(club?.location || "");
   const [genres, setGenres] = useState(club?.genres || []);
   const [expanded, setExpanded] = useState(false);
@@ -14,10 +16,44 @@ export default function ClubAboutCard({ club, isEditing, canEdit, onSaved }) {
 
   useEffect(() => {
     setAbout(club?.about || "");
+    setTagline(club?.tagline || "");
     setLocation(club?.location || "");
     setGenres(Array.isArray(club?.genres) ? club.genres : []);
     setDirty(false);
   }, [club]);
+
+  useEffect(() => {
+    if (!isEditing || !club?.id) return;
+    try {
+      const raw = localStorage.getItem(`sf.club.aboutDraft:${club.id}`);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (!parsed?.data) return;
+      const d = parsed.data;
+      setAbout(typeof d.about === "string" ? d.about : about);
+      setTagline(typeof d.tagline === "string" ? d.tagline : tagline);
+      setLocation(typeof d.location === "string" ? d.location : location);
+      setGenres(Array.isArray(d.genres) ? d.genres : genres);
+      setDirty(true);
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [club?.id, isEditing]);
+
+  useEffect(() => {
+    if (!isEditing || !club?.id) return;
+    try {
+      const payload = {
+        about,
+        tagline,
+        location,
+        genres,
+      };
+      localStorage.setItem(
+        `sf.club.aboutDraft:${club.id}`,
+        JSON.stringify({ at: Date.now(), data: payload })
+      );
+    } catch {}
+  }, [about, tagline, location, genres, isEditing, club?.id]);
 
   async function save() {
     if (!canEdit || !club?.id) return;
@@ -26,13 +62,17 @@ export default function ClubAboutCard({ club, isEditing, canEdit, onSaved }) {
     try {
       const { error } = await supabase
         .from("clubs")
-        .update({ about, location, genres })
+        .update({ about, tagline, location, genres })
         .eq("id", club.id);
       if (error) throw error;
-      onSaved?.({ about, location, genres });
+      onSaved?.({ about, tagline, location, genres });
+      toast.success("About updated.");
       setDirty(false);
+      try {
+        localStorage.removeItem(`sf.club.aboutDraft:${club.id}`);
+      } catch {}
     } catch (e) {
-      alert(e.message || "Could not save About section.");
+      toast.error(e.message || "Could not save About section.");
     } finally {
       setBusy(false);
     }
@@ -96,6 +136,9 @@ export default function ClubAboutCard({ club, isEditing, canEdit, onSaved }) {
         )}
 
         {/* About text with read-more */}
+        {tagline && (
+          <p className="text-sm font-semibold text-zinc-200 mb-2">{tagline}</p>
+        )}
         <div className="relative">
           <p
             className={`text-sm leading-6 text-zinc-300 whitespace-pre-wrap transition-all duration-300 ease-in-out ${
@@ -128,6 +171,17 @@ export default function ClubAboutCard({ club, isEditing, canEdit, onSaved }) {
       <h2 className="text-lg font-bold text-yellow-400 mb-3 flex items-center gap-2">
         <Info className="w-5 h-5" /> About the Club
       </h2>
+
+      {/* Location */}
+      <label className="block text-xs uppercase tracking-wide text-zinc-400 mb-1">
+        Tagline
+      </label>
+      <input
+        value={tagline}
+        onChange={(e) => setTagline(e.target.value)}
+        className="w-full bg-zinc-900/70 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white outline-none mb-3"
+        placeholder="Short, punchy line that sums up the club"
+      />
 
       {/* Location */}
       <label className="block text-xs uppercase tracking-wide text-zinc-400 mb-1">
@@ -203,6 +257,19 @@ export default function ClubAboutCard({ club, isEditing, canEdit, onSaved }) {
           Add “Any and all genres”
         </button>
       </div>
+
+      {canEdit && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={save}
+            disabled={busy || !dirty}
+            className="rounded-lg bg-yellow-500 px-4 py-2 text-sm font-semibold text-black hover:bg-yellow-400 disabled:opacity-50"
+          >
+            {busy ? "Saving…" : "Save about"}
+          </button>
+        </div>
+      )}
     </section>
   );
 }

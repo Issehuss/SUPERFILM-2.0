@@ -10,11 +10,12 @@ export default function ClubSettings() {
   const { user, profile } = useUser();
 
   const [loading, setLoading] = useState(true);
-  const [club, setClub] = useState(null); // { id, name, slug, is_private, wants_private }
+  const [club, setClub] = useState(null); // { id, name, slug, is_private, wants_private, welcome_message }
   const [clubId, setClubId] = useState(null);
   const [role, setRole] = useState(null);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
+  const [welcomeDraft, setWelcomeDraft] = useState("");
   const [members, setMembers] = useState([]);
   const [applyingVP, setApplyingVP] = useState(false);
   const [applyMsg, setApplyMsg] = useState("");
@@ -37,6 +38,11 @@ export default function ClubSettings() {
       if (!clubParam || !user?.id) return;
       setLoading(true);
       setErr("");
+      setClub(null);
+      setClubId(null);
+      setRole(null);
+      setMembers([]);
+      setWelcomeDraft("");
 
       try {
         // resolve club ID
@@ -58,7 +64,7 @@ export default function ClubSettings() {
         const [clubRes, roleRes, membersRes] = await Promise.all([
           supabase
             .from("clubs")
-            .select("id, name, slug, is_private, wants_private")
+            .select("id, name, slug, is_private, wants_private, welcome_message")
             .eq("id", resolvedId)
             .maybeSingle(),
           supabase
@@ -97,6 +103,7 @@ export default function ClubSettings() {
 
         if (!alive) return;
         setClub(clubRow || null);
+        setWelcomeDraft(clubRow?.welcome_message || "");
         setClubId(resolvedId);
         setRole(mem?.role ?? null);
         setMembers(enrichedMembers);
@@ -183,6 +190,28 @@ export default function ClubSettings() {
       );
     } catch (e) {
       setErr(e?.message || "Failed to sync privacy.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveWelcomeMessage() {
+    if (!clubId || role !== "president") return;
+    setSaving(true);
+    setErr("");
+    try {
+      const next = (welcomeDraft || "").trim();
+      const { data, error } = await supabase
+        .from("clubs")
+        .update({ welcome_message: next || null })
+        .eq("id", clubId)
+        .select("welcome_message")
+        .maybeSingle();
+      if (error) throw error;
+      setClub((c) => (c ? { ...c, welcome_message: data?.welcome_message ?? next } : c));
+      toast.success("Welcome message updated.");
+    } catch (e) {
+      setErr(e?.message || "Couldn’t update welcome message.");
     } finally {
       setSaving(false);
     }
@@ -277,7 +306,13 @@ export default function ClubSettings() {
 
   return (
     <div className="max-w-3xl mx-auto">
-      <h1 className="text-2xl font-semibold mb-4">Club Settings</h1>
+      <h1 className="text-2xl font-semibold mb-1">Club Settings</h1>
+      <p className="text-sm text-zinc-400 mb-4">
+        Editing: <span className="text-zinc-200">{club.name}</span>
+        {club.slug ? (
+          <span className="text-zinc-500"> • /clubs/{club.slug}</span>
+        ) : null}
+      </p>
 
       {/* --- Privacy Section --- */}
       <section className="rounded-xl border border-zinc-700 bg-black/40 p-4 mb-6">
@@ -337,6 +372,34 @@ export default function ClubSettings() {
             Only the club president can change privacy. Your current role: {role || "Member"}.
           </p>
         )}
+      </section>
+
+      {/* --- Welcome Message --- */}
+      <section className="rounded-xl border border-zinc-700 bg-black/40 p-4 mb-6">
+        <h2 className="text-lg font-semibold mb-2">Welcome Message</h2>
+        <p className="text-sm text-zinc-400 mb-3">
+          This is shown to new members when they join.
+        </p>
+        <textarea
+          value={welcomeDraft}
+          onChange={(e) => setWelcomeDraft(e.target.value)}
+          className="w-full min-h-[120px] rounded-lg bg-zinc-900 border border-zinc-700 p-3 text-sm text-white outline-none focus:border-yellow-400"
+          placeholder="Welcome to the club! Introduce yourself and share your favourites."
+        />
+        <div className="mt-3 flex justify-end">
+          {role === "president" ? (
+            <button
+              type="button"
+              onClick={saveWelcomeMessage}
+              disabled={saving}
+              className="rounded-lg bg-yellow-500 px-4 py-2 text-sm font-semibold text-black hover:bg-yellow-400 disabled:opacity-50"
+            >
+              {saving ? "Saving…" : "Save welcome message"}
+            </button>
+          ) : (
+            <p className="text-xs text-zinc-500">Only the club president can edit this.</p>
+          )}
+        </div>
       </section>
 
       {/* --- Invites Section --- */}

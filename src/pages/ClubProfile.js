@@ -94,6 +94,7 @@ const AvatarCropper = lazy(() => import("../components/AvatarCropper"));
 const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CLUB_CACHE_TTL = 1000 * 60 * 5; // 5 minutes
 const clubCacheKey = (id) => `sf.club.cache.v1:${id}`;
+const CLUB_BANNER_ASPECT = 1152 / 276;
 
 const readClubCache = (id) => {
   if (!id) return null;
@@ -1023,9 +1024,9 @@ const [rawAvatarImage, setRawAvatarImage] = useState(null);
 
   // NEW: avatar + rename UI state
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
-  const [renameError, setRenameError] = useState('');
-  const [renameOk, setRenameOk] = useState('');
-  const [newName, setNewName] = useState('');
+const [renameError, setRenameError] = useState('');
+const [renameOk, setRenameOk] = useState('');
+const [newName, setNewName] = useState('');
   // --- poster ↔ teaser height sync ---
 const posterRef = useRef(null);
 const teaserWrapRef = useRef(null);
@@ -1053,6 +1054,27 @@ const [isMounted, setIsMounted] = useState(false);
 useEffect(() => {
   setIsMounted(true);
 }, []);
+
+useEffect(() => {
+  if (!club?.id || !isEditing || !isPresident) return;
+  try {
+    const raw = localStorage.getItem(`sf.club.nameDraft:${club.id}`);
+    if (raw) {
+      setNewName(raw);
+    }
+  } catch {}
+}, [club?.id, isEditing, isPresident]);
+
+useEffect(() => {
+  if (!club?.id || !isEditing || !isPresident) return;
+  try {
+    if (newName && newName !== club?.name) {
+      localStorage.setItem(`sf.club.nameDraft:${club.id}`, newName);
+    } else {
+      localStorage.removeItem(`sf.club.nameDraft:${club.id}`);
+    }
+  } catch {}
+}, [newName, club?.id, club?.name, isEditing, isPresident]);
 
 // Keep member avatars in sync when the viewer updates their profile picture
 useEffect(() => {
@@ -2235,6 +2257,24 @@ function onFeaturedKeyDown(e) {
     setShowBannerCropper(true);
   };
 
+  const handlePartnerDeleteClub = async () => {
+    if (!club?.id) return;
+    const label = club?.name || club?.slug || "this club";
+    const confirmText = window.prompt(
+      `Type DELETE to permanently remove ${label}. This cannot be undone.`
+    );
+    if (confirmText !== "DELETE") return;
+    try {
+      const { error } = await supabase.from("clubs").delete().eq("id", club.id);
+      if (error) throw error;
+      toast.success("Club deleted.");
+      navigate("/clubs", { replace: true });
+    } catch (e) {
+      console.warn("delete club failed", e?.message || e);
+      toast.error(e?.message || "Could not delete club.");
+    }
+  };
+
   const handleToggleMembership = async () => {
     if (!club) return;
     if (!user?.id) {
@@ -2481,10 +2521,14 @@ const handleNextEventSearch = useCallback(async () => {
 
       if (!UUID_RX.test(String(club.id))) {
         // local demo fallback
-        setClub((p) => ({ ...p, name: newName }));
-        setRenameOk('Club name updated (local).');
-        return;
-      }
+      setClub((p) => ({ ...p, name: newName }));
+      setRenameOk('Club name updated (local).');
+      toast.success("Club name updated.");
+      try {
+        localStorage.removeItem(`sf.club.nameDraft:${club.id}`);
+      } catch {}
+      return;
+    }
 
       const { error } = await supabase
         .from('clubs')
@@ -2495,6 +2539,10 @@ const handleNextEventSearch = useCallback(async () => {
 
       setClub((p) => ({ ...p, name: newName, nameLastChangedAt: new Date().toISOString() }));
       setRenameOk('Club name updated.');
+      toast.success("Club name updated.");
+      try {
+        localStorage.removeItem(`sf.club.nameDraft:${club.id}`);
+      } catch {}
       await postActivity(`renamed the club to "${newName}"`);
     } catch (err) {
       setRenameError(
@@ -2502,6 +2550,7 @@ const handleNextEventSearch = useCallback(async () => {
           ? err.message
           : (err?.message || 'Unable to rename right now.')
       );
+      toast.error(err?.message || "Could not update club name.");
     }
   };
 
@@ -2646,6 +2695,7 @@ const postActivity = async (summary) => {
             />
             <div className="flex items-center gap-2 mt-2">
               <button
+                type="button"
                 onClick={handleRenameClub}
                 className="px-3 py-1 rounded bg-yellow-500 text-black text-sm hover:bg-yellow-400"
                 disabled={uploadingAvatar}
@@ -2774,6 +2824,14 @@ const postActivity = async (summary) => {
           <span className="w-2 h-2 rounded-full bg-amber-300" aria-hidden />
           Signed in as SuperFilm Partner
         </div>
+
+        <button
+          type="button"
+          onClick={handlePartnerDeleteClub}
+          className="w-full rounded-lg border border-red-400/50 bg-red-500/10 px-3 py-2 text-sm font-semibold text-red-100 hover:bg-red-500/20"
+        >
+          Permanently delete this club
+        </button>
       </div>
     )}
   </div>
@@ -2799,7 +2857,7 @@ const postActivity = async (summary) => {
         {showBannerCropper && rawBannerImage && (
           <BannerCropper
             imageSrc={rawBannerImage}
-            aspect={16 / 9}
+            aspect={CLUB_BANNER_ASPECT}
             onCancel={() => {
               setShowBannerCropper(false);
               setRawBannerImage(null);
