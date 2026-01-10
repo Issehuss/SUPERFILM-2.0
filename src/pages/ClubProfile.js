@@ -1040,6 +1040,9 @@ const [membersLoading, setMembersLoading] = useState(true);
 const [selectedResultId, setSelectedResultId] = useState(null);
 const [membersErr, setMembersErr] = useState("");
 const myMembership = members?.find(m => m.user_id === user?.id);
+const isPresident = members?.some(
+  (m) => m.user_id === user?.id && m.role === "president"
+);
 const { isStaff } = useStaff(club?.id);
 const [nextAvg, setNextAvg] = useState(null);
 const [isClubAdmin, setIsClubAdmin] = useState(false);
@@ -1768,13 +1771,6 @@ useEffect(() => {
   const isMemberByContext =
     Array.isArray(user?.joinedClubs) && (club?.id ? user.joinedClubs.some((c) => String(c) === String(club.id)) : false);
 
-    // ── Step 1: Detect if the current user is the club president ───────────────
-const isPresident = members?.some(
-  (m) => m.user_id === user?.id && m.role === "president"
-);
-
-    
-    
   // Robust gate for member-only sections
 // TMDB numeric ID for rating & takes
 
