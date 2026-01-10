@@ -695,6 +695,30 @@ title: t.film_title,      // <-- THIS fixes missing names in FilmTakeCard
       setBannerGradientOverride(patch.banner_gradient);
     }
 
+    if (isOwnProfile) {
+      const bannerPatch = {};
+      const bannerUrl =
+        typeof patch.banner_url === "string" ? patch.banner_url : null;
+      const bannerImage =
+        typeof patch.banner_image === "string" ? patch.banner_image : null;
+      if (bannerUrl && !/^data:|^blob:/i.test(bannerUrl)) {
+        bannerPatch.banner_url = bannerUrl;
+      }
+      if (bannerImage && !/^data:|^blob:/i.test(bannerImage)) {
+        bannerPatch.banner_image = bannerImage;
+      }
+      if (typeof patch.banner_gradient === "string") {
+        bannerPatch.banner_gradient = patch.banner_gradient;
+      }
+      if (Object.keys(bannerPatch).length) {
+        try {
+          await saveProfilePatch(bannerPatch);
+        } catch (e) {
+          console.error("Failed to persist banner update:", e);
+        }
+      }
+    }
+
     if (Array.isArray(patch.taste_cards)) {
       setLiveTasteCards(patch.taste_cards);
       try {
