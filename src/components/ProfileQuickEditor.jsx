@@ -11,11 +11,10 @@ import uploadAvatar from "../lib/uploadAvatar";
 export default function ProfileQuickEditor({ onUpdated }) {
   const { user, refreshProfile } = useUser();
 
-  // Basics (DB: profiles.display_name, profiles.username, profiles.bio, profiles.club_tag)
+  // Basics (DB: profiles.display_name, profiles.username, profiles.bio)
   const [displayName, setDisplayName] = useState(user?.name || "");
   const [username, setUsername] = useState("");
   const [bio, setBio] = useState("");
-  const [clubTag, setClubTag] = useState("");
 
   // UI
   const [saving, setSaving] = useState(false);
@@ -32,7 +31,7 @@ export default function ProfileQuickEditor({ onUpdated }) {
       const { data, error } = await supabase
         .from("profiles")
         .select(
-          "display_name, username, bio, club_tag, avatar_url, created_at, username_last_changed_at, username_changes_in_window, username_window_started_at"
+          "display_name, username, bio, avatar_url, created_at, username_last_changed_at, username_changes_in_window, username_window_started_at"
         )
         .eq("id", user.id)
         .single();
@@ -42,7 +41,6 @@ export default function ProfileQuickEditor({ onUpdated }) {
       setDisplayName(data?.display_name || user?.name || "");
       setUsername(data?.username || "");
       setBio(data?.bio || "");
-      setClubTag(data?.club_tag || "");
 
       // Precompute warning if the *next* change is the last in window
       const warn = computeLastChanceWarning({
@@ -164,7 +162,7 @@ export default function ProfileQuickEditor({ onUpdated }) {
         throw new Error("Display name must be 2–40 characters.");
       }
 
-      // 1) Save display_name, bio, club_tag
+      // 1) Save display_name, bio
       {
         const { error } = await supabase
         .from("profiles")
@@ -172,7 +170,6 @@ export default function ProfileQuickEditor({ onUpdated }) {
           id: user.id,
           display_name: cleanDisplay,
           bio: bio ?? null,
-          club_tag: clubTag ?? null,
           updated_at: new Date().toISOString(),
         }, { onConflict: "id" });
       
@@ -185,7 +182,6 @@ export default function ProfileQuickEditor({ onUpdated }) {
         onUpdated?.({
           display_name: cleanDisplay,
           bio: bio ?? null,
-          club_tag: clubTag ?? null,
         });
       }
 
@@ -277,18 +273,6 @@ export default function ProfileQuickEditor({ onUpdated }) {
         <p className="text-[11px] text-neutral-500 mt-1">
           You can change your username up to 2 times within your first 90 days, then once every 90 days.
         </p>
-      </div>
-
-      {/* Club tag */}
-      <div className="mb-4">
-        <label className="block text-sm text-neutral-300 mb-1">Club tag</label>
-        <input
-          type="text"
-          value={clubTag}
-          onChange={(e) => setClubTag(e.target.value)}
-          placeholder="e.g., Film Poets"
-          className="w-full rounded-xl bg-neutral-800 border border-neutral-700 px-3 py-2 text-white placeholder-neutral-500 outline-none focus:border-yellow-400"
-        />
       </div>
 
       {/* Bio */}

@@ -78,18 +78,18 @@ function formatDateTime(iso) {
 async function tmdbProxy(path, query = {}) {
   const cleanPath = String(path || "").startsWith("/") ? path : `/${path || ""}`;
   const isSearch = cleanPath.includes("/search");
+  const searchQuery = typeof query?.query === "string" ? query.query.trim() : "";
   if (
     isSearch &&
     (!query ||
-      typeof query.query !== "string" ||
-      query.query.trim().length < 2)
+      searchQuery.length < 2)
   ) {
     return {};
   }
   try {
     if (isSearch) {
       const { data, error } = await supabase.functions.invoke("tmdb-search", {
-        body: { path: cleanPath, query },
+        body: { q: searchQuery },
         headers: { "Content-Type": "application/json" },
       });
       if (!error && data) return data;
@@ -99,13 +99,13 @@ async function tmdbProxy(path, query = {}) {
     console.warn("[tmdbProxy] invoke threw:", e?.message || e);
   }
 
-  if (ENV.SUPABASE_FUNCTIONS_URL) {
+  if (isSearch && ENV.SUPABASE_FUNCTIONS_URL) {
     try {
       const url = `${ENV.SUPABASE_FUNCTIONS_URL.replace(/\/$/, "")}/tmdb-search`;
       const r = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: cleanPath, query }),
+        body: JSON.stringify({ q: searchQuery }),
       });
       if (r.ok) return await r.json();
       console.warn("[tmdbProxy] HTTP fallback non-2xx:", r.status, await r.text().catch(() => ""));
@@ -160,6 +160,8 @@ const ACTIVITY_CACHE_KEY = "cache:clubActivity:v1";
 const ACTIVITY_TTL_MS = 3 * 60 * 1000; // 3 minutes
 const NEXT_SCREENING_CACHE_KEY = "cache:clubNextScreening:v1";
 const NEXT_SCREENING_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isUuid = (v) => UUID_RX.test(String(v || ""));
 
 function readActivityCache(clubId) {
   if (!clubId) return null;
@@ -294,7 +296,7 @@ export default function HomeSignedIn() {
   /* ============ memberships -> primary club ============ */
   useEffect(() => {
     if (!isReady) return;
-    if (!user?.id) {
+    if (!user?.id || !isUuid(user.id)) {
       setMemberships([]);
       setMembershipsLoading(false);
       setClub(null);
@@ -659,6 +661,9 @@ export default function HomeSignedIn() {
 
         const rows = await Promise.all(
           clubs.map(async (c) => {
+            if (!isUuid(c?.id)) {
+              return null;
+            }
             const mem = await supabase
               .from("club_members")
               .select("*", { count: "exact", head: true })
@@ -697,8 +702,9 @@ export default function HomeSignedIn() {
         );
 
         if (cancelled) return;
-        rows.sort((a, b) => b.score - a.score);
-        setLeaderboard(rows.slice(0, 10));
+        const filtered = rows.filter(Boolean);
+        filtered.sort((a, b) => b.score - a.score);
+        setLeaderboard(filtered.slice(0, 10));
       } catch (e) {
         console.warn("leaderboard fetch failed", e);
         if (!cancelled) setLeaderboard([]);

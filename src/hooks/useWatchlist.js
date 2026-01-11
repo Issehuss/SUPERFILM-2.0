@@ -9,11 +9,19 @@ export default function useWatchlist(userId) {
 
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(Boolean(effectiveUserId));
+  const [hasLoaded, setHasLoaded] = useState(false);
   const [error, setError] = useState(null);
 
   const fetchWatchlist = useCallback(async () => {
-    if (!sessionLoaded || !effectiveUserId) return;
-    setLoading(true);
+    if (!sessionLoaded) return;
+    if (!effectiveUserId) {
+      setItems([]);
+      setError(null);
+      setLoading(false);
+      setHasLoaded(false);
+      return;
+    }
+    if (!hasLoaded) setLoading(true);
     setError(null);
 
     const { data, error } = await supabase
@@ -35,9 +43,15 @@ export default function useWatchlist(userId) {
       setItems(mapped);
     }
     setLoading(false);
-  }, [effectiveUserId, sessionLoaded]);
+    setHasLoaded(true);
+  }, [effectiveUserId, hasLoaded, sessionLoaded]);
 
   useEffect(() => { fetchWatchlist(); }, [fetchWatchlist]);
+
+  useEffect(() => {
+    setHasLoaded(false);
+    if (!effectiveUserId) setItems([]);
+  }, [effectiveUserId]);
 
   // Realtime refresh
   useEffect(() => {
@@ -59,6 +73,7 @@ export default function useWatchlist(userId) {
       if (event === "SIGNED_OUT") {
         setItems([]);
         setLoading(false);
+        setHasLoaded(false);
         return;
       }
       if (event === "TOKEN_REFRESHED" || event === "SIGNED_IN") {

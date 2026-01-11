@@ -15,6 +15,10 @@ const normalizePoster = (posterPath) => {
 export default function ClubTakesArchive() {
   const { clubParam } = useParams();
   const navigate = useNavigate();
+  const isUuid = (value) =>
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      String(value || "")
+    );
 
   const [club, setClub] = useState(null);
   const [takes, setTakes] = useState([]);
@@ -29,11 +33,13 @@ export default function ClubTakesArchive() {
         setError("");
 
         // 1) Load club by slug or id
-        const { data: clubRow, error: clubErr } = await supabase
+        const clubQuery = supabase
           .from("clubs")
-          .select("id, slug, name, banner_url, profile_image_url")
-          .or(`slug.eq.${clubParam},id.eq.${clubParam}`)
-          .maybeSingle();
+          .select("id, slug, name, banner_url, profile_image_url");
+        const { data: clubRow, error: clubErr } = await (isUuid(clubParam)
+          ? clubQuery.eq("id", clubParam)
+          : clubQuery.eq("slug", clubParam)
+        ).maybeSingle();
 
         if (clubErr) throw clubErr;
         if (!clubRow) {

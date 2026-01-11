@@ -69,7 +69,7 @@ export default function useMyClubs(userIdOverride) {
       .select(`
         role,
         club:clubs (
-          id, slug, name, profile_image_url, banner_url, avatar_url,
+          id, slug, name, profile_image_url, banner_url,
           next_screening:club_next_screening (
             film_title,
             screening_at,
@@ -108,7 +108,7 @@ export default function useMyClubs(userIdOverride) {
     if (!combined.length) {
       const { data: owned, error: ownedErr } = await supabase
         .from('clubs')
-        .select('id, slug, name, profile_image_url, banner_url, avatar_url')
+        .select('id, slug, name, profile_image_url, banner_url')
         .eq('owner_id', userId);
       if (ownedErr) {
         console.warn("[useMyClubs] owned fetch error:", ownedErr.message);

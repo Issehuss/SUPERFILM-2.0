@@ -63,12 +63,6 @@ export default supabase;
 /* -------------------------------------------------------------------------- */
 
 if (typeof window !== "undefined" && process.env.NODE_ENV === "development") {
-  console.log("[SF] ENV CHECK →", {
-    url: supabaseUrl,
-    anon: supabaseAnonKey?.slice(0, 10) + "...",
-    functionsUrl,
-  });
-
   // Expose client on window for debugging
   window.supabase = supabase;
 }

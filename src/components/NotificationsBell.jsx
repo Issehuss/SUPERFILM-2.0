@@ -7,6 +7,7 @@ import {
   AtSign,
   MessageSquare,
   Crown,
+  UserPlus,
   Users as UsersIcon,
 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
@@ -32,6 +33,7 @@ function typeIcon(type) {
   if (type?.startsWith("chat.new")) return <MessageSquare size={16} className="shrink-0" />;
   if (type?.startsWith("club.membership")) return <UsersIcon size={16} className="shrink-0" />;
   if (type?.startsWith("club.role")) return <Crown size={16} className="shrink-0" />;
+  if (type?.startsWith("profile.follow")) return <UserPlus size={16} className="shrink-0" />;
   if (type?.startsWith("screening.")) return <CalendarClock size={16} className="shrink-0" />;
   return <Bell size={16} className="shrink-0" />;
 }
@@ -246,17 +248,14 @@ export default function NotificationsBell() {
         onClick={() => setOpen((v) => !v)}
         className={
           `relative inline-flex items-center justify-center h-9 w-9 rounded-full
-           bg-white/10 hover:bg-white/15 ring-1 ring-white/10
-           ${totalUnread > 0 ? "animate-[pulse_1.5s_ease-in-out_infinite] ring-yellow-400" : ""}`
+           bg-white/10 hover:bg-white/15 ring-1 ring-white/10`
         }
         
         aria-label="Open notifications"
       >
         <Bell size={18} />
         {totalUnread > 0 && (
-          <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-yellow-500 text-black text-[11px] font-bold leading-[18px] text-center">
-            {totalUnread > 9 ? "9+" : totalUnread}
-          </span>
+          <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-yellow-400 ring-2 ring-black" />
         )}
       </button>
 

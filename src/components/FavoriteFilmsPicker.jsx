@@ -3,6 +3,12 @@ import { useMemo, useState } from "react";
 import { searchMovies } from "../lib/tmdbClient";
 import TmdbImage from "./TmdbImage";
 
+const svgPlaceholder = (w, h, label) =>
+  `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><rect width="100%" height="100%" fill="#18181b"/><text x="50%" y="50%" fill="#71717a" font-family="Arial, sans-serif" font-size="14" text-anchor="middle" dominant-baseline="central">${label}</text></svg>`
+  )}`;
+const POSTER_PLACEHOLDER = svgPlaceholder(342, 513, "No Poster");
+
 /**
  * Props:
  * - value: array of current favourites, e.g. [{ id, title, poster_path, release_date }]
@@ -122,7 +128,7 @@ export default function FavoriteFilmsPicker({
                   src={
                     m.poster_path
                       ? `https://image.tmdb.org/t/p/w342${m.poster_path}`
-                      : "https://via.placeholder.com/342x513?text=No+Poster"
+                      : POSTER_PLACEHOLDER
                   }
                   alt={m.title}
                   className="rounded-lg shadow w-full h-auto"
@@ -164,7 +170,7 @@ export default function FavoriteFilmsPicker({
               return (
                 <div key={hit.id} className="relative">
                   <TmdbImage
-                    src={posterUrl || "https://via.placeholder.com/342x513?text=No+Poster"}
+                    src={posterUrl || POSTER_PLACEHOLDER}
                     alt={hit.title}
                     className={`rounded-lg shadow w-full h-auto ${
                       picked ? "opacity-60" : "cursor-pointer hover:opacity-90"

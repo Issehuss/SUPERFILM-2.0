@@ -12,7 +12,7 @@ export default function useStaff(clubId) {
     let cancelled = false;
 
     async function run() {
-      if (!user?.id || !clubId) {
+      if (!user?.id || !clubId || !/^[0-9a-f-]{16,}$/i.test(String(clubId))) {
         if (!cancelled) { setIsStaff(false); setLoading(false); }
         return;
       }
@@ -44,13 +44,15 @@ export default function useStaff(clubId) {
         }
 
         // Debug
-        console.log("[useStaff]", {
-          clubId,
-          partner,
-          staffRole: null, // no club_staff table
-          memberRole: memRow?.role || null,
-          result
-        });
+        if (process.env.NODE_ENV === "development") {
+          console.log("[useStaff]", {
+            clubId,
+            partner,
+            staffRole: null, // no club_staff table
+            memberRole: memRow?.role || null,
+            result
+          });
+        }
       } catch (e) {
         if (!cancelled) {
           console.warn("[useStaff] error:", e?.message || e);

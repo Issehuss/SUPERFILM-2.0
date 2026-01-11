@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import supabase from "../supabaseClient.js";
 import { useUser } from "../context/UserContext";
+import { createNotification } from "../utils/notify";
 
 export default function FollowButton({ profileId }) {
-  const { user } = useUser();
+  const { user, profile } = useUser();
   const me = user?.id;
   const disabled = !me || me === profileId;
   const [loading, setLoading] = useState(false);
@@ -31,8 +32,30 @@ export default function FollowButton({ profileId }) {
         .eq("follower_id", me)
         .eq("followee_id", profileId);
     } else {
-      await supabase.from("profile_follows")
+      const { error: followErr } = await supabase.from("profile_follows")
         .insert({ follower_id: me, followee_id: profileId });
+      if (!followErr && me && profileId && me !== profileId) {
+        const actorName =
+          profile?.display_name ||
+          profile?.username ||
+          user?.email?.split("@")[0] ||
+          "Someone";
+        const actorSlug = profile?.slug || profile?.username || null;
+        const href = actorSlug ? `/u/${actorSlug}` : `/profile/${me}`;
+        const { error: notifyErr } = await createNotification({
+          userId: profileId,
+          type: "profile.follow",
+          actorId: me,
+          data: {
+            title: "New follower",
+            message: `${actorName} followed you.`,
+            href,
+          },
+        });
+        if (notifyErr) {
+          console.warn("[follow notify] failed:", notifyErr.message || notifyErr);
+        }
+      }
     }
     await refresh();
     setLoading(false);

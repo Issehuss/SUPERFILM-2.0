@@ -20,7 +20,7 @@ export default function ClubAnalytics() {
   // local club/admin gate
   const [loadingGate, setLoadingGate] = useState(true);
   const [club, setClub] = useState(null); // { id, slug, name }
-  const [role, setRole] = useState(null); // president | vice | editor-in-chief | ...
+  const [role, setRole] = useState(null); // president | vice | ...
   const [isPremiumClub, setIsPremiumClub] = useState(false);
 
   // ---- year state (annual analytics) ----

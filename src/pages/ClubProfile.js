@@ -1045,6 +1045,8 @@ const isPresident = members?.some(
 );
 const { isStaff } = useStaff(club?.id);
 const [nextAvg, setNextAvg] = useState(null);
+const [nextRatingCounts, setNextRatingCounts] = useState([0, 0, 0, 0, 0]);
+const [nextRatingTotal, setNextRatingTotal] = useState(0);
 const [isClubAdmin, setIsClubAdmin] = useState(false);
 const allowed = ["president", "vice", "vice_president", "admin", "moderator", "partner"];
 const [tmdbBusy, setTmdbBusy] = useState(false);
@@ -1916,26 +1918,40 @@ useEffect(() => {
 useEffect(() => {
   async function loadAvg() {
     if (!sessionLoaded) return;
-if (!club?.id || !nextFilmId) {
+    if (!club?.id || !nextFilmId) {
       setNextAvg(null);
+      setNextRatingCounts([0, 0, 0, 0, 0]);
+      setNextRatingTotal(0);
       return;
     }
     const { data, error } = await supabase
-      .from("film_ratings")
+      .from("club_film_takes")
       .select("rating")
       .eq("club_id", club.id)
-      .eq("movie_id", nextFilmId);
+      .eq("film_id", nextFilmId);
 
     if (error) {
       console.warn("avg rating error:", error.message);
       setNextAvg(null);
+      setNextRatingCounts([0, 0, 0, 0, 0]);
+      setNextRatingTotal(0);
       return;
     }
-    const arr = data || [];
-    const avg = arr.length
-      ? (arr.reduce((s, r) => s + r.rating, 0) / arr.length).toFixed(1)
+    const values = (data || [])
+      .map((r) => Number(r.rating))
+      .filter((v) => Number.isFinite(v) && v > 0)
+      .map((v) => (v > 5 ? v / 2 : v));
+    const avg = values.length
+      ? Number((values.reduce((s, v) => s + v, 0) / values.length).toFixed(1))
       : null;
+    const counts = [0, 0, 0, 0, 0];
+    values.forEach((v) => {
+      const idx = Math.min(4, Math.max(0, Math.round(v) - 1));
+      counts[idx] += 1;
+    });
     setNextAvg(avg);
+    setNextRatingCounts(counts);
+    setNextRatingTotal(values.length);
   }
   loadAvg();
 }, [club?.id, nextFilmId, sessionLoaded]);
@@ -1950,20 +1966,34 @@ useEffect(() => {
 
     (async () => {
       const { data } = await supabase
-        .from("film_ratings")
+        .from("club_film_takes")
         .select("rating")
         .eq("club_id", club.id)
-        .eq("movie_id", nextFilmId);
+        .eq("film_id", nextFilmId);
 
-      const arr = data || [];
-      const avg = arr.length
-        ? (arr.reduce((s, r) => s + r.rating, 0) / arr.length).toFixed(1)
+      const values = (data || [])
+        .map((r) => Number(r.rating))
+        .filter((v) => Number.isFinite(v) && v > 0)
+        .map((v) => (v > 5 ? v / 2 : v));
+      const avg = values.length
+        ? Number((values.reduce((s, v) => s + v, 0) / values.length).toFixed(1))
         : null;
+      const counts = [0, 0, 0, 0, 0];
+      values.forEach((v) => {
+        const idx = Math.min(4, Math.max(0, Math.round(v) - 1));
+        counts[idx] += 1;
+      });
       setNextAvg(avg);
+      setNextRatingCounts(counts);
+      setNextRatingTotal(values.length);
     })();
   }
   window.addEventListener("ratings-updated", onRatingsUpdated);
-  return () => window.removeEventListener("ratings-updated", onRatingsUpdated);
+  window.addEventListener("club-film-takes-updated", onRatingsUpdated);
+  return () => {
+    window.removeEventListener("ratings-updated", onRatingsUpdated);
+    window.removeEventListener("club-film-takes-updated", onRatingsUpdated);
+  };
 }, [club?.id, nextFilmId]);
 
 
@@ -3112,7 +3142,7 @@ const postActivity = async (summary) => {
     </div>
 
     {/* Right: Details / Ticket */}
-    <div className="h-full flex flex-col self-start">
+    <div className="h-full flex flex-col self-stretch">
       {isEditing && canEdit ? (
         <div className="space-y-3">
           {/* Title */}
@@ -3326,6 +3356,7 @@ const postActivity = async (summary) => {
                 clubId={club.id}
                 filmId={nextScreening?.filmId}
                 canSeeMembersOnly={canSeeMembersOnly}
+                userId={user?.id}
               />
             </div>
           )}
@@ -3333,24 +3364,14 @@ const postActivity = async (summary) => {
       </div>
       
 
-   {/* Club rating + submissions */}
+   {/* Average rating graphic */}
 {nextFilmId ? (
-  <div className="mt-4">
-    <div className="text-xs uppercase tracking-wide text-zinc-400 flex items-center gap-2">
-      Club rating
-    </div>
-
-    <div className="mt-1 text-2xl font-semibold">
+  <div className="mt-4 flex-1">
     <FilmAverageCell
-  average={null}
-  clubId={club.id}
-  filmId={nextScreening?.filmId}
-  movieTitle={nextScreening?.title}
-  posterPath={nextScreening?.poster}
-/>
-
-
-    </div>
+      average={nextAvg}
+      counts={nextRatingCounts}
+      total={nextRatingTotal}
+    />
   </div>
 ) : null}
 

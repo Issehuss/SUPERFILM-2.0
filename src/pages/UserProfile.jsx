@@ -1,14 +1,14 @@
 // src/pages/UserProfile.jsx
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
+import { toast } from "react-hot-toast";
 import supabase from "../supabaseClient";
 import { fetchActiveScheme } from "../lib/ratingSchemes";
 import RatingSchemeView from "../components/RatingSchemeView";
 import DirectorsCutBadge from "../components/DirectorsCutBadge";
 import { useUser } from "../context/UserContext";
 import StatsAndWatchlist from "../components/StatsAndWatchlist";
-import ClubBadge from "../components/ClubBadge";
 import FollowButton from "../components/FollowButton.jsx";
 import AvatarCropper from "../components/AvatarCropper";
 import Moodboard from "../components/Moodboard.jsx";
@@ -293,12 +293,13 @@ const UserProfile = () => {
   const [filmTakes, setFilmTakes] = useState([]);
 
     // Editing a single take (owner only)
-    const [editingTake, setEditingTake] = useState(null);
+  const [editingTake, setEditingTake] = useState(null);
   const [editingTakeDraft, setEditingTakeDraft] = useState({
-      rating_5: 0,
-      take: "",
-    });
-    const [editingTakeSaving, setEditingTakeSaving] = useState(false);
+    rating_5: 0,
+    take: "",
+  });
+  const [editingTakeSaving, setEditingTakeSaving] = useState(false);
+  const [removingTakeId, setRemovingTakeId] = useState(null);
 
   // Avatar cropper state
   const [showAvatarCropper, setShowAvatarCropper] = useState(false);
@@ -743,10 +744,11 @@ title: t.film_title,      // <-- THIS fixes missing names in FilmTakeCard
   };
 
   const handleRemoveTake = async (id) => {
-    if (!id) return;
+    if (!id || removingTakeId) return;
     if (typeof window !== "undefined" && !window.confirm("Remove this take?")) return;
 
     try {
+      setRemovingTakeId(id);
       const { error } = await supabase
       .from("club_film_takes")
         .delete()
@@ -757,8 +759,13 @@ title: t.film_title,      // <-- THIS fixes missing names in FilmTakeCard
 
       // Update local state
       setFilmTakes((prev) => prev.filter((t) => t.id !== id));
+      setEditingTake(null);
+      toast.success("Take removed.");
     } catch (e) {
       console.error("Failed to remove take:", e);
+      toast.error(e?.message || "Could not remove that take.");
+    } finally {
+      setRemovingTakeId(null);
     }
   };
 
@@ -826,7 +833,6 @@ title: t.film_title,      // <-- THIS fixes missing names in FilmTakeCard
 
   const username = viewProfile?.slug || viewProfile?.username || "username";
   const bio = viewProfile?.bio || "";
-  const clubName = viewProfile?.club_tag || "";
   const avatarUrl = viewProfile?.avatar_url || "/default-avatar.svg";
 
   const bannerUrl =
@@ -953,10 +959,6 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
                 </p>
               )}
 
-              <div className="mt-1 flex items-center flex-wrap gap-2">
-                <ClubBadge clubName={clubName} />
-              </div>
-
               {editMode && viewingOwn ? (
                 <textarea
                   defaultValue={bio}
@@ -1069,8 +1071,20 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
               ? "themed-card themed-outline forge rounded-none sm:rounded-2xl border-t border-b border-zinc-900 sm:border sm:border-zinc-800 bg-black/30 p-4"
               : "rounded-none border-t border-b border-zinc-900 bg-black/30 p-4 sm:rounded-2xl sm:border sm:border-zinc-800"
           }>
-            <div className="flex items-center mb-3 px-1 sm:px-0">
+            <div className="flex items-center justify-between mb-3 px-1 sm:px-0">
               <h3 className="text-sm font-semibold text-white">Film Takes</h3>
+              <Link
+                to={
+                  viewProfile?.slug
+                    ? `/u/${viewProfile.slug}/takes`
+                    : viewProfile?.id
+                    ? `/profile/${viewProfile.id}/takes`
+                    : "/"
+                }
+                className="text-xs text-zinc-400 hover:text-white transition"
+              >
+                See all
+              </Link>
             </div>
 
             {filmTakesLoading ? (
@@ -1169,9 +1183,9 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
                     type="button"
                     onClick={() => handleRemoveTake(editingTake.id)}
                     className="text-xs text-red-400 hover:text-red-300"
-                    disabled={editingTakeSaving}
+                    disabled={editingTakeSaving || removingTakeId === editingTake.id}
                   >
-                    Delete take
+                    {removingTakeId === editingTake.id ? "Deleting…" : "Delete take"}
                   </button>
                   <button
                     type="button"

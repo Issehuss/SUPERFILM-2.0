@@ -38,6 +38,10 @@ export default function StatsAndWatchlist({ statsData, userId, movieRoute = "/mo
     navigate(`${movieRoute}/${id}`);
   };
 
+  const goWatchlist = () => {
+    navigate("/watchlist");
+  };
+
   return (
     <div className="w-full px-0 sm:px-6 pt-4 sm:pt-6">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-6">
@@ -87,7 +91,16 @@ export default function StatsAndWatchlist({ statsData, userId, movieRoute = "/mo
 
           <div className="flex items-center justify-between mb-2 sm:mb-3">
             <h3 className="text-sm font-semibold text-white/90">Watchlist</h3>
-            <span className="text-xs text-zinc-400">{watchlist.length}</span>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-zinc-400">{watchlist.length}</span>
+              <button
+                type="button"
+                onClick={goWatchlist}
+                className="text-[11px] uppercase tracking-wide text-zinc-400 hover:text-white transition"
+              >
+                View all
+              </button>
+            </div>
           </div>
 
           {watchlist.length > 0 ? (

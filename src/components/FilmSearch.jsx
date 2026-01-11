@@ -4,6 +4,11 @@ import { searchMovies } from "../lib/tmdbClient"; // <- uses Supabase Edge Funct
 import TmdbImage from "./TmdbImage";
 
 const TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w185";
+const svgPlaceholder = (w, h, label) =>
+  `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><rect width="100%" height="100%" fill="#18181b"/><text x="50%" y="50%" fill="#71717a" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" dominant-baseline="central">${label}</text></svg>`
+  )}`;
+const SEARCH_PLACEHOLDER = svgPlaceholder(185, 278, "No Image");
 
 const FilmSearch = ({ onSelect }) => {
   const [query, setQuery] = useState("");
@@ -87,7 +92,7 @@ const FilmSearch = ({ onSelect }) => {
                     ? film.posterUrl
                     : film.poster_path
                     ? `${TMDB_IMAGE_BASE}${film.poster_path}`
-                    : "https://via.placeholder.com/185x278?text=No+Image"
+                    : SEARCH_PLACEHOLDER
                 }
                 alt={film.title}
                 className="w-full h-[278px]"

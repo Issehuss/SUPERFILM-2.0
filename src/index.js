@@ -8,13 +8,6 @@ import AuthGate from "./components/AuthGate";
 
 import { env, missingCriticalEnv } from "./lib/env";
 if (process.env.NODE_ENV === "development") {
-  console.log("[SF] ENV CHECK", {
-    url: env.SUPABASE_URL,
-    anonPrefix: env.SUPABASE_ANON_KEY?.slice(0, 8) || null,
-    funcs: env.SUPABASE_FUNCTIONS_URL,
-    nodeEnv: env.NODE_ENV,
-  });
-
   const missing = missingCriticalEnv();
   if (missing.length) {
     console.warn("[SF] Missing critical env vars:", missing.join(", "));

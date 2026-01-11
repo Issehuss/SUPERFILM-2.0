@@ -1,6 +1,8 @@
 // src/components/ClubFilmTakesSection.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import supabase from "../supabaseClient";
+import { useUser } from "../context/UserContext";
+import { createNotification } from "../utils/notify";
 
 const CLAPS_TABLE = "club_take_claps"; // ← use the actual table you created
 
@@ -11,6 +13,8 @@ export default function ClubFilmTakesSection({
   userId,           // ← pass viewer id in
   rotateMs = 8000,
 }) {
+  const { user, profile } = useUser();
+  const effectiveUserId = userId || user?.id || null;
   const [takes, setTakes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
@@ -66,11 +70,11 @@ export default function ClubFilmTakesSection({
 
       // 3) Has the viewer clapped any of these?
       let mySet = new Set();
-      if (userId) {
+      if (effectiveUserId) {
         const { data: mine } = await supabase
           .from(CLAPS_TABLE)
           .select("take_id")
-          .eq("user_id", userId)
+          .eq("user_id", effectiveUserId)
           .in("take_id", ids);
         mySet = new Set((mine || []).map((m) => m.take_id));
       }
@@ -94,7 +98,7 @@ export default function ClubFilmTakesSection({
   useEffect(() => {
     fetchTakes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clubId, filmId, userId]);
+  }, [clubId, filmId, effectiveUserId]);
 
   useEffect(() => {
     function onUpdated(e) {
@@ -130,7 +134,9 @@ export default function ClubFilmTakesSection({
   }
 
   // detect if viewer already has a take for "Edit your take" link
-  const myTake = userId ? safeTakes.find((t) => t.user_id === userId) : null;
+  const myTake = effectiveUserId
+    ? safeTakes.find((t) => t.user_id === effectiveUserId)
+    : null;
 
   return (
     <div className="mt-3">
@@ -174,7 +180,7 @@ export default function ClubFilmTakesSection({
           count={safeTakes.length}
           index={index}
           onToggleClap={async (takeId, clapped) => {
-            if (!userId) {
+            if (!effectiveUserId) {
               alert("Sign in to clap.");
               return;
             }
@@ -199,15 +205,38 @@ export default function ClubFilmTakesSection({
                   .from(CLAPS_TABLE)
                   .delete()
                   .eq("take_id", takeId)
-                  .eq("user_id", userId);
+                  .eq("user_id", effectiveUserId);
                 if (error) throw error;
               } else {
+                const take = safeTakes.find((t) => t.id === takeId);
                 // add clap (include club_id for RLS)
                 const { error } = await supabase
                   .from(CLAPS_TABLE)
-                  .insert({ club_id: clubId, take_id: takeId, user_id: userId });
+                  .insert({ club_id: clubId, take_id: takeId, user_id: effectiveUserId });
                 // ignore unique-violation from double clicks
                 if (error && error.code !== "23505") throw error;
+
+                if (take?.user_id && take.user_id !== effectiveUserId) {
+                  const actorName =
+                    profile?.display_name ||
+                    profile?.username ||
+                    user?.email?.split("@")[0] ||
+                    "Someone";
+                  const { error: notifyErr } = await createNotification({
+                    userId: take.user_id,
+                    type: "club.take.clap",
+                    actorId: effectiveUserId,
+                    clubId,
+                    data: {
+                      title: "New clap",
+                      message: `${actorName} clapped your take.`,
+                      href: `/clubs/${clubId}`,
+                    },
+                  });
+                  if (notifyErr) {
+                    console.warn("[clap notify] failed:", notifyErr.message || notifyErr);
+                  }
+                }
               }
             } catch (e) {
               // rollback UI on failure
@@ -236,8 +265,14 @@ function SpotlightCard({ take, count, index, onToggleClap }) {
   const avatar = take?.profiles?.avatar_url || "/avatar_placeholder.png";
   const rating =
     typeof take?.rating === "number" && !Number.isNaN(take.rating)
-      ? take.rating.toFixed(1)
+      ? take.rating
       : null;
+  const ratingOutOfFive =
+    rating == null
+      ? null
+      : rating > 5
+      ? Number((rating / 2).toFixed(1))
+      : Number(rating.toFixed(1));
 
   // SuperFilm outlined container
   return (
@@ -272,9 +307,9 @@ function SpotlightCard({ take, count, index, onToggleClap }) {
                 Clap • {take.clap_count ?? 0}
               </button>
 
-              {rating && (
+              {ratingOutOfFive != null && (
                 <div className="shrink-0 rounded-full border border-yellow-500/30 px-2 py-0.5 text-xs text-yellow-400">
-                  {rating}/10
+                  {ratingOutOfFive}/5
                 </div>
               )}
             </div>

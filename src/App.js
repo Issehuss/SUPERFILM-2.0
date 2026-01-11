@@ -71,6 +71,7 @@ const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const UserSearchPage = lazy(() => import("./pages/UserSearchPage.jsx"));
 const TermsPage = lazy(() => import("./pages/Terms.jsx"));
 const ProfileFollows = lazy(() => import("./pages/ProfileFollows.jsx"));
+const Watchlist = lazy(() => import("./pages/Watchlist.jsx"));
 
 // Premium/president-only pages
 const ClubSettings = lazy(() => import("./pages/ClubSettings.jsx"));
@@ -188,7 +189,7 @@ export default function AppWrapper() {
   // STEP 3: Force Supabase session hydration on boot
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      console.log("[APP SESSION HYDRATE]", data.session);
+      void data.session;
     });
   }, []);
 
@@ -645,6 +646,7 @@ function MainShell() {
               path="/profile"
               element={<UserProfile key={window.location.search} />}
             />
+            <Route path="/watchlist" element={<Watchlist />} />
             <Route path="/movie/:id" element={<MovieDetails />} />
             <Route path="/movies/:id" element={<MovieDetails />} />{" "}
             {/* alias */}

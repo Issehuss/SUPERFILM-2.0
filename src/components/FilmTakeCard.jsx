@@ -17,8 +17,14 @@ export default function FilmTakeCard({ take }) {
     take.comment ||
     "You contributed to this review.";
 
-  const rating =
+  const rawRating =
     typeof take.rating === "number" ? take.rating : null;
+  const rating =
+    rawRating == null
+      ? null
+      : rawRating > 5
+      ? Number((rawRating / 2).toFixed(1))
+      : Number(rawRating.toFixed(1));
 
   const createdAt = take.created_at || take.updated_at;
   const dateLabel = createdAt

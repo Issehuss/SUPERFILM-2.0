@@ -1,5 +1,6 @@
 // src/components/ReviewCards.jsx
 import { useEffect, useMemo, useState } from "react";
+import { toast } from "react-hot-toast";
 import supabase from "../supabaseClient";
 import { useUser } from "../context/UserContext";
 import useEntitlements from "../hooks/useEntitlements";
@@ -48,6 +49,7 @@ export default function ReviewCards({
   const [loading, setLoading] = useState(true);
   const [avg, setAvg] = useState(null);
   const [reviews, setReviews] = useState([]);
+  const [saving, setSaving] = useState(false);
 
   // premium & scheme
   const [defaultMode, setDefaultMode] = useState("stars"); // 'tags' | 'stars'
@@ -175,89 +177,98 @@ const filmValue = Number(filmId) || null;
 
   // --- save (club rating + mirrored user take) ---
   async function save() {
-    if (!canSubmit) return;
+    if (!canSubmit || saving) return;
+    setSaving(true);
 
-    const base = {
-      club_id: clubId,
-      user_id: uid,
-      review: myReview || null,
-      updated_at: new Date().toISOString(),
-    };
+    try {
+      const base = {
+        club_id: clubId,
+        user_id: uid,
+        review: myReview || null,
+        updated_at: new Date().toISOString(),
+      };
 
-    // Tag path if both id & custom weight present
-    const isTagPath =
-      !!myInput?.tag_id && !!myInput?.custom_weight;
+      // Tag path if both id & custom weight present
+      const isTagPath =
+        !!myInput?.tag_id && !!myInput?.custom_weight;
 
-    const payload = {
-      ...base,
-      [filmColumn]: filmValue, // film_id (uuid) OR movie_id (number)
-      rating_5: Number(myInput?.rating_5) || null,
-      custom_weight: isTagPath
-        ? Number(myInput.custom_weight)
-        : null,
-      tag_id: isTagPath ? myInput.tag_id : null,
-      tag_label: isTagPath ? myInput.tag_label : null,
-      tag_desc: isTagPath ? myInput.tag_desc ?? null : null,
-      tag_emoji: isTagPath ? myInput.tag_emoji ?? null : null,
-    };
+      const payload = {
+        ...base,
+        [filmColumn]: filmValue, // film_id (uuid) OR movie_id (number)
+        rating_5: Number(myInput?.rating_5) || null,
+        custom_weight: isTagPath
+          ? Number(myInput.custom_weight)
+          : null,
+        tag_id: isTagPath ? myInput.tag_id : null,
+        tag_label: isTagPath ? myInput.tag_label : null,
+        tag_desc: isTagPath ? myInput.tag_desc ?? null : null,
+        tag_emoji: isTagPath ? myInput.tag_emoji ?? null : null,
+      };
 
-    // Pick the right conflict target (must exist as a unique constraint or PK on your table)
-    const onConflictCols = useUuidFilm
-      ? "club_id,user_id,film_id"
-      : "club_id,user_id,movie_id";
+      // Pick the right conflict target (must exist as a unique constraint or PK on your table)
+      const onConflictCols = useUuidFilm
+        ? "club_id,user_id,film_id"
+        : "club_id,user_id,movie_id";
 
-    // 1️⃣ SAVE TO CLUB TABLE (film_ratings)
-    const { data, error } = await supabase
-      .from("film_ratings")
-      .upsert(payload, { onConflict: onConflictCols })
-      .select("id")
-      .maybeSingle();
+      // 1️⃣ SAVE TO CLUB TABLE (film_ratings)
+      const { data, error } = await supabase
+        .from("film_ratings")
+        .upsert(payload, { onConflict: onConflictCols })
+        .select("id")
+        .maybeSingle();
 
-    if (error) {
-      console.warn("save rating error:", error.message);
-      return;
+      if (error) {
+        console.warn("save rating error:", error.message);
+        toast.error(error.message || "Could not save your rating.");
+        return;
+      }
+
+      // 2️⃣ MIRROR TO USER FILM TAKES TABLE (film_takes)
+      //    For this panel, we expect a TMDB numeric id on movie_id.
+      if (!useUuidFilm && filmValue) {
+        // keep originals for consistency with existing UI
+        const titleForTake =
+          (movieTitle && String(movieTitle).trim()) || null;
+        const posterForTake =
+          (posterPath && String(posterPath).trim()) || null;
+
+        const { error: takeErr } = await supabase
+          .from("film_takes")
+          .upsert(
+            {
+              user_id: uid,
+              movie_id: useUuidFilm ? null : filmValue,
+              movie_title: titleForTake,
+              poster_path: posterForTake,
+              rating: Number(myInput?.rating_5) || null,
+              blurb: myReview || null,
+              created_at: new Date().toISOString(),
+            },
+            { onConflict: "user_id,movie_id" }
+          );
+
+        if (takeErr) {
+          console.warn("film_takes error:", takeErr.message || takeErr);
+        }
+      }
+
+      // 3️⃣ AWARD POINTS + REFRESH CLUB REVIEWS
+      await awardPointsForAction({
+        clubId,
+        userId: uid,
+        action: "RATE_FILM",
+        subjectId: data?.id,
+        reason: "Rated the film",
+      });
+
+      await load();
+      toast.success("Saved to the club review.");
+    } catch (err) {
+      console.warn("save rating failed:", err?.message || err);
+      toast.error("Could not save your rating.");
+    } finally {
+      setSaving(false);
     }
-
-    // 2️⃣ MIRROR TO USER FILM TAKES TABLE (film_takes)
-    //    For this panel, we expect a TMDB numeric id on movie_id.
-    if (!useUuidFilm && filmValue) {
-      const titleForTake =
-        (movieTitle && String(movieTitle).trim()) || null;
-      const posterForTake =
-        (posterPath && String(posterPath).trim()) || null;
-
-      // -----------------------------------------------------------
-// 2) Mirror into film_takes (user library) — with debug
-// -----------------------------------------------------------
-const { error: takeErr } = await supabase
-.from("film_takes")
-.upsert(
-  {
-    user_id: uid,
-    movie_id: useUuidFilm ? null : filmValue,
-    movie_title: movieTitle || null,
-    poster_path: posterPath || null,
-    rating: Number(myInput?.rating_5) || null,
-    blurb: myReview || null,
-    created_at: new Date().toISOString(),
-  },
-  { onConflict: "user_id,movie_id" }
-);
-
-console.log("film_takes error:", takeErr);
-
-    }
-
-    // 3️⃣ AWARD POINTS + REFRESH CLUB REVIEWS
-    await awardPointsForAction({
-      clubId,
-      userId: uid,
-      action: "RATE_FILM",
-      subjectId: data?.id,
-      reason: "Rated the film",
-    });
-
-    await load();
   }
 
   if (!open) return null;
@@ -320,10 +331,10 @@ console.log("film_takes error:", takeErr);
               <div className="mt-3 flex justify-end">
                 <button
                   onClick={save}
-                  disabled={!canSubmit}
+                  disabled={!canSubmit || saving}
                   className="rounded-lg bg-yellow-500/90 px-4 py-2 text-sm font-medium text-black hover:bg-yellow-400 disabled:opacity-60"
                 >
-                  Save
+                  {saving ? "Saving..." : "Save"}
                 </button>
               </div>
             </div>

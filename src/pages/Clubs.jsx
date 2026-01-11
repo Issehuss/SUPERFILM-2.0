@@ -119,8 +119,12 @@ const GENRES = [
 const CACHE_KEY = "sf.clubs2.cache.v2";
 const CACHE_MAX_AGE = 1000 * 60 * 5; // 5 minutes
 const PAGE_SIZE = 40;
-const CLUB_PLACEHOLDER = "https://via.placeholder.com/300x480?text=Club";
-const CLUB_EVENT_PLACEHOLDER = "https://via.placeholder.com/300x160?text=Club";
+const svgPlaceholder = (w, h, label) =>
+  `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><rect width="100%" height="100%" fill="#141414"/><text x="50%" y="50%" fill="#6b7280" font-family="Arial, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central">${label}</text></svg>`
+  )}`;
+const CLUB_PLACEHOLDER = svgPlaceholder(300, 480, "Club");
+const CLUB_EVENT_PLACEHOLDER = svgPlaceholder(300, 160, "Club");
 const safeClubImage = (url, fallback = CLUB_PLACEHOLDER) => {
   if (!url || typeof url !== "string") return fallback;
   if (/^https?:\/\//i.test(url)) return url;
@@ -298,7 +302,7 @@ function mapRowToClub(row) {
       row.profile_image_url ??
       row.image_url ??
       row.image ??
-      "https://via.placeholder.com/300x480?text=Club",
+      CLUB_PLACEHOLDER,
     meta: metaFromRow,
     createdAt: row.created_at ?? null,
   };
