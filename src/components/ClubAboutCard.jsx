@@ -15,12 +15,13 @@ export default function ClubAboutCard({ club, isEditing, canEdit, onSaved }) {
   const prevEditingRef = useRef(isEditing);
 
   useEffect(() => {
+    if (isEditing && dirty) return;
     setAbout(club?.about || "");
     setTagline(club?.tagline || "");
     setLocation(club?.location || "");
     setGenres(Array.isArray(club?.genres) ? club.genres : []);
     setDirty(false);
-  }, [club]);
+  }, [club, isEditing, dirty]);
 
   useEffect(() => {
     if (!isEditing || !club?.id) return;

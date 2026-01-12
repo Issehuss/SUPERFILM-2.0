@@ -1608,7 +1608,6 @@ useEffect(() => {
     }
     
 
-    console.log("[NEXT LOADER] loaded:", row);
 
     // ⭐ Mirror into club.nextEvent for UI
     setClub((prev) =>

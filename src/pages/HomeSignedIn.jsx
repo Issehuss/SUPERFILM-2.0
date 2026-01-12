@@ -1253,20 +1253,7 @@ export default function HomeSignedIn() {
       </div>
 
       {/* Bottom Quick actions */}
-      <div className="mt-8 flex flex-wrap gap-3">
-        <Link
-          to="/movies"
-          className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 hover:bg-white/15"
-        >
-          <ListChecks size={18} /> Log a film
-        </Link>
-        <Link
-          to={club ? `/clubs/${club.slug || club.id}` : "/clubs"}
-          className="inline-flex items-center gap-2 rounded-full bg-white/10 px-4 py-2 hover:bg-white/15"
-        >
-          <Users size={18} /> {club ? "Post to club" : "Join a club"}
-        </Link>
-      </div>
+      <div className="mt-8 flex flex-wrap gap-3" />
     </div>
 
     {/* Mobile bottom nav */}
