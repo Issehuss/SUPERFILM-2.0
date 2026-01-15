@@ -5,6 +5,7 @@ import AppWrapper from './App'; // ✅ wrapped with <Router> and <UserProvider>
 import reportWebVitals from './reportWebVitals';
 import BetaGate from "./components/BetaGate";
 import AuthGate from "./components/AuthGate";
+import * as serviceWorkerRegistration from "./serviceWorkerRegistration";
 
 import { env, missingCriticalEnv } from "./lib/env";
 if (process.env.NODE_ENV === "development") {
@@ -27,3 +28,4 @@ root.render(
 );
 
 reportWebVitals();
+serviceWorkerRegistration.register();
