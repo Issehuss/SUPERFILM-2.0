@@ -72,6 +72,7 @@ const UserSearchPage = lazy(() => import("./pages/UserSearchPage.jsx"));
 const TermsPage = lazy(() => import("./pages/Terms.jsx"));
 const ProfileFollows = lazy(() => import("./pages/ProfileFollows.jsx"));
 const Watchlist = lazy(() => import("./pages/Watchlist.jsx"));
+const SettingsProfile = lazy(() => import("./pages/SettingsProfile.jsx"));
 
 // Premium/president-only pages
 const ClubSettings = lazy(() => import("./pages/ClubSettings.jsx"));
@@ -412,11 +413,11 @@ function MainShell() {
   return (
     <div className="flex flex-col min-h-screen bg-gradient-to-b from-black via-zinc-900 to-black text-white font-sans">
       {/* ===== Header ===== */}
-      <header className="sticky top-0 z-40 bg-zinc-950/80 backdrop-blur border-b border-white/10">
-  <div className="w-full flex items-center h-16">
+      <header className="sticky top-0 z-40 bg-zinc-950/80 backdrop-blur border-b border-white/10 relative">
+  <div className="w-full flex items-center h-14 sm:h-16">
     
     {/* LEFT: SuperFilm logo */}
-    <div className="flex-shrink-0 pl-4 md:pl-6">
+    <div className="flex-shrink-0 pl-3 sm:pl-4 md:pl-6">
       <NavLink
         to="/"
         end
@@ -424,7 +425,7 @@ function MainShell() {
         className={({ isActive }) =>
           [
             "group relative flex items-center gap-2",
-            "text-2xl md:text-3xl font-bold tracking-wide",
+            "text-xl sm:text-2xl md:text-3xl font-bold tracking-wide",
             "text-zinc-200 hover:text-white transition-colors",
             "after:absolute after:left-0 after:-bottom-1 after:h-[2px] after:w-0 after:bg-yellow-400",
             "after:transition-[width] after:duration-300 group-hover:after:w-full",
@@ -434,7 +435,7 @@ function MainShell() {
       >
         <div className="flex items-center gap-2">
           <span>SuperFilm</span>
-          <span className="text-[10px] uppercase tracking-[0.18em] text-yellow-300/90 border border-yellow-300/30 rounded-full px-2 py-[3px] bg-yellow-300/10">
+          <span className="text-[9px] sm:text-[10px] uppercase tracking-[0.18em] text-yellow-300/90 border border-yellow-300/30 rounded-full px-1.5 py-[2px] sm:px-2 sm:py-[3px] bg-yellow-300/10">
             Beta
           </span>
         </div>
@@ -442,111 +443,15 @@ function MainShell() {
           src="/superfilm-logo.png"
           alt=""
           aria-hidden="true"
-          className="h-6 w-6 md:h-7 md:w-7 object-contain"
+          className="h-5 w-5 sm:h-6 sm:w-6 md:h-7 md:w-7 object-contain"
           draggable="false"
         />
       </NavLink>
     </div>
 
-                {/* Center: nav + search aligned to content width */}
-                <div className="flex-1 flex justify-center">
-              <nav
-                className="hidden sm:block w-full"
-                aria-label="Primary navigation"
-              >
-                <ul className="mx-auto max-w-6xl w-full flex items-center justify-between px-6 gap-4">
-                  {/* Home */}
-                  <li>
-                    <NavLink
-                      to="/"
-                      end
-                      className={({ isActive }) => linkClass(isActive)}
-                    >
-                      Home
-                    </NavLink>
-                  </li>
-
-                  {/* Clubs */}
-                  <li>
-                    <NavLink
-                      to="/clubs"
-                      className={({ isActive }) => linkClass(isActive)}
-                    >
-                      Discover
-                    </NavLink>
-                  </li>
-
-                  {/* My Clubs dropdown (ClubSwitcher) */}
-                  <li>
-                    <Suspense fallback={null}>
-                      <ClubSwitcher />
-                    </Suspense>
-                  </li>
-
-                  {/* Movies */}
-                  <li>
-                    <NavLink
-                      to="/movies"
-                      className={({ isActive }) => linkClass(isActive)}
-                    >
-                      Movies
-                    </NavLink>
-                  </li>
-
-                  {/* Search bar – part of the evenly spaced group */}
-                  <li className="hidden md:flex items-center gap-2">
-                    <div className="flex items-center rounded-full bg-zinc-800 ring-1 ring-white/10 px-2">
-                      <input
-                        type="text"
-                        value={rawQuery}
-                        onChange={handleSearchChange}
-                        onKeyDown={handleKeyDown}
-                        placeholder={
-                          searchMode === "users" ? "Search @usernames" : "Search films/@cinephiles"
-                        }
-                        className="
-                          bg-transparent text-white placeholder-zinc-400 rounded-full 
-                          px-3 py-2 w-48 lg:w-60
-                          outline-none
-                          transition-all duration-300
-                          focus:ring-0
-                        "
-                        aria-label="Search"
-                      />
-                      <div className="flex rounded-full bg-zinc-900/80 ring-1 ring-white/10">
-                        <button
-                          type="button"
-                          onClick={() => setSearchMode("films")}
-                          className={`text-[11px] px-3 py-1 rounded-full transition ${
-                            searchMode === "films"
-                              ? "bg-yellow-400 text-black shadow-[0_0_12px_rgba(255,215,0,0.35)]"
-                              : "text-zinc-300 hover:text-white"
-                          }`}
-                          aria-pressed={searchMode === "films"}
-                        >
-                          Films
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setSearchMode("users")}
-                          className={`text-[11px] px-3 py-1 rounded-full transition ${
-                            searchMode === "users"
-                              ? "bg-yellow-400 text-black shadow-[0_0_12px_rgba(255,215,0,0.35)]"
-                              : "text-zinc-300 hover:text-white"
-                          }`}
-                          aria-pressed={searchMode === "users"}
-                        >
-                          Users
-                        </button>
-                      </div>
-                    </div>
-                  </li>
-                </ul>
-              </nav>
-            </div>
 
     {/* RIGHT: bell + account menu */}
-    <div className="flex items-center gap-3 pr-4 md:pr-6">
+    <div className="ml-auto flex items-center gap-2 sm:gap-3 pr-3 sm:pr-4 md:pr-6">
       {user && (
         <Suspense fallback={null}>
           <NotificationsBell />
@@ -556,6 +461,106 @@ function MainShell() {
       <NavActions />
     </div>
 
+  </div>
+
+  {/* Center: nav + search aligned to content width */}
+  <div className="pointer-events-none absolute inset-0 flex items-center">
+    <nav className="hidden sm:block w-full" aria-label="Primary navigation">
+      <div className="mx-auto max-w-6xl w-full px-6 pointer-events-auto">
+        <div className="flex items-center justify-between gap-6 w-full">
+          <ul className="flex items-center flex-1 justify-between pr-6">
+            {/* Home */}
+            <li>
+              <NavLink
+                to="/"
+                end
+                className={({ isActive }) => linkClass(isActive)}
+              >
+                Home
+              </NavLink>
+            </li>
+
+            {/* Clubs */}
+            <li>
+              <NavLink
+                to="/clubs"
+                className={({ isActive }) => linkClass(isActive)}
+              >
+                Discover
+              </NavLink>
+            </li>
+
+            {/* My Clubs dropdown (ClubSwitcher) */}
+            <li>
+              <Suspense fallback={null}>
+                <ClubSwitcher />
+              </Suspense>
+            </li>
+
+            {/* Movies */}
+            <li>
+              <NavLink
+                to="/movies"
+                className={({ isActive }) => linkClass(isActive)}
+              >
+                Movies
+              </NavLink>
+            </li>
+          </ul>
+
+          {/* Search bar */}
+          <div className="hidden md:flex items-center justify-end">
+            <div className="flex items-center rounded-full bg-zinc-800 ring-1 ring-white/10 px-2">
+              <input
+                type="text"
+                value={rawQuery}
+                onChange={handleSearchChange}
+                onKeyDown={handleKeyDown}
+                placeholder={
+                  searchMode === "users"
+                    ? "Search @usernames"
+                    : "Search films/@cinephiles"
+                }
+                className="
+                  bg-transparent text-white placeholder-zinc-400 rounded-full 
+                  px-3 py-2 w-48 lg:w-60
+                  outline-none
+                  transition-all duration-300
+                  focus:ring-0
+                "
+                aria-label="Search"
+              />
+              <div className="flex rounded-full bg-zinc-900/80 ring-1 ring-white/10">
+                <button
+                  type="button"
+                  onClick={() => setSearchMode("films")}
+                  className={`text-[11px] px-3 py-1 rounded-full transition ${
+                    searchMode === "films"
+                      ? "bg-yellow-400 text-black shadow-[0_0_12px_rgba(255,215,0,0.35)]"
+                      : "text-zinc-300 hover:text-white"
+                  }`}
+                  aria-pressed={searchMode === "films"}
+                >
+                  Films
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSearchMode("users")}
+                  className={`text-[11px] px-3 py-1 rounded-full transition ${
+                    searchMode === "users"
+                      ? "bg-yellow-400 text-black shadow-[0_0_12px_rgba(255,215,0,0.35)]"
+                      : "text-zinc-300 hover:text-white"
+                  }`}
+                  aria-pressed={searchMode === "users"}
+                >
+                  Users
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </nav>
   </div>
 </header>
 
@@ -696,6 +701,7 @@ function MainShell() {
               }
             />
             <Route path="/settings/premium" element={<SettingsPremium />} />
+            <Route path="/settings/profile" element={<SettingsProfile />} />
             <Route path="/premium/success" element={<PremiumSuccess />} />
             <Route path="/directors-cut/success" element={<DirectorsCutSuccess />} />
 

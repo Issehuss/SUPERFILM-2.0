@@ -402,6 +402,7 @@ function mapClubRowToUI(row) {
     banner: safeImageSrc(row.banner_url, fallbackBanner),
     profileImageUrl: safeImageSrc(row.profile_image_url, ""),
     nameLastChangedAt: row.name_last_changed_at || null,
+    type: row.type || null,
 
     // ---------------------------------------------------------------
     // NEXT EVENT (now correctly pulled ONLY from club_next_screening)
@@ -476,6 +477,9 @@ function MembersDialog({
               const name = p.display_name || "Member";
               const avatar = safeImageSrc(p.avatar_url, "/default-avatar.svg");
               const role = m.role;
+              const isPremium =
+                p?.is_premium === true ||
+                String(p?.plan || "").toLowerCase() === "directors_cut";
 
               return (
                 <div
@@ -494,6 +498,7 @@ function MembersDialog({
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm text-neutral-100 flex items-center gap-2">
                       {name}
+                      {isPremium && <DirectorsCutBadge className="ml-0" size="xs" />}
                       {role === "president" && (
                         <span className="w-3 h-3 rounded-full bg-yellow-500 inline-block" title="President" />
                       )}
@@ -686,7 +691,7 @@ function ClubAddTake({ movie, club }) {
           })
           .select(`
             id, club_id, user_id, film_id, rating, take, is_archived, created_at,
-            profiles:profiles!user_id ( display_name, avatar_url )
+            profiles:profiles!user_id ( display_name, avatar_url, is_premium, plan )
           `)
           .maybeSingle();
 
@@ -830,6 +835,7 @@ const [aspect, setAspect] = useState(null);  // standout craft key
 
 
   const [club, setClub] = useState(() => readClubCache(idParam));
+  const isCuratedClub = club?.type === "superfilm_curated";
 
 // --- Next Screening state ---
 const [nextScreening, setNextScreening] = useState(null);
@@ -1032,6 +1038,7 @@ const posterRef = useRef(null);
 const teaserWrapRef = useRef(null);
 const [teaserHeight, setTeaserHeight] = useState(null);
 const [members, setMembers] = useState([]);
+const membersFetchRef = useRef(null);
 const membersCount = useMemo(
   () => (Array.isArray(members) ? members.length : Number(club?.members) || 0),
   [members, club?.members]
@@ -1130,60 +1137,69 @@ useEffect(() => {
 // re-fetch members (used after role changes)
 const loadMembers = useCallback(async () => {
   if (!club?.id) return;
-  try {
-    // 1) raw member rows
-    const { data: memRows, error: memErr } = await supabase
-      .from("club_members")
-      .select("user_id, role")
-      .eq("club_id", club.id);
+  if (membersFetchRef.current) return membersFetchRef.current;
 
-    if (memErr) throw memErr;
+  const p = (async () => {
+    try {
+      // 1) raw member rows
+      const { data: memRows, error: memErr } = await supabase
+        .from("club_members")
+        .select("user_id, role")
+        .eq("club_id", club.id);
 
-    const ids = (memRows || []).map(r => r.user_id).filter(Boolean);
-    let profilesMap = {};
+      if (memErr) throw memErr;
 
-    if (ids.length) {
-      // 2) fetch profiles in bulk
-      const { data: profRows, error: profErr } = await supabase
-        .from("profiles")
-        .select("id, slug, display_name, avatar_url")
-        .in("id", ids);
+      const ids = (memRows || []).map(r => r.user_id).filter(Boolean);
+      let profilesMap = {};
 
-      if (profErr) {
-        // fail-safe: keep going with empty profiles
-        profilesMap = {};
-      } else {
-        profilesMap = Object.fromEntries(
-          (profRows || []).map(p => [p.id, p])
-        );
+      if (ids.length) {
+        // 2) fetch profiles in bulk
+        const { data: profRows, error: profErr } = await supabase
+          .from("profiles")
+          .select("id, slug, display_name, avatar_url, is_premium, plan")
+          .in("id", ids);
+
+        if (profErr) {
+          // fail-safe: keep going with empty profiles
+          profilesMap = {};
+        } else {
+          profilesMap = Object.fromEntries(
+            (profRows || []).map(p => [p.id, p])
+          );
+        }
       }
+
+      // merge + sort
+      const priority = { president: 0, vice_president: 1, member: 2 };
+      const merged = (memRows || []).map(r => ({
+        user_id: r.user_id,
+        role: r.role || "member",
+        profiles: profilesMap[r.user_id] || null,
+      }));
+
+      const sorted = merged.slice().sort((a, b) => {
+        const pa = priority[a.role] ?? 9;
+        const pb = priority[b.role] ?? 9;
+        if (pa !== pb) return pa - pb;
+        const an = (a.profiles?.display_name || "").toLowerCase();
+        const bn = (b.profiles?.display_name || "").toLowerCase();
+        return an.localeCompare(bn);
+      });
+
+      setMembers(sorted);
+    } catch (e) {
+      console.error("loadMembers failed:", e);
+      setMembers([]);
+    } finally {
+      setMembersLoading(false);
     }
+  })();
 
-    // merge + sort
-    const priority = { president: 0, vice_president: 1, member: 2 };
-    const merged = (memRows || []).map(r => ({
-      user_id: r.user_id,
-      role: r.role || "member",
-      profiles: profilesMap[r.user_id] || null,
-    }));
-
-    const sorted = merged.slice().sort((a, b) => {
-      const pa = priority[a.role] ?? 9;
-      const pb = priority[b.role] ?? 9;
-      if (pa !== pb) return pa - pb;
-      const an = (a.profiles?.display_name || "").toLowerCase();
-      const bn = (b.profiles?.display_name || "").toLowerCase();
-      return an.localeCompare(bn);
-    });
-
-    setMembers(sorted);
-  } catch (e) {
-    console.error("loadMembers failed:", e);
-    setMembers([]);
-  } finally {
-    setMembersLoading(false);
-  }
-}, [club?.id, sessionLoaded]);
+  membersFetchRef.current = p.finally(() => {
+    membersFetchRef.current = null;
+  });
+  return membersFetchRef.current;
+}, [club?.id]);
 
 
 
@@ -1229,10 +1245,6 @@ const transferPresidency = async (userId) => {
   toast?.success ? toast.success("Presidency transferred") : console.log("Presidency transferred");
   await loadMembers();
 };
-
-useEffect(() => {
-  if (club?.id) loadMembers();
-}, [club?.id, loadMembers]);
 
 
 
@@ -1349,10 +1361,11 @@ useEffect(() => {
 
       // SELECT now includes avatar + name_last_changed_at
 
-      const selectCols = `
+  const selectCols = `
   id, slug, name, tagline, about, location,
   banner_url, profile_image_url, name_last_changed_at,
   featured_posters,
+  type,
   next_screening:club_next_screening(*)
 `;
 
@@ -1728,7 +1741,7 @@ useEffect(() => {
     if (ids.length) {
       const { data: profRows, error: profErr } = await supabase
         .from("profiles")
-        .select("id, slug, display_name, avatar_url")
+        .select("id, slug, display_name, avatar_url, is_premium, plan")
         .in("id", ids);
       if (!profErr) {
         profilesMap = Object.fromEntries((profRows || []).map(p => [p.id, p]));
@@ -2657,6 +2670,103 @@ const postActivity = async (summary) => {
   const nextRenameDate = club?.nameLastChangedAt
     ? new Date(new Date(club.nameLastChangedAt).getTime() + 90 * 24 * 60 * 60 * 1000)
     : null;
+
+  const memberCreatedExtras = (
+    <>
+      {/* Chat teaser (members only) */}
+      <div ref={teaserWrapRef} className="mt-3 hidden md:block">
+        {canSeeMembersOnly || isCuratedClub ? (
+          <div
+            className="rounded-2xl border border-zinc-800 bg-black/50 overflow-hidden"
+          >
+            <ClubChatTeaserCard clubId={club.id} slug={club.slug} />
+          </div>
+        ) : (
+          <div className="rounded-xl bg-white/5 ring-1 ring-white/10 p-4 text-sm text-zinc-400">
+            Club chat is for members only.
+          </div>
+        )}
+      </div>
+
+      {/* Film Takes */}
+      <div className="mt-5 rounded-2xl border border-zinc-800 bg-gradient-to-br from-black/55 via-zinc-900/55 to-black/60 shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800/80 backdrop-blur-sm bg-black/40">
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.18em] text-yellow-300/80">
+              Film Takes
+            </p>
+            <h3 className="text-sm font-semibold text-white">Share your club’s reactions</h3>
+          </div>
+          <div className="flex items-center gap-2">
+            <Link
+              to={`/clubs/${club.slug || club.id}/takes/archive`}
+              className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-zinc-200 hover:border-yellow-400 hover:text-white transition"
+            >
+              Archived takes
+            </Link>
+            <ClubAddTake
+              movie={{
+                id: nextScreening?.filmId,
+                title: nextScreening?.title,
+                poster: nextScreening?.poster,
+              }}
+              club={{ id: club.id, name: club.name, slug: club.slug }}
+            />
+          </div>
+        </div>
+
+        <div className="p-4">
+          {!nextScreening?.filmId ? (
+            <div className="rounded-xl border border-dashed border-zinc-700/80 bg-zinc-900/50 px-4 py-5 text-sm text-zinc-300 flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                {canSeeMembersOnly ? (
+                  canEdit ? (
+                    "No film selected for this screening."
+                  ) : (
+                    "A film hasn’t been chosen yet. Once the club sets the next film, members’ takes will appear here."
+                  )
+                ) : (
+                  "Film Takes are for members."
+                )}
+              </div>
+              {canSeeMembersOnly && canEdit && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditing(true);
+                    document.querySelector('input[aria-label="Search film title"]')?.focus();
+                  }}
+                  className="rounded-full bg-yellow-400/90 hover:bg-yellow-300 px-4 py-2 text-sm font-semibold text-black focus:outline-none focus:ring-2 focus:ring-yellow-400/70"
+                >
+                  Pick a film
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="rounded-xl border border-zinc-800 bg-black/40 p-3">
+              <ClubFilmTakesSection
+                clubId={club.id}
+                filmId={nextScreening?.filmId}
+                canSeeMembersOnly={canSeeMembersOnly}
+                userId={user?.id}
+              />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Average rating graphic */}
+      {nextFilmId ? (
+        <div className="mt-4 flex-1">
+          <FilmAverageCell
+            average={nextAvg}
+            counts={nextRatingCounts}
+            total={nextRatingTotal}
+          />
+        </div>
+      ) : null}
+    </>
+  );
   
   return (
       <div className="min-h-screen bg-black text-white">
@@ -2811,15 +2921,6 @@ const postActivity = async (summary) => {
 
 {/* Partner-only moderation UI; old PointsReviewPanel is deprecated */}
 
-        {isClubAdmin && (
-          <Link
-            to={`/clubs/${club.slug || club.id}/requests`}
-            className="text-sm text-yellow-400 hover:underline"
-          >
-            Requests
-          </Link>
-        )}
-    
 {/* Partner-only moderation UI; old PointsReviewPanel.jsx is now a no-op */}
 {isPartner && (
   <div className="mx-6 mt-3 rounded-xl border border-amber-400/30 bg-amber-500/10">
@@ -3050,33 +3151,43 @@ const postActivity = async (summary) => {
   <div className="grid md:grid-cols-2 gap-6 items-start">
     {/* Left: Poster */}
     <div>
-    {isMounted && (
-  <div
-    key={nextScreening?.poster || "next-poster"}
-    className="inline-block rounded-xl border-[4px] border-yellow-500 overflow-hidden group"
-  >
-    <Link
-      to={nextScreening?.filmId ? `/movies/${nextScreening.filmId}` : "#"}
-      onClick={(e) => {
-        if (!nextScreening?.filmId) e.preventDefault();
-      }}      
-      className="block transition-transform duration-150 group-hover:scale-[1.03]"
-      title={nextScreening?.movieTitle || "Open movie details"}
-    >
-      <img
-        ref={posterRef}
-        src={safeImageSrc(nextScreening?.poster || fallbackNext, fallbackNext)}
-        alt={nextScreening?.movieTitle || "Next screening poster"}
-        className="block w-full h-auto object-cover"
-        loading="lazy"
-      />
-    </Link>
-  </div>
-)}
-
+      {isCuratedClub ? (
+        <div className="rounded-xl bg-white/5 ring-1 ring-white/10 p-4 text-sm text-zinc-300">
+          SuperFilm Curated clubs are here to help you get started. Use this as inspiration, then create your own club around your interests, taste, or niche. This can be your template.
+          <div className="mt-3">
+            <Link to="/create-club" className="text-yellow-400 hover:underline text-sm">
+              Create a club
+            </Link>
+          </div>
+        </div>
+      ) : (
+        isMounted && (
+          <div
+            key={nextScreening?.poster || "next-poster"}
+            className="inline-block rounded-xl border-[4px] border-yellow-500 overflow-hidden group"
+          >
+            <Link
+              to={nextScreening?.filmId ? `/movies/${nextScreening.filmId}` : "#"}
+              onClick={(e) => {
+                if (!nextScreening?.filmId) e.preventDefault();
+              }}
+              className="block transition-transform duration-150 group-hover:scale-[1.03]"
+              title={nextScreening?.movieTitle || "Open movie details"}
+            >
+              <img
+                ref={posterRef}
+                src={safeImageSrc(nextScreening?.poster || fallbackNext, fallbackNext)}
+                alt={nextScreening?.movieTitle || "Next screening poster"}
+                className="block w-full h-auto object-cover"
+                loading="lazy"
+              />
+            </Link>
+          </div>
+        )
+      )}
 
       {/* Edit UI (search) */}
-      {canEdit && isEditing && (
+      {!isCuratedClub && canEdit && isEditing && (
         <div className="mt-2">
           <input
             value={nextSearch}
@@ -3095,7 +3206,7 @@ const postActivity = async (summary) => {
           </button>
 
           <div className="grid grid-cols-2 gap-2 mt-2">
-          {nextSearchResults.map((movie) => (
+            {nextSearchResults.map((movie) => (
               <TmdbImage
                 key={movie.id}
                 src={
@@ -3125,16 +3236,10 @@ const postActivity = async (summary) => {
                     posterPath: pickedPosterPath,
                   }));
 
-                  
-                  
-                  
-    
-
                   setNextSearchResults([]);
                 }}
               />
             ))}
-
           </div>
         </div>
       )}
@@ -3147,79 +3252,72 @@ const postActivity = async (summary) => {
           {/* Title */}
           <label className="block text-xs uppercase tracking-wide text-zinc-400">Title</label>
           <input
-  value={nextScreening?.title || ""}
-  onChange={(e) =>
-    setNextScreening((prev) => ({
-      ...(prev || {}),
-      title: e.target.value
-    }))
-  }
-  className="w-full bg-zinc-800 p-2 rounded"
-  placeholder="Film title"
-  aria-label="Event title"
-/>
-
+            value={nextScreening?.title || ""}
+            onChange={(e) =>
+              setNextScreening((prev) => ({
+                ...(prev || {}),
+                title: e.target.value
+              }))
+            }
+            className="w-full bg-zinc-800 p-2 rounded"
+            placeholder="Film title"
+            aria-label="Event title"
+          />
 
           {/* Location */}
           <label className="block text-xs uppercase tracking-wide text-zinc-400">Location</label>
           <div className="relative">
             <MapPin className="w-4 h-4 text-yellow-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
-  value={nextScreening?.location || ""}
-  onChange={(e) =>
-    setNextScreening((prev) => ({
-      ...(prev || {}),
-      location: e.target.value
-    }))
-  }
-  className="w-full bg-zinc-800 p-2 pl-9 rounded"
-  placeholder="Venue, area (e.g., Electric Cinema, Notting Hill)"
-  aria-label="Event location"
-/>
-
-
+              value={nextScreening?.location || ""}
+              onChange={(e) =>
+                setNextScreening((prev) => ({
+                  ...(prev || {}),
+                  location: e.target.value
+                }))
+              }
+              className="w-full bg-zinc-800 p-2 pl-9 rounded"
+              placeholder="Venue, area (e.g., Electric Cinema, Notting Hill)"
+              aria-label="Event location"
+            />
           </div>
 
           {/* Tagline */}
           <label className="block text-xs uppercase tracking-wide text-zinc-400">Tagline</label>
           <textarea
-  value={nextScreening?.caption || ""}
-  onChange={(e) =>
-    setNextScreening((prev) => ({
-      ...(prev || {}),
-      caption: e.target.value
-    }))
-  }
-  className="w-full bg-zinc-800 p-2 rounded"
-  placeholder="Optional note for the ticket"
-  aria-label="Event caption"
-/>
-
-
+            value={nextScreening?.caption || ""}
+            onChange={(e) =>
+              setNextScreening((prev) => ({
+                ...(prev || {}),
+                caption: e.target.value
+              }))
+            }
+            className="w-full bg-zinc-800 p-2 rounded"
+            placeholder="Optional note for the ticket"
+            aria-label="Event caption"
+          />
 
           {/* Date & time */}
           <label className="block text-xs uppercase tracking-wide text-zinc-400">Date &amp; time</label>
           <Suspense fallback={<div className="text-xs text-zinc-500">Date picker…</div>}>
-          <DatePicker
-  selected={nextScreening?.date ? new Date(nextScreening.date) : null}
-  onChange={(date) => {
-    if (!date) {
-      setNextScreening((prev) => ({ ...(prev || {}), date: null }));
-      return;
-    }
-    setNextScreening((prev) => ({
-      ...(prev || {}),
-      date: date.toISOString(),
-    }));
-  }}
+            <DatePicker
+              selected={nextScreening?.date ? new Date(nextScreening.date) : null}
+              onChange={(date) => {
+                if (!date) {
+                  setNextScreening((prev) => ({ ...(prev || {}), date: null }));
+                  return;
+                }
+                setNextScreening((prev) => ({
+                  ...(prev || {}),
+                  date: date.toISOString(),
+                }));
+              }}
 
-  showTimeSelect
-  dateFormat="Pp"
-          className="bg-zinc-800 text-white p-2 rounded w-full"
-/>
-
-
-</Suspense>
+              showTimeSelect
+              dateFormat="Pp"
+              className="bg-zinc-800 text-white p-2 rounded w-full"
+            />
+          </Suspense>
 
           <div className="mt-3 text-xs text-zinc-400">
             Want to list a public event? Use the Events page (Discover → Events) to create it so everyone can find it.
@@ -3239,17 +3337,17 @@ const postActivity = async (summary) => {
 
       ) : canSeeMembersOnly ? (
         <TicketCard
-  title={nextScreening?.title}
-  tagline={nextScreening?.caption}
-  location={nextScreening?.location}
-  datetime={
-    nextScreening?.date
-      ? new Date(nextScreening.date).toLocaleString([], {
-          dateStyle: "medium",
-          timeStyle: "short",
-        })
-      : ""
-  }
+          title={nextScreening?.title}
+          tagline={nextScreening?.caption}
+          location={nextScreening?.location}
+          datetime={
+            nextScreening?.date
+              ? new Date(nextScreening.date).toLocaleString([], {
+                  dateStyle: "medium",
+                  timeStyle: "short",
+                })
+              : ""
+          }
 
           onClick={() => {
             navigate(`/clubs/${club.slug || club.id}/events/next`, {
@@ -3274,120 +3372,17 @@ const postActivity = async (summary) => {
           </div>
         </div>
       )}
-
-      {/* Chat teaser (members only) */}
-      <div ref={teaserWrapRef} className="mt-6 hidden md:block">
-        {canSeeMembersOnly ? (
-          <div
-            className="rounded-2xl border border-zinc-800 bg-black/50 overflow-hidden"
-            style={teaserHeight ? { height: teaserHeight } : undefined}
-          >
-            <ClubChatTeaserCard clubId={club.id} slug={club.slug} />
-          </div>
-        ) : (
-          <div className="rounded-xl bg-white/5 ring-1 ring-white/10 p-4 text-sm text-zinc-400">
-            Club chat is for members only.
-          </div>
-        )}
-      </div>
-
-     
-
-      {/* Quick personal take (posts to profiles.film_takes) */}
-
-      {/* Film Takes */}
-      <div className="mt-5 rounded-2xl border border-zinc-800 bg-gradient-to-br from-black/55 via-zinc-900/55 to-black/60 shadow-[0_20px_50px_rgba(0,0,0,0.5)] overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800/80 backdrop-blur-sm bg-black/40">
-          <div>
-            <p className="text-[11px] uppercase tracking-[0.18em] text-yellow-300/80">
-              Film Takes
-            </p>
-            <h3 className="text-sm font-semibold text-white">Share your club’s reactions</h3>
-          </div>
-          <div className="flex items-center gap-2">
-            <Link
-              to={`/clubs/${club.slug || club.id}/takes/archive`}
-              className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-zinc-200 hover:border-yellow-400 hover:text-white transition"
-            >
-              Archived takes
-            </Link>
-            <ClubAddTake
-              movie={{
-                id: nextScreening?.filmId,
-                title: nextScreening?.title,
-                poster: nextScreening?.poster,
-              }}
-              club={{ id: club.id, name: club.name, slug: club.slug }}
-            />
-          </div>
-        </div>
-
-        <div className="p-4">
-          {!nextScreening?.filmId ? (
-            <div className="rounded-xl border border-dashed border-zinc-700/80 bg-zinc-900/50 px-4 py-5 text-sm text-zinc-300 flex items-center justify-between gap-3 flex-wrap">
-              <div>
-                {canSeeMembersOnly ? (
-                  canEdit ? (
-                    "No film selected for this screening."
-                  ) : (
-                    "A film hasn’t been chosen yet. Once the club sets the next film, members’ takes will appear here."
-                  )
-                ) : (
-                  "Film Takes are for members."
-                )}
-              </div>
-              {canSeeMembersOnly && canEdit && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsEditing(true);
-                    document.querySelector('input[aria-label=\"Search film title\"]')?.focus();
-                  }}
-                  className="rounded-full bg-yellow-400/90 hover:bg-yellow-300 px-4 py-2 text-sm font-semibold text-black focus:outline-none focus:ring-2 focus:ring-yellow-400/70"
-                >
-                  Pick a film
-                </button>
-              )}
-            </div>
-          ) : (
-            <div className="rounded-xl border border-zinc-800 bg-black/40 p-3">
-              <ClubFilmTakesSection
-                clubId={club.id}
-                filmId={nextScreening?.filmId}
-                canSeeMembersOnly={canSeeMembersOnly}
-                userId={user?.id}
-              />
-            </div>
-          )}
-        </div>
-      </div>
-      
-
-   {/* Average rating graphic */}
-{nextFilmId ? (
-  <div className="mt-4 flex-1">
-    <FilmAverageCell
-      average={nextAvg}
-      counts={nextRatingCounts}
-      total={nextRatingTotal}
-    />
+      {!isCuratedClub && memberCreatedExtras}
+    </div>
   </div>
-) : null}
-
-
-
-
-
-  
-
-
-
-</div>
-</div>
 </div>
 
+      {isCuratedClub && memberCreatedExtras}
 
 
+
+
+ 
 {/* About + Featured (Option 1 layout) */}
 <div className="px-6 mt-6 grid md:grid-cols-2 gap-6 items-start">
   <ClubAboutCard

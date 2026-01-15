@@ -38,6 +38,19 @@ function typeIcon(type) {
   return <Bell size={16} className="shrink-0" />;
 }
 
+function resolveNotificationHref(notification) {
+  const d = notification?.data || {};
+  if (notification?.type?.startsWith("club.membership.pending")) {
+    const clubParam = d.slug || d.club_slug || notification?.club_id;
+    return clubParam ? `/clubs/${clubParam}/requests` : "/notifications";
+  }
+  if (d.href) return d.href;
+  if (d.chat_path) return d.chat_path;
+  if (d.slug) return `/clubs/${d.slug}/chat`;
+  if (notification?.club_id) return `/clubs/${notification.club_id}/chat`;
+  return "/notifications";
+}
+
 const REQUEST_ROLES = ["president"]; // who can see & act on membership requests
 
 export default function NotificationsBell() {
@@ -255,7 +268,9 @@ export default function NotificationsBell() {
       >
         <Bell size={18} />
         {totalUnread > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-yellow-400 ring-2 ring-black" />
+          <span className="absolute -top-1 -right-1 inline-flex h-5 min-w-[20px] px-1 items-center justify-center rounded-full bg-yellow-500 text-black text-[11px] font-bold ring-2 ring-black">
+            {totalUnread > 99 ? "99+" : totalUnread}
+          </span>
         )}
       </button>
 
@@ -323,15 +338,7 @@ export default function NotificationsBell() {
                 const clubName =
                   d.club_name || d.group_name || d.chat_name || d.title || "Club chat";
                 const snippet = d.snippet || d.message || d.summary || "";
-                const href =
-                  d.href ||
-                  (d.chat_path
-                    ? d.chat_path
-                    : d.slug
-                    ? `/clubs/${d.slug}/chat`
-                    : n.club_id
-                    ? `/clubs/${n.club_id}/chat`
-                    : "/");
+                const href = resolveNotificationHref(n);
 
                 return (
                   <li

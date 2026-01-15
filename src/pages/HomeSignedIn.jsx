@@ -1139,7 +1139,7 @@ export default function HomeSignedIn() {
                 Add films to your watchlist.
               </div>
             ) : (
-              <div className="relative h-[420px] md:h-[520px] rounded-xl ring-1 ring-white/10 p-3">
+              <div className="relative h-[420px] md:h-[520px] rounded-xl ring-1 ring-white/10 p-3 overflow-hidden">
                 <Link
                   to={`/movie/${wlCurrent?.id ?? wlCurrent?.movie_id}`}
                   className="flex h-full w-full flex-col items-center justify-start"
@@ -1147,7 +1147,7 @@ export default function HomeSignedIn() {
                   aria-label={wlCurrent?.title || "Watchlist item"}
                 >
                   <div className="flex-1 flex items-center justify-center w-full">
-                  <div className="aspect-[2/3] h-[86%] w-[78%] mx-auto">
+                  <div className="aspect-[2/3] h-[72%] sm:h-[86%] w-[72%] sm:w-[78%] mx-auto">
                     {wlPoster ? (
                       <TmdbImage
                         key={`${wlCurrent?.id || wlCurrent?.movie_id}-${wlIndex}`}

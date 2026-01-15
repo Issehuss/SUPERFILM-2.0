@@ -180,7 +180,6 @@ function HoverPreview({ sourceEl, club, scale = 1.06, showTooltip = false, toolt
   }, [sourceEl]);
 
   if (!sourceEl || !club) return null;
-  const m = club.meta || {};
 
   return createPortal(
     <div
@@ -189,42 +188,6 @@ function HoverPreview({ sourceEl, club, scale = 1.06, showTooltip = false, toolt
       style={{ "--scale": scale }}
       aria-hidden
     >
-      <div className="preview-card">
-        <div className="w-full bg-zinc-900/70 overflow-hidden club-media">
-          <div className="club-thumb">
-            <img
-              src={safeClubImage(club.image)}
-              alt={club.name}
-              className="w-full h-full object-cover"
-              onError={(e) => {
-                e.currentTarget.src = CLUB_PLACEHOLDER;
-              }}
-            />
-          </div>
-          <div className="club-badges">
-            {m.isNew && (
-              <span className="badge">
-                <span className="badge-dot" />
-                New
-              </span>
-            )}
-            {m.activeThisWeek && (
-              <span className="badge">
-                <span className="badge-dot" />
-                Active this week
-              </span>
-            )}
-            {m.liveSoon && (
-              <span className="badge">
-                <span className="badge-dot" />
-                Live soon
-              </span>
-            )}
-          </div>
-        </div>
-        <div className="px-3 py-2 text-white text-sm font-semibold truncate">{club.name}</div>
-      </div>
-
       <div className={`club-tooltip ${showTooltip ? "show" : ""}`}>
         <div className="club-tooltip__row">
           <span className="club-dot" /> <strong className="mr-1">Members:</strong>{" "}
@@ -628,7 +591,7 @@ export default function Clubs() {
 
   const handleLeave = useCallback(() => cancelHover(), [cancelHover]);
 
-  const combined = enrichClubs(liveClubs);
+  const combined = useMemo(() => enrichClubs(liveClubs), [liveClubs]);
   const isOfficialClub = useCallback((club) => {
     const m = club?.meta || {};
     return m.type === "superfilm_curated";
@@ -651,13 +614,29 @@ export default function Clubs() {
     [search]
   );
 
-  const filteredByFilters = combined.filter((c) => passesFilters(c.meta || {}, filters));
-  const filtered = filteredByFilters.filter(matchesSearch);
+  const filteredByFilters = useMemo(
+    () => combined.filter((c) => passesFilters(c.meta || {}, filters)),
+    [combined, filters]
+  );
+  const filtered = useMemo(
+    () => filteredByFilters.filter(matchesSearch),
+    [filteredByFilters, matchesSearch]
+  );
 
-  const curatedClubs = combined.filter(isOfficialClub);
-  const communityClubs = combined.filter((c) => !isOfficialClub(c));
-  const filteredCurated = curatedClubs.filter((c) => filtered.includes(c));
-  const filteredCommunity = communityClubs.filter((c) => filtered.includes(c));
+  const curatedClubs = useMemo(() => combined.filter(isOfficialClub), [combined, isOfficialClub]);
+  const communityClubs = useMemo(
+    () => combined.filter((c) => !isOfficialClub(c)),
+    [combined, isOfficialClub]
+  );
+  const filteredSet = useMemo(() => new Set(filtered.map((c) => c.id)), [filtered]);
+  const filteredCurated = useMemo(
+    () => curatedClubs.filter((c) => filteredSet.has(c.id)),
+    [curatedClubs, filteredSet]
+  );
+  const filteredCommunity = useMemo(
+    () => communityClubs.filter((c) => filteredSet.has(c.id)),
+    [communityClubs, filteredSet]
+  );
 
   const baseCurated = filteredCurated.length > 0 ? filteredCurated : curatedClubs;
   const baseForCarousel = filteredCommunity.length > 0 ? filteredCommunity : communityClubs;

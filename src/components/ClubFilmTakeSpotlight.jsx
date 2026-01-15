@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import DirectorsCutBadge from "./DirectorsCutBadge";
 
 export default function ClubFilmTakeSpotlight({ takes = [], intervalMs = 8000 }) {
   const [index, setIndex] = useState(0);
@@ -32,6 +33,9 @@ export default function ClubFilmTakeSpotlight({ takes = [], intervalMs = 8000 })
   }
 
   const cur = safeTakes[index];
+  const isPremium =
+    cur?.profiles?.is_premium === true ||
+    String(cur?.profiles?.plan || "").toLowerCase() === "directors_cut";
 
   return (
     <div className="group relative overflow-hidden rounded-2xl border border-white/10 bg-black/30 p-5 transition-colors">
@@ -47,8 +51,9 @@ export default function ClubFilmTakeSpotlight({ takes = [], intervalMs = 8000 })
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between">
-            <div className="truncate font-semibold text-white">
-              {cur?.profiles?.display_name || "Member"}
+            <div className="truncate font-semibold text-white flex items-center gap-2">
+              <span className="truncate">{cur?.profiles?.display_name || "Member"}</span>
+              {isPremium && <DirectorsCutBadge className="ml-0" size="xs" />}
             </div>
             {typeof cur?.rating === "number" ? (
               <div className="shrink-0 rounded-full border border-yellow-500/30 px-2 py-0.5 text-xs text-yellow-400">
@@ -75,4 +80,3 @@ export default function ClubFilmTakeSpotlight({ takes = [], intervalMs = 8000 })
     </div>
   );
 }
-

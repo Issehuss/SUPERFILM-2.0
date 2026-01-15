@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import supabase from "../supabaseClient";
 import { useUser } from "../context/UserContext";
 import { Check, X, Users } from "lucide-react";
+import DirectorsCutBadge from "../components/DirectorsCutBadge";
 
 const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -86,7 +87,7 @@ useEffect(() => {
         const userIds = Array.from(new Set(reqs.map(r => r.user_id)));
         const { data: profs, error: pErr } = await supabase
           .from("profiles")
-          .select("id, slug, display_name, avatar_url")
+          .select("id, slug, display_name, avatar_url, is_premium, plan")
           .in("id", userIds);
   
         if (pErr) throw pErr;
@@ -227,8 +228,12 @@ if (updErr) throw updErr;
                 </Link>
 
                 <div className="flex-1 min-w-0">
-                  <Link to={profileHref} className="font-medium hover:underline">
-                    {name}
+                  <Link to={profileHref} className="font-medium hover:underline inline-flex items-center gap-2">
+                    <span className="truncate">{name}</span>
+                    {(p?.is_premium === true ||
+                      String(p?.plan || "").toLowerCase() === "directors_cut") && (
+                      <DirectorsCutBadge className="ml-0" size="xs" />
+                    )}
                   </Link>
                   <div className="text-xs text-zinc-500">
                     Requested {new Date(r.created_at).toLocaleString()}

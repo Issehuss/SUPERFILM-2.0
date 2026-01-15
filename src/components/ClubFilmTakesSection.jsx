@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import supabase from "../supabaseClient";
 import { useUser } from "../context/UserContext";
 import { createNotification } from "../utils/notify";
+import DirectorsCutBadge from "./DirectorsCutBadge";
 
 const CLAPS_TABLE = "club_take_claps"; // ← use the actual table you created
 
@@ -36,7 +37,7 @@ export default function ClubFilmTakesSection({
         .from("club_film_takes")
         .select(`
           id, user_id, rating, take, created_at, is_archived,
-          profiles:profiles!user_id ( display_name, avatar_url )
+          profiles:profiles!user_id ( display_name, avatar_url, is_premium, plan )
         `)
         .eq("club_id", clubId)
         .eq("film_id", Number(filmId))
@@ -263,6 +264,9 @@ export default function ClubFilmTakesSection({
 function SpotlightCard({ take, count, index, onToggleClap }) {
   const name = take?.profiles?.display_name || "Member";
   const avatar = take?.profiles?.avatar_url || "/avatar_placeholder.png";
+  const isPremium =
+    take?.profiles?.is_premium === true ||
+    String(take?.profiles?.plan || "").toLowerCase() === "directors_cut";
   const rating =
     typeof take?.rating === "number" && !Number.isNaN(take.rating)
       ? take.rating
@@ -289,7 +293,10 @@ function SpotlightCard({ take, count, index, onToggleClap }) {
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-3">
-            <div className="truncate font-semibold text-white">{name}</div>
+            <div className="truncate font-semibold text-white flex items-center gap-2">
+              <span className="truncate">{name}</span>
+              {isPremium && <DirectorsCutBadge className="ml-0" size="xs" />}
+            </div>
             <div className="flex items-center gap-2">
               {/* Clap pill (no emoji) */}
               <button

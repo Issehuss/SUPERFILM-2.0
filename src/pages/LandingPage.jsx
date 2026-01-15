@@ -22,17 +22,16 @@ export default function LandingPage() {
   const { heading, subheading, image } = carouselSlides[index];
 
   return (
-    <div className="relative w-full h-[calc(100vh-120px)] sm:h-[calc(100vh-140px)] overflow-hidden flex items-center justify-center bg-black text-white">
+    <div className="relative w-full h-[calc(100vh-170px)] sm:h-[calc(100vh-140px)] overflow-hidden flex items-center justify-center bg-black text-white">
       {/* Centered cinematic card — rounded, no side fades */}
       <section className="relative w-full">
         <div
           className="
             relative mx-auto overflow-hidden rounded-2xl sm:rounded-[28px] shadow-2xl ring-1 ring-white/10
-            max-w-[96vw] sm:max-w-[94vw] md:max-w-[90vw] lg:max-w-[96vw] xl:max-w-[92vw]
+            max-w-[92vw] sm:max-w-[94vw] md:max-w-[90vw] lg:max-w-[96vw] xl:max-w-[92vw]
+            h-[70vh] sm:h-[78vh] md:h-[88vh]
+            max-h-[680px] sm:max-h-[820px] md:max-h-[960px]
           "
-          style={{
-            height: 'clamp(520px, 90vh, 960px)',
-          }}
         >
           {/* Film still */}
           <img
@@ -82,4 +81,3 @@ export default function LandingPage() {
     </div>
   );
 }
-

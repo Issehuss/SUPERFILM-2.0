@@ -2,6 +2,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import supabase from "../supabaseClient";
+import DirectorsCutBadge from "../components/DirectorsCutBadge";
 
 const normalizePoster = (posterPath) => {
   if (!posterPath) return null;
@@ -58,7 +59,7 @@ export default function ClubTakesArchive() {
           .select(
             `
             id, film_id, film_title, poster_path, rating, take, created_at,
-            profiles:profiles!user_id ( display_name, avatar_url, slug )
+            profiles:profiles!user_id ( display_name, avatar_url, slug, is_premium, plan )
           `
           )
           .eq("club_id", clubRow.id)
@@ -190,8 +191,14 @@ export default function ClubTakesArchive() {
                           ) : (
                             <span className="h-6 w-6 rounded-full bg-zinc-800 inline-block" />
                           )}
-                          <span className="text-zinc-200">
-                            {take.profiles?.display_name || "Member"}
+                          <span className="text-zinc-200 flex items-center gap-2">
+                            <span className="truncate">
+                              {take.profiles?.display_name || "Member"}
+                            </span>
+                            {(take.profiles?.is_premium === true ||
+                              String(take.profiles?.plan || "").toLowerCase() === "directors_cut") && (
+                              <DirectorsCutBadge className="ml-0" size="xs" />
+                            )}
                           </span>
                         </div>
                         <span>{new Date(take.created_at).toLocaleDateString()}</span>

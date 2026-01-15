@@ -2,6 +2,19 @@ import { useState } from "react";
 import useNotifications from "../hooks/useNotifications";
 import { Link } from "react-router-dom";
 
+function resolveNotificationHref(notification) {
+  const d = notification?.data || {};
+  if (notification?.type?.startsWith("club.membership.pending")) {
+    const clubParam = d.slug || d.club_slug || notification?.club_id;
+    return clubParam ? `/clubs/${clubParam}/requests` : "/notifications";
+  }
+  if (d.href) return d.href;
+  if (d.chat_path) return d.chat_path;
+  if (d.slug) return `/clubs/${d.slug}/chat`;
+  if (notification?.club_id) return `/clubs/${notification.club_id}/chat`;
+  return "/notifications";
+}
+
 export default function NotificationsPage() {
   const { items, loading, loadMore, hasMore, markItemRead, markAllAsRead } = useNotifications({ pageSize: 30 });
   const [confirmingAll, setConfirmingAll] = useState(false);
@@ -61,7 +74,7 @@ export default function NotificationsPage() {
               const d = n.data || {};
               const clubName = d.club_name || d.group_name || d.chat_name || d.title || "Club chat";
               const snippet = d.snippet || d.message || d.summary || "";
-              const href = d.href || d.chat_path || (d.slug ? `/clubs/${d.slug}/chat` : "/");
+              const href = resolveNotificationHref(n);
               return (
                 <li key={n.id} className={`p-5 ${!n.read_at ? "bg-white/[0.03]" : ""}`}>
                   <div className="flex items-start justify-between gap-3">

@@ -94,11 +94,11 @@ const go = () => {
       aria-label="Open club chat"
     >
       {/* animated edge (via ::before in CSS) */}
-      <div className="rounded-3xl bg-[#0f0f0f] px-4 py-4 md:px-6 md:py-5 relative">
+      <div className="rounded-3xl bg-[#0f0f0f] px-4 py-3 md:px-5 md:py-4 relative">
         <div className="flex items-center gap-4">
           <div className="relative">
-            <div className="p-3 rounded-xl bg-zinc-900 border border-zinc-800">
-              <MessageSquare className="w-6 h-6 text-yellow-400" />
+            <div className="p-2.5 rounded-xl bg-zinc-900 border border-zinc-800">
+              <MessageSquare className="w-5 h-5 text-yellow-400" />
             </div>
             {unread > 0 && (
               <span className="absolute -top-2 -right-2 bg-yellow-400 text-black text-xs font-bold rounded-full px-2 py-0.5">
