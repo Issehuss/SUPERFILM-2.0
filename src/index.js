@@ -28,4 +28,10 @@ root.render(
 );
 
 reportWebVitals();
-serviceWorkerRegistration.register();
+serviceWorkerRegistration.register({
+  onUpdate: (registration) => {
+    window.dispatchEvent(
+      new CustomEvent("sf:pwa-update", { detail: { registration } })
+    );
+  },
+});

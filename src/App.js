@@ -15,6 +15,7 @@ import { Toaster } from "react-hot-toast";
 import { trackPageView } from "./lib/analytics";
 import BetaBanner from "./components/BetaBanner";
 import { Home as HomeIcon, Users, Film, User as UserIcon } from "lucide-react";
+import PwaUpdateToast from "./components/PwaUpdateToast";
 
 import "./styles/glows.css";
 import NavActions from "./components/NavActions";
@@ -733,6 +734,7 @@ function MainShell() {
         </Suspense>
       </main>
 
+      <PwaUpdateToast />
       <Toaster position="top-center" />
       <Suspense fallback={null}>
         <SuperFilmFooter />
