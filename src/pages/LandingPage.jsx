@@ -1,6 +1,7 @@
 // src/pages/LandingPage.jsx
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import usePageVisibility from "../hooks/usePageVisibility";
 
 const carouselSlides = [
   { heading: "Your film community lives here.", subheading: "Find your taste. Build your club. Share the experience.", image: "/decision_to_leave.jpg" },
@@ -11,13 +12,15 @@ const carouselSlides = [
 
 export default function LandingPage() {
   const [index, setIndex] = useState(0);
+  const isVisible = usePageVisibility();
 
   useEffect(() => {
+    if (!isVisible) return;
     const id = setInterval(() => {
       setIndex((i) => (i + 1) % carouselSlides.length);
     }, 5000);
     return () => clearInterval(id);
-  }, []);
+  }, [isVisible]);
 
   const { heading, subheading, image } = carouselSlides[index];
 

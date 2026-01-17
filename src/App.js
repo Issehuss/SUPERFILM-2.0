@@ -9,13 +9,16 @@ import {
   useParams,
   Navigate,
 } from "react-router-dom";
-import { useState, useMemo, useEffect, Suspense, lazy } from "react";
+import { useState, useMemo, useEffect, useRef, Suspense, lazy } from "react";
 import debounce from "lodash.debounce";
 import { Toaster } from "react-hot-toast";
 import { trackPageView } from "./lib/analytics";
 import BetaBanner from "./components/BetaBanner";
 import { Home as HomeIcon, Users, Film, User as UserIcon } from "lucide-react";
 import PwaUpdateToast from "./components/PwaUpdateToast";
+import PwaInstallPrompt from "./components/PwaInstallPrompt";
+import usePerfLogger from "./hooks/usePerfLogger";
+import useMyClubs from "./hooks/useMyClubs";
 
 import "./styles/glows.css";
 import NavActions from "./components/NavActions";
@@ -74,6 +77,7 @@ const TermsPage = lazy(() => import("./pages/Terms.jsx"));
 const ProfileFollows = lazy(() => import("./pages/ProfileFollows.jsx"));
 const Watchlist = lazy(() => import("./pages/Watchlist.jsx"));
 const SettingsProfile = lazy(() => import("./pages/SettingsProfile.jsx"));
+const PwaInstall = lazy(() => import("./pages/PwaInstall.jsx"));
 
 // Premium/president-only pages
 const ClubSettings = lazy(() => import("./pages/ClubSettings.jsx"));
@@ -115,6 +119,14 @@ function PageViewTracker() {
     trackPageView(path);
   }, [location.pathname, location.search]);
   return null;
+}
+
+function isPwaInstalled() {
+  if (typeof window === "undefined") return false;
+  return (
+    window.matchMedia?.("(display-mode: standalone)")?.matches ||
+    window.navigator.standalone === true
+  );
 }
 
 /* ==================== GUARD: RequirePresidentPremium ==================== */
@@ -319,6 +331,11 @@ function MainShell() {
   const { user, isPremium, profile, loading: userLoading, isReady } = useUser();
   const location = useLocation();
   const navigate = useNavigate();
+  const pwaPromptedRef = useRef(false);
+  const perfEnabled =
+    typeof window !== "undefined" && localStorage.getItem("sf:perf") === "1";
+
+  usePerfLogger({ enabled: perfEnabled, intervalMs: 30000 });
 
   // Clears the onboarding "stuck" state if user already completed it (e.g., DB flag set) but local flag missing
   useEffect(() => {
@@ -351,6 +368,48 @@ function MainShell() {
     userLoading,
     isReady,
   ]);
+
+  useEffect(() => {
+    if (!user?.id || !isReady) return;
+    if (pwaPromptedRef.current) return;
+    pwaPromptedRef.current = true;
+
+    if (isPwaInstalled()) return;
+    try {
+      if (localStorage.getItem("sf:pwa-installed") === "1") return;
+    } catch {}
+
+    const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from("notifications")
+          .select("id, created_at, data")
+          .eq("user_id", user.id)
+          .eq("type", "pwa.install")
+          .order("created_at", { ascending: false })
+          .limit(1);
+
+        const latest = data?.[0] || null;
+        if (latest?.data?.dismissed) return;
+
+        if (latest?.created_at) {
+          const age = Date.now() - new Date(latest.created_at).getTime();
+          if (age < WEEK_MS) return;
+        }
+
+        await supabase.from("notifications").insert({
+          user_id: user.id,
+          type: "pwa.install",
+          data: {
+            title: "Install SuperFilm",
+            message: "Get instant access from your home screen.",
+            question: "Already got the PWA? Tap yes to dismiss this reminder.",
+          },
+        });
+      } catch {}
+    })();
+  }, [user?.id, isReady]);
 
 
   const [rawQuery, setRawQuery] = useState("");
@@ -703,6 +762,7 @@ function MainShell() {
             />
             <Route path="/settings/premium" element={<SettingsPremium />} />
             <Route path="/settings/profile" element={<SettingsProfile />} />
+            <Route path="/pwa" element={<PwaInstall />} />
             <Route path="/premium/success" element={<PremiumSuccess />} />
             <Route path="/directors-cut/success" element={<DirectorsCutSuccess />} />
 
@@ -734,6 +794,7 @@ function MainShell() {
         </Suspense>
       </main>
 
+      <PwaInstallPrompt />
       <PwaUpdateToast />
       <Toaster position="top-center" />
       <Suspense fallback={null}>
@@ -748,56 +809,173 @@ function MainShell() {
 function MobileNav() {
   const location = useLocation();
   const { user } = useUser();
+  const navigate = useNavigate();
+  const { clubs: myClubs, loading: clubsLoading } = useMyClubs();
+  const [clubsOpen, setClubsOpen] = useState(false);
+  const clubsRef = useRef(null);
+
+  useEffect(() => {
+    if (!clubsOpen) return;
+    function onDocClick(e) {
+      if (clubsRef.current && !clubsRef.current.contains(e.target)) {
+        setClubsOpen(false);
+      }
+    }
+    function onKey(e) {
+      if (e.key === "Escape") setClubsOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDocClick);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [clubsOpen]);
 
   // Always show on small screens; keep a minimal set of primary destinations
   return (
-    <nav
-      className="sm:hidden fixed bottom-0 inset-x-0 z-50 bg-black/85 backdrop-blur-xl border-t border-white/10"
-      style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 8px)" }}
-      aria-label="Mobile navigation"
-    >
-      <div className="mx-auto max-w-5xl px-4 py-2 flex items-center justify-around text-zinc-200 text-xs">
-        <NavLink
-          to="/"
-          className={({ isActive }) =>
-            `flex flex-col items-center gap-1 ${isActive ? "text-white" : "text-zinc-300"}`
-          }
-          aria-label="Home"
-        >
-          <HomeIcon size={18} />
-          <span>Home</span>
-        </NavLink>
-        <NavLink
-          to="/clubs"
-          className={({ isActive }) =>
-            `flex flex-col items-center gap-1 ${isActive ? "text-white" : "text-zinc-300"}`
-          }
-          aria-label="Clubs"
-        >
-          <Users size={18} />
-          <span>Clubs</span>
-        </NavLink>
-        <NavLink
-          to="/movies"
-          className={({ isActive }) =>
-            `flex flex-col items-center gap-1 ${isActive ? "text-white" : "text-zinc-300"}`
-          }
-          aria-label="Movies"
-        >
-          <Film size={18} />
-          <span>Movies</span>
-        </NavLink>
-        <NavLink
-          to={user ? "/profile" : "/auth"}
-          className={({ isActive }) =>
-            `flex flex-col items-center gap-1 ${isActive ? "text-white" : "text-zinc-300"}`
-          }
-          aria-label="Profile"
-        >
-          <UserIcon size={18} />
-          <span>{user ? "Profile" : "Sign in"}</span>
-        </NavLink>
-      </div>
-    </nav>
+    <>
+      {clubsOpen && (
+        <div
+          className="sm:hidden fixed inset-0 z-40 bg-black/60 backdrop-blur-[2px]"
+          aria-hidden="true"
+        />
+      )}
+
+      {clubsOpen && (
+        <div className="sm:hidden fixed inset-x-0 bottom-16 z-50 px-4" ref={clubsRef}>
+          <div className="rounded-2xl border border-white/10 bg-black/95 shadow-2xl">
+            <div className="px-4 pt-3 pb-2 text-xs uppercase tracking-wide text-zinc-400">
+              My Clubs
+            </div>
+            <div className="max-h-[45vh] overflow-auto">
+              {clubsLoading ? (
+                <div className="px-4 py-3 text-sm text-zinc-400">Loading clubs…</div>
+              ) : myClubs.length === 0 ? (
+                <div className="px-4 py-3 text-sm text-zinc-400">You haven’t joined a club yet.</div>
+              ) : (
+                myClubs.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => {
+                      setClubsOpen(false);
+                      navigate(`/clubs/${c.slug || c.id}`);
+                    }}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-left text-sm text-zinc-100 hover:bg-white/5"
+                  >
+                    <div className="h-9 w-9 rounded-full overflow-hidden border border-white/10 bg-zinc-900 shrink-0">
+                      {c.profile_image_url ? (
+                        <img
+                          src={c.profile_image_url}
+                          alt={c.name}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : null}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="truncate font-medium">{c.name}</div>
+                      <div className="text-xs text-zinc-400">
+                        {c.role ? c.role.replace("_", " ") : "member"}
+                      </div>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+            <div className="border-t border-white/10">
+              <button
+                type="button"
+                onClick={() => {
+                  setClubsOpen(false);
+                  navigate("/create-club");
+                }}
+                className="w-full px-4 py-3 text-sm text-white hover:bg-white/5 text-left"
+              >
+                Create a club
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setClubsOpen(false);
+                  navigate("/clubs");
+                }}
+                className="w-full px-4 py-3 text-sm text-yellow-400 hover:bg-white/5 text-left"
+              >
+                Browse all clubs
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <nav
+        className="sm:hidden fixed bottom-0 inset-x-0 z-50 bg-black/85 backdrop-blur-xl border-t border-white/10"
+        style={{ paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 8px)" }}
+        aria-label="Mobile navigation"
+      >
+        <div className="mx-auto max-w-5xl px-4 py-2 flex items-center justify-around text-zinc-200 text-xs">
+          <NavLink
+            to="/"
+            className={({ isActive }) =>
+              `flex flex-col items-center gap-1 ${isActive ? "text-white" : "text-zinc-300"}`
+            }
+            aria-label="Home"
+          >
+            <HomeIcon size={18} />
+            <span>Home</span>
+          </NavLink>
+
+          {user ? (
+            <button
+              type="button"
+              onClick={() => setClubsOpen((v) => !v)}
+              className={`flex flex-col items-center gap-1 ${
+                location.pathname.startsWith("/clubs") || clubsOpen
+                  ? "text-white"
+                  : "text-zinc-300"
+              }`}
+              aria-label="My clubs"
+              aria-expanded={clubsOpen ? "true" : "false"}
+            >
+              <Users size={18} />
+              <span>Clubs</span>
+            </button>
+          ) : (
+            <NavLink
+              to="/clubs"
+              className={({ isActive }) =>
+                `flex flex-col items-center gap-1 ${isActive ? "text-white" : "text-zinc-300"}`
+              }
+              aria-label="Clubs"
+            >
+              <Users size={18} />
+              <span>Clubs</span>
+            </NavLink>
+          )}
+
+          <NavLink
+            to="/movies"
+            className={({ isActive }) =>
+              `flex flex-col items-center gap-1 ${isActive ? "text-white" : "text-zinc-300"}`
+            }
+            aria-label="Movies"
+          >
+            <Film size={18} />
+            <span>Movies</span>
+          </NavLink>
+          <NavLink
+            to={user ? "/profile" : "/auth"}
+            className={({ isActive }) =>
+              `flex flex-col items-center gap-1 ${isActive ? "text-white" : "text-zinc-300"}`
+            }
+            aria-label="Profile"
+          >
+            <UserIcon size={18} />
+            <span>{user ? "Profile" : "Sign in"}</span>
+          </NavLink>
+        </div>
+      </nav>
+    </>
   );
 }

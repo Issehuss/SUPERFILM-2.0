@@ -6,6 +6,7 @@ import supabase from "../supabaseClient.js";
 import "../App.css";
 import "./Clubs.css";
 import { useUser } from "../context/UserContext";
+import usePageVisibility from "../hooks/usePageVisibility";
 import { Users, CalendarDays, Trophy, PlusCircle } from "lucide-react";
 import { Swiper, SwiperSlide } from "swiper/react";
 import "swiper/css";
@@ -299,6 +300,7 @@ export default function Clubs() {
   const [tipData, setTipData] = useState(null);
   const timerRef = useRef(null);
   const swiperRefs = useRef([]);
+  const isPageVisible = usePageVisibility();
 
   const clearTipTimer = () => {
     if (timerRef.current) {
@@ -584,9 +586,11 @@ export default function Clubs() {
       setShowTip(false);
       clearTipTimer();
       setTipData(getTooltipData(club));
-      timerRef.current = setTimeout(() => setShowTip(true), 1000);
+      if (isPageVisible) {
+        timerRef.current = setTimeout(() => setShowTip(true), 1000);
+      }
     },
-    [getTooltipData]
+    [getTooltipData, isPageVisible]
   );
 
   const handleLeave = useCallback(() => cancelHover(), [cancelHover]);

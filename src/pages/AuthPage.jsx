@@ -51,7 +51,7 @@ const initialMode = search.get("mode") === "signup" ? "signup" : "signin";
       if (error) throw error;
       setMsg({
         type: "success",
-        text: "Check your email to confirm your account. After confirming, return here to sign in.",
+        text: "Check your email to confirm your account. Please check your junk/spam folder too. After clicking the link, return here to sign in.",
       });
       setMode("signin");
     } catch (err) {

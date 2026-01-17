@@ -65,7 +65,7 @@ export default function FollowButton({ profileId }) {
     <button
       onClick={toggle}
       disabled={disabled || loading}
-      className={`rounded-full px-3 py-1 text-sm border
+      className={`rounded-full px-2.5 sm:px-3 py-1 text-xs sm:text-sm border
         ${isFollowing ? 'border-zinc-600 bg-zinc-800 text-zinc-200' : 'border-yellow-400 text-yellow-300'}
         disabled:opacity-50`}
       aria-label={isFollowing ? "Unfollow" : "Follow"}

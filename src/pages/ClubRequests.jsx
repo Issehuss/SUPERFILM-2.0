@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import supabase from "../supabaseClient";
 import { useUser } from "../context/UserContext";
 import { Check, X, Users } from "lucide-react";
+import { toast } from "react-hot-toast";
 import DirectorsCutBadge from "../components/DirectorsCutBadge";
 
 const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -130,11 +131,23 @@ const { error: updErr } = await supabase
   .eq("id", r.id);
 if (updErr) throw updErr;
 
-// (no extra notification here — the RPC already sent the welcome message)
+// Notify requester
+await supabase.from("notifications").insert({
+  user_id: r.user_id,
+  club_id: club.id,
+  type: "club.membership.approved",
+  data: {
+    club_name: club.name,
+    slug: club.slug,
+    href: `/clubs/${club.slug || club.id}`,
+    message: `Your request to join ${club.name} was accepted.`,
+  },
+});
 
 
       // remove from list
       setRows((prev) => prev.filter((x) => x.id !== r.id));
+      toast.success("You accepted this user’s request.");
     } catch (e) {
       setErr(e.message || "Approve failed");
     } finally {

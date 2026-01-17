@@ -187,17 +187,19 @@ export default function BannerPicker({ onSelect }) {
       {loading && <p className="mt-3 text-zinc-400">Searching backdrops...</p>}
 
       {!!backdrops.length && (
-        <div className="mt-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
-          {backdrops.map((item) => (
-            <img
-              key={item.id + "_" + item.url}
-              src={item.url.replace("/original/", "/w500/")} // lighter thumbs in the grid
-              alt={item.title || "Backdrop"}
-              className="rounded-lg cursor-pointer hover:opacity-80 transition"
-              onClick={() => handleImageClick(item)}
-              loading="lazy"
-            />
-          ))}
+        <div className="mt-4 max-h-64 overflow-y-auto pr-1">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
+            {backdrops.map((item) => (
+              <img
+                key={item.id + "_" + item.url}
+                src={item.url.replace("/original/", "/w500/")} // lighter thumbs in the grid
+                alt={item.title || "Backdrop"}
+                className="rounded-lg cursor-pointer hover:opacity-80 transition"
+                onClick={() => handleImageClick(item)}
+                loading="lazy"
+              />
+            ))}
+          </div>
         </div>
       )}
 

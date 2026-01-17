@@ -1,16 +1,31 @@
 // src/hooks/useWatchlist.js
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import supabase from "../supabaseClient.js";
 import { useUser } from "../context/UserContext";
 
-export default function useWatchlist(userId) {
+export default function useWatchlist(userId, options = {}) {
   const { user, sessionLoaded } = useUser();
   const effectiveUserId = userId || user?.id || null;
+  const {
+    auto = true,
+    realtime = true,
+    useCache = false,
+    refreshKey = 0,
+  } = options || {};
 
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(Boolean(effectiveUserId));
   const [hasLoaded, setHasLoaded] = useState(false);
   const [error, setError] = useState(null);
+
+  const cacheKey = effectiveUserId ? `sf.watchlist.cache.v1:${effectiveUserId}` : null;
+  const lastRefreshRef = useRef(refreshKey);
+  const cacheItems = useCallback((next) => {
+    if (!useCache || !cacheKey) return;
+    try {
+      sessionStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: next }));
+    } catch {}
+  }, [useCache, cacheKey]);
 
   const fetchWatchlist = useCallback(async () => {
     if (!sessionLoaded) return;
@@ -41,12 +56,35 @@ export default function useWatchlist(userId) {
         poster_path: r.poster_path || "",
       }));
       setItems(mapped);
+      cacheItems(mapped);
     }
     setLoading(false);
     setHasLoaded(true);
-  }, [effectiveUserId, hasLoaded, sessionLoaded]);
+  }, [effectiveUserId, hasLoaded, sessionLoaded, cacheItems]);
 
-  useEffect(() => { fetchWatchlist(); }, [fetchWatchlist]);
+  useEffect(() => {
+    if (useCache && cacheKey) {
+      try {
+        const raw = sessionStorage.getItem(cacheKey);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed?.data) {
+            setItems(parsed.data);
+            setLoading(false);
+            setHasLoaded(true);
+          }
+        }
+      } catch {}
+    }
+  }, [useCache, cacheKey]);
+
+  useEffect(() => {
+    const shouldForceRefresh = refreshKey !== lastRefreshRef.current;
+    const shouldFetch = auto || !hasLoaded || shouldForceRefresh;
+    if (!shouldFetch) return;
+    fetchWatchlist();
+    if (shouldForceRefresh) lastRefreshRef.current = refreshKey;
+  }, [fetchWatchlist, auto, hasLoaded, refreshKey]);
 
   useEffect(() => {
     setHasLoaded(false);
@@ -55,7 +93,7 @@ export default function useWatchlist(userId) {
 
   // Realtime refresh
   useEffect(() => {
-    if (!sessionLoaded || !effectiveUserId) return;
+    if (!realtime || !sessionLoaded || !effectiveUserId) return;
     const channel = supabase
       .channel(`watchlist:${effectiveUserId}`)
       .on(
@@ -65,7 +103,7 @@ export default function useWatchlist(userId) {
       )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [effectiveUserId, fetchWatchlist, sessionLoaded]);
+  }, [effectiveUserId, fetchWatchlist, sessionLoaded, realtime]);
 
   // Retry after a token refresh/sign-in so stale JWTs never freeze the UI
   useEffect(() => {
@@ -101,10 +139,14 @@ export default function useWatchlist(userId) {
         poster_path: movie.poster_path || movie.posterPath || "",
       };
 
-      setItems((prev) => [
-        { id: row.movie_id, title: row.title, poster_path: row.poster_path },
-        ...prev.filter((m) => m.id !== row.movie_id),
-      ]);
+      setItems((prev) => {
+        const next = [
+          { id: row.movie_id, title: row.title, poster_path: row.poster_path },
+          ...prev.filter((m) => m.id !== row.movie_id),
+        ];
+        cacheItems(next);
+        return next;
+      });
 
       const { error } = await supabase.from("user_watchlist").insert(row);
       if (error) {
@@ -114,7 +156,7 @@ export default function useWatchlist(userId) {
       }
       return { ok: true };
     },
-    [user?.id, fetchWatchlist]
+    [user?.id, fetchWatchlist, cacheItems]
   );
 
   // Remove item (current signed-in user only)
@@ -126,7 +168,11 @@ export default function useWatchlist(userId) {
         return { error: err };
       }
 
-      setItems((prev) => prev.filter((m) => m.id !== Number(movieId)));
+      setItems((prev) => {
+        const next = prev.filter((m) => m.id !== Number(movieId));
+        cacheItems(next);
+        return next;
+      });
 
       const { error } = await supabase
         .from("user_watchlist")
@@ -141,7 +187,7 @@ export default function useWatchlist(userId) {
       }
       return { ok: true };
     },
-    [user?.id, fetchWatchlist]
+    [user?.id, fetchWatchlist, cacheItems]
   );
 
   return useMemo(

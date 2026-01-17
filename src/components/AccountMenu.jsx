@@ -10,6 +10,8 @@ import {
   Lock,
   Crown,
   CreditCard,
+  Users,
+  Download,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useUser } from "../context/UserContext";
@@ -80,6 +82,11 @@ export default function AccountMenu({ className = "" }) {
     if (slug) navigate(`/u/${slug}`);
   };
 
+  const goProfileSettings = () => {
+    setOpen(false);
+    navigate("/settings/profile");
+  };
+
   const goClubSettings = () => {
     setOpen(false);
     if (!isPremium || !presidentClub) {
@@ -119,6 +126,20 @@ export default function AccountMenu({ className = "" }) {
     navigate(isPremium ? "/settings/premium" : "/premium");
   };
 
+  const goClubRequests = () => {
+    if (!presidentClub) return;
+    setOpen(false);
+    const path = presidentClub.slug
+      ? `/clubs/${presidentClub.slug}/requests`
+      : `/clubs/${presidentClub.id}/requests`;
+    navigate(path);
+  };
+
+  const goPwaInstall = () => {
+    setOpen(false);
+    navigate("/pwa");
+  };
+
   // ✅ REAL sign-out handler
   const handleSignOut = async () => {
     if (signingOut) return;
@@ -141,6 +162,7 @@ export default function AccountMenu({ className = "" }) {
   };
 
   const premiumEnabled = isPremium && !!presidentClub;
+  const requestsEnabled = !!presidentClub;
 
   return (
     <div className={`relative ${className}`} ref={ref}>
@@ -195,6 +217,16 @@ export default function AccountMenu({ className = "" }) {
           >
             <UserIcon className="h-4 w-4" />
             <span>My Profile</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={goProfileSettings}
+            role="menuitem"
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-white/10 rounded-2xl"
+          >
+            <Settings className="h-4 w-4" />
+            <span>Profile Settings</span>
           </button>
 
           {/* Premium entry */}
@@ -260,7 +292,30 @@ export default function AccountMenu({ className = "" }) {
             <span>Manage Invites</span>
           </button>
 
+          <button
+            type="button"
+            onClick={goClubRequests}
+            role="menuitem"
+            className={`w-full flex items-center gap-2 px-3 py-2 text-sm rounded-2xl ${
+              requestsEnabled ? "hover:bg-white/10" : "opacity-60 hover:bg-white/5"
+            }`}
+            title={requestsEnabled ? "Review membership requests" : "Club president required"}
+          >
+            <Users className="h-4 w-4" />
+            <span>Club Requests</span>
+          </button>
+
           <div className="h-px bg-white/10 my-1" />
+
+          <button
+            type="button"
+            onClick={goPwaInstall}
+            role="menuitem"
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-white/10 rounded-2xl"
+          >
+            <Download className="h-4 w-4" />
+            <span>Install SuperFilm</span>
+          </button>
 
 {/* View Tutorial Again */}
 <button

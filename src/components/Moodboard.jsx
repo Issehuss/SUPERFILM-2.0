@@ -21,6 +21,8 @@ export default function Moodboard({
   className = "",
   maxPreview = 6,
   usePremiumTheme = false,
+  disableAutoRefresh = false,
+  refreshKey = 0,
 }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -59,6 +61,9 @@ export default function Moodboard({
   const SIZE_ORDER = ["m", "s", "w", "t"];
   const OVERLAP = 2; // tiny overlap between tiles
 
+  const cacheKey = profileId ? `sf.moodboard.cache.v1:${profileId}` : null;
+  const lastRefreshRef = useRef({ key: refreshKey, tick: refreshTick });
+
   // Load from DB (profiles.moodboard jsonb) or fallback to localStorage
   useEffect(() => {
     let cancelled = false;
@@ -66,6 +71,22 @@ export default function Moodboard({
       setLoading(true);
       setError("");
       try {
+        const shouldForceRefresh =
+          refreshKey !== lastRefreshRef.current.key ||
+          refreshTick !== lastRefreshRef.current.tick;
+        if (disableAutoRefresh && cacheKey && !shouldForceRefresh) {
+          try {
+            const raw = sessionStorage.getItem(cacheKey);
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              if (parsed?.data && !cancelled) {
+                setItems(parsed.data);
+                setLoading(false);
+                return;
+              }
+            }
+          } catch {}
+        }
         if (!profileId) {
           const ls = localStorage.getItem("sf_moodboard_preview");
           if (!cancelled) setItems(ls ? JSON.parse(ls) : []);
@@ -92,25 +113,35 @@ export default function Moodboard({
           setItems(arr);
           setLoading(false);
         }
+        if (cacheKey) {
+          try {
+            sessionStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: arr }));
+          } catch {}
+        }
       } catch {
         const ls = localStorage.getItem("sf_moodboard_preview");
         if (!cancelled) {
           setItems(ls ? JSON.parse(ls) : []);
           setLoading(false);
         }
+      } finally {
+        lastRefreshRef.current = { key: refreshKey, tick: refreshTick };
       }
     }
     load();
     return () => {
       cancelled = true;
     };
-  }, [profileId, refreshTick]);
+  }, [profileId, refreshTick, disableAutoRefresh, cacheKey, refreshKey]);
 
   // Persist to DB (if available) + localStorage as backup
   async function persist(next) {
     setItems(next);
     try {
       localStorage.setItem("sf_moodboard_preview", JSON.stringify(next));
+      if (cacheKey) {
+        sessionStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: next }));
+      }
       if (!profileId) return;
       await supabase.from("profiles").update({ moodboard: next }).eq("id", profileId);
     } catch {
@@ -148,7 +179,6 @@ export default function Moodboard({
     // Block only when adding a brand-new tile (not replacing)
     if (replaceIndex == null && items.length >= limits.moodboardTiles) {
       const limitCount = limits.moodboardTiles;
-      const premiumLimit = 120;
       if (!limitHitOnceRef.current) {
         trackEvent("limit_hit", {
           feature: "moodboard",
@@ -158,7 +188,7 @@ export default function Moodboard({
       }
       const copy = isPremium
         ? `Moodboard limit reached (${limitCount} stills).`
-        : `You’ve reached the free Moodboard limit (${limitCount} stills). Director’s Cut unlocks up to ${premiumLimit} stills — try it free for 14 days.`;
+        : `You’ve reached the free Moodboard limit (${limitCount} stills). Director’s Cut unlocks unlimited stills — try it free for 14 days.`;
       const showUpsell = !isPremium;
 
       toast((t) => (
@@ -202,7 +232,7 @@ export default function Moodboard({
     if (replaceIndex == null && items.length >= limits.moodboardTiles) {
       const limitCopy = isPremium
         ? "Moodboard limit reached."
-        : `You’ve reached the free Moodboard limit (${limits.moodboardTiles} stills). Director’s Cut unlocks up to 120 stills — try it free for 14 days.`;
+        : `You’ve reached the free Moodboard limit (${limits.moodboardTiles} stills). Director’s Cut unlocks unlimited stills — try it free for 14 days.`;
       toast(limitCopy, {
         duration: 6000,
         style: {
@@ -225,15 +255,15 @@ export default function Moodboard({
 
   const preview = useMemo(() => items.slice(0, maxPreview), [items, maxPreview]);
 
-  if (loading) {
   const themed = usePremiumTheme || isPremium;
 
-  return (
+  if (loading) {
+    return (
     <div
       className={
         themed
-          ? `themed-card themed-outline forge rounded-2xl p-4 ${className}`
-          : `rounded-2xl border border-zinc-800 bg-black/40 p-4 ${className}`
+          ? `themed-card themed-outline forge rounded-2xl p-3 sm:p-4 ${className}`
+          : `rounded-2xl border border-zinc-800 bg-black/40 p-3 sm:p-4 ${className}`
       }
     >
         <div className="h-40 animate-pulse rounded-xl bg-zinc-900" />
@@ -244,19 +274,24 @@ export default function Moodboard({
   return (
     <div
       className={
-        isOwner && typeof window !== "undefined" && window?.document?.body?.dataset?.theme === "premium"
-          ? `themed-card themed-outline forge rounded-2xl p-4 ${className}`
-          : `rounded-2xl border border-zinc-800 bg-black/40 p-4 ${className}`
+        themed
+          ? `themed-card themed-outline forge rounded-2xl p-3 sm:p-4 ${className}`
+          : `rounded-2xl border border-zinc-800 bg-black/40 p-3 sm:p-4 ${className}`
       }
     >
       <div className="mb-2 flex items-center justify-between">
-        <h3 className="text-lg font-semibold text-white">Moodboard</h3>
+        <div>
+          <h3 className="text-base sm:text-lg font-semibold text-white">Moodboard</h3>
+          <div className="text-[11px] sm:text-xs text-zinc-500">
+            If you have more than {maxPreview} tiles, use Expand to see everything.
+          </div>
+        </div>
         <div className="flex items-center gap-2">
           {isOwner && (
             <button
               type="button"
               onClick={handleAddTileRequest}
-              className="inline-flex items-center gap-2 rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-white hover:bg-zinc-900"
+              className="inline-flex items-center gap-2 rounded-lg border border-zinc-700 px-2.5 sm:px-3 py-1 text-xs sm:text-sm text-white hover:bg-zinc-900"
               title="Add item"
             >
               <Plus className="h-4 w-4" />
@@ -266,7 +301,7 @@ export default function Moodboard({
           <button
             type="button"
             onClick={() => setOpen(true)}
-            className="inline-flex items-center gap-2 rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-white hover:bg-zinc-900"
+            className="inline-flex items-center gap-2 rounded-lg border border-zinc-700 px-2.5 sm:px-3 py-1 text-xs sm:text-sm text-white hover:bg-zinc-900"
             title="Expand"
           >
             <ArrowUpRight className="h-4 w-4" />
@@ -277,7 +312,7 @@ export default function Moodboard({
       {/* helper text intentionally removed per request */}
 
       {/* Collage preview: tight grid, no borders, slight overlap */}
-      <div className="grid grid-cols-6 auto-rows-[60px] gap-0" style={{ overflow: "visible" }}>
+      <div className="grid grid-cols-6 auto-rows-[48px] sm:auto-rows-[60px] gap-0" style={{ overflow: "visible" }}>
         {preview.map((it, i) => (
           <Tile
             key={i}
@@ -326,7 +361,7 @@ export default function Moodboard({
             </div>
 
             {/* Collage fullscreen: taller rows, same tight style */}
-            <div className="grid grid-cols-6 auto-rows-[80px] gap-0" style={{ overflow: "visible" }}>
+            <div className="grid grid-cols-6 auto-rows-[64px] sm:auto-rows-[80px] gap-0" style={{ overflow: "visible" }}>
               {items.map((it, i) => (
                 <Tile
                   key={`full-${i}`}
@@ -672,39 +707,41 @@ function AddReplaceDialog({ onCancel, onConfirm, initialType = "image" }) {
                   </button>
                 </div>
 
-                <div className="grid grid-cols-3 gap-2">
-                  {searching ? (
-                    <div className="col-span-3 h-24 animate-pulse rounded-md bg-zinc-900" />
-                  ) : (
-                    results.map((m) => {
-                      const poster = m?.backdropUrl || m?.posterUrl || "";
-                      if (!poster) return null;
-                      return (
-                        <button
-                          key={m.id}
-                          type="button"
-                          onClick={() => {
-                            onConfirm({
-                              type: "image",
-                              url: poster,
-                              title: m.title || "",
-                              source: "tmdb",
-                            });
-                            onCancel(); // close after picking
-                          }}
-                          className="aspect-[2/3] overflow-hidden rounded-md border border-zinc-800 hover:ring-2 hover:ring-yellow-500"
-                          title="Use this image"
-                        >
-                          <img
-                            src={poster}
-                            alt="TMDB result"
-                            className="h-full w-full object-cover"
-                            loading="lazy"
-                          />
-                        </button>
-                      );
-                    })
-                  )}
+                <div className="max-h-64 overflow-y-auto pr-1">
+                  <div className="grid grid-cols-3 gap-2">
+                    {searching ? (
+                      <div className="col-span-3 h-24 animate-pulse rounded-md bg-zinc-900" />
+                    ) : (
+                      results.map((m) => {
+                        const poster = m?.backdropUrl || m?.posterUrl || "";
+                        if (!poster) return null;
+                        return (
+                          <button
+                            key={m.id}
+                            type="button"
+                            onClick={() => {
+                              onConfirm({
+                                type: "image",
+                                url: poster,
+                                title: m.title || "",
+                                source: "tmdb",
+                              });
+                              onCancel(); // close after picking
+                            }}
+                            className="aspect-[2/3] overflow-hidden rounded-md border border-zinc-800 hover:ring-2 hover:ring-yellow-500"
+                            title="Use this image"
+                          >
+                            <img
+                              src={poster}
+                              alt="TMDB result"
+                              className="h-full w-full object-cover"
+                              loading="lazy"
+                            />
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
                 </div>
 
                 {tmdbErr ? <p className="mt-2 text-xs text-red-400">{tmdbErr}</p> : null}

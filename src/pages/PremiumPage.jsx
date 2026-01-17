@@ -85,6 +85,9 @@ export default function PremiumPage() {
         <Feature tone="sky" title="Dynamic Profile Themes">
           Unlock extra visual themes inspired by cinema movements and moods such as Neon Nights and Golden Age Noir.
         </Feature>
+        <Feature tone="amber" title="Premium Banner Gradients">
+          Add cinematic gradient overlays to your profile banner for extra depth and polish.
+        </Feature>
         <Feature tone="emerald" title="More Glow and Outline Styles">
           Expand your Taste Card palette with rare glow effects and outlines.
         </Feature>

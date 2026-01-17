@@ -19,14 +19,22 @@ export default function useEntitlements() {
   const limitHitRef = useMemo(() => ({ moodboard: false, clubs: false }), []);
 
   // ─────────────────────────────── Plan derivation ───────────────────────────────
-  const plan = (profile?.plan || "").toLowerCase();
-  const isPremium = profile?.is_premium === true || plan === "directors_cut";
+  const normalizePlan = (value) =>
+    String(value || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+  const plan = normalizePlan(profile?.plan);
+  const isPremium =
+    profile?.is_premium === true ||
+    plan === "directors_cut" ||
+    plan === "premium";
   const resolvedPlan = plan || (isPremium ? "directors_cut" : "free");
 
   // Define limits per plan (client-side mirror of the DB function)
   const LIMITS = {
-    free: { clubs: 1, moodboardTiles: 6 },
-    directors_cut: { clubs: 5, moodboardTiles: 120 }, // generous cap; server should enforce ultimate limit
+    free: { clubs: 3, moodboardTiles: 6 },
+    directors_cut: { clubs: 10, moodboardTiles: Number.POSITIVE_INFINITY },
   };
   const limitForPlan = LIMITS[resolvedPlan]?.clubs ?? LIMITS.free.clubs;
   const moodboardTiles = LIMITS[resolvedPlan]?.moodboardTiles ?? LIMITS.free.moodboardTiles;

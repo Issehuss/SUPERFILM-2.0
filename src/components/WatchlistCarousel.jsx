@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import useWatchlist from "../hooks/useWatchlist";
 import TmdbImage from "./TmdbImage";
+import usePageVisibility from "../hooks/usePageVisibility";
 
 export default function WatchlistCarousel({
   userId,
@@ -16,6 +17,7 @@ export default function WatchlistCarousel({
   const [paused, setPaused] = useState(false);
   const timerRef = useRef(null);
   const navigate = useNavigate();
+  const isVisible = usePageVisibility();
 
   // Respect reduced motion
   const prefersReducedMotion = typeof window !== "undefined" &&
@@ -25,12 +27,12 @@ export default function WatchlistCarousel({
   // Auto-advance
   useEffect(() => {
     if (slides.length <= 1) return;
-    if (paused || prefersReducedMotion) return;
+    if (!isVisible || paused || prefersReducedMotion) return;
     timerRef.current = setInterval(() => {
       setIdx((i) => (i + 1) % slides.length);
     }, intervalMs);
     return () => clearInterval(timerRef.current);
-  }, [slides.length, intervalMs, paused, prefersReducedMotion]);
+  }, [slides.length, intervalMs, paused, prefersReducedMotion, isVisible]);
 
   // Keyboard nav
   useEffect(() => {

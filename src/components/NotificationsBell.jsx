@@ -9,6 +9,7 @@ import {
   Crown,
   UserPlus,
   Users as UsersIcon,
+  Download,
 } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import useNotifications from "../hooks/useNotifications";
@@ -35,6 +36,7 @@ function typeIcon(type) {
   if (type?.startsWith("club.role")) return <Crown size={16} className="shrink-0" />;
   if (type?.startsWith("profile.follow")) return <UserPlus size={16} className="shrink-0" />;
   if (type?.startsWith("screening.")) return <CalendarClock size={16} className="shrink-0" />;
+  if (type?.startsWith("pwa.install")) return <Download size={16} className="shrink-0" />;
   return <Bell size={16} className="shrink-0" />;
 }
 
@@ -61,6 +63,7 @@ export default function NotificationsBell() {
   const navigate = useNavigate();
   const [syntheticItems, setSyntheticItems] = useState([]);
   const [syntheticUnread, setSyntheticUnread] = useState(0);
+  const [hiddenIds, setHiddenIds] = useState(() => new Set());
 
   // Admin/Staff clubs with pending join requests
   const [adminClubs, setAdminClubs] = useState([]); // [{club_id, name, slug, pending}]
@@ -249,10 +252,33 @@ export default function NotificationsBell() {
   // 🔒 If not signed in, hide bell entirely (no markup rendered)
   if (!user) return null;
 
-  const mergedItems = [...syntheticItems, ...items].sort(
+  const mergedItems = [...syntheticItems, ...items]
+    .filter((n) => !hiddenIds.has(n.id))
+    .sort(
     (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
   );
   const totalUnread = (unread || 0) + (syntheticUnread || 0);
+
+  const dismissPwa = async (e, n) => {
+    e.stopPropagation();
+    if (!n?.id || n.id?.startsWith("synthetic-")) return;
+    const now = new Date().toISOString();
+    try {
+      await supabase
+        .from("notifications")
+        .update({
+          read_at: now,
+          seen_at: now,
+          data: { ...(n.data || {}), dismissed: true, dismissed_at: now },
+        })
+        .eq("id", n.id);
+    } catch {}
+    await markItemRead(n.id);
+    setHiddenIds((prev) => new Set(prev).add(n.id));
+    try {
+      localStorage.setItem("sf:pwa-installed", "1");
+    } catch {}
+  };
 
   return (
     <div className="relative" ref={ref}>
@@ -335,6 +361,7 @@ export default function NotificationsBell() {
               {mergedItems.slice(0, 12).map((n) => {
                 const isUnread = !n.read_at && !n.id?.startsWith("synthetic-");
                 const d = n.data || {};
+                const isPwa = n.type?.startsWith("pwa.install");
                 const clubName =
                   d.club_name || d.group_name || d.chat_name || d.title || "Club chat";
                 const snippet = d.snippet || d.message || d.summary || "";
@@ -358,14 +385,28 @@ export default function NotificationsBell() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className={`truncate ${isUnread ? "font-semibold" : "font-medium"}`}>
-                          {n.type?.startsWith("chat.mention")
+                          {isPwa
+                            ? d.title || "Install SuperFilm"
+                            : n.type?.startsWith("chat.mention")
                             ? `Mention in ${clubName}`
                             : n.type?.startsWith("chat.new")
                             ? `New messages in ${clubName}`
                             : d.title || clubName}
                         </div>
                         {snippet && <div className="truncate text-zinc-400">{snippet}</div>}
+                        {isPwa && d.question && (
+                          <div className="mt-1 text-xs text-zinc-400">{d.question}</div>
+                        )}
                         <div className="text-xs text-zinc-500 mt-0.5">{timeAgo(n.created_at)}</div>
+                        {isPwa && (
+                          <button
+                            type="button"
+                            onClick={(e) => dismissPwa(e, n)}
+                            className="mt-2 inline-flex items-center rounded-full bg-white/10 px-2.5 py-1 text-[11px] text-zinc-200 hover:bg-white/15"
+                          >
+                            Yes, installed
+                          </button>
+                        )}
                       </div>
                     </div>
                   </li>

@@ -7,11 +7,13 @@ import Slide from "./Slide";
 import "./onboarding.css";
 import supabase from "../../supabaseClient";
 import { useUser } from "../../context/UserContext";
+import usePageVisibility from "../../hooks/usePageVisibility";
 
 export default function OnboardingTutorial() {
   const [index, setIndex] = useState(0);
   const navigate = useNavigate();
   const { user } = useUser();
+  const isVisible = usePageVisibility();
 
   const current = slides[index];
   const lastIndex = slides.length - 1;
@@ -29,7 +31,7 @@ export default function OnboardingTutorial() {
 
   // Auto-rotate every 2s until the last slide
   useEffect(() => {
-    if (index >= lastIndex) return;
+    if (index >= lastIndex || !isVisible) return;
     const t = setInterval(() => {
       setIndex((i) => {
         if (i >= lastIndex) return i;
@@ -37,7 +39,7 @@ export default function OnboardingTutorial() {
       });
     }, 5000);
     return () => clearInterval(t);
-  }, [index, lastIndex]);
+  }, [index, lastIndex, isVisible]);
 
   async function finishOnboarding() {
     // Fire-and-forget profile flag updates

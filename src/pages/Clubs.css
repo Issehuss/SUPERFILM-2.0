@@ -31,8 +31,8 @@
 
 @media (max-width: 640px) {
   .clubs2 .swiper-slide {
-    width: 60vw !important;
-    flex-basis: 60vw !important;
+    width: clamp(120px, 33vw, 170px) !important;
+    flex-basis: clamp(120px, 33vw, 170px) !important;
   }
 }
 

@@ -16,6 +16,7 @@ import {
 import { useUser } from "../context/UserContext";
 import supabase from "../supabaseClient.js";
 import useWatchlist from "../hooks/useWatchlist";
+import usePageVisibility from "../hooks/usePageVisibility";
 import LeaderboardWideCard from "../components/LeaderboardWideCard.jsx";
 import { env as ENV } from "../lib/env";
 import TmdbImage from "../components/TmdbImage";
@@ -292,6 +293,7 @@ export default function HomeSignedIn() {
   const [wlIndex, setWlIndex] = useState(0);
   const [wlMeta, setWlMeta] = useState({});
   const [leaderboardReady, setLeaderboardReady] = useState(false);
+  const isPageVisible = usePageVisibility();
 
   /* ============ memberships -> primary club ============ */
   useEffect(() => {
@@ -772,11 +774,12 @@ export default function HomeSignedIn() {
 
   useEffect(() => {
     if (!homeWatchlist || homeWatchlist.length <= 1) return;
+    if (!isPageVisible) return;
     const t = setInterval(() => {
       setWlIndex((i) => (i + 1) % homeWatchlist.length);
     }, 5000);
     return () => clearInterval(t);
-  }, [homeWatchlist]);
+  }, [homeWatchlist, isPageVisible]);
 
   const wlCurrent = homeWatchlist?.[wlIndex] || null;
   const wlId = wlCurrent ? wlCurrent.id ?? wlCurrent.movie_id : null;

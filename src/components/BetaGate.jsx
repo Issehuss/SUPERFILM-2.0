@@ -106,8 +106,16 @@ export default function BetaGate({ children }) {
           </button>
         )}
         {handoff && (
-          <div className="beta-gate__handoff">
-            Loading... if you don’t see the app, please refresh.
+          <div className="beta-gate__handoff" role="status" aria-live="polite">
+            <div className="beta-gate__handoff-card">
+              <div className="beta-gate__spinner" aria-hidden />
+              <div>
+                <div className="beta-gate__handoff-title">Loading SuperFilm…</div>
+                <div className="beta-gate__handoff-sub">
+                  Preparing your session.
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </>

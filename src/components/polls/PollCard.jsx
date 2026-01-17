@@ -1,5 +1,5 @@
 // src/components/polls/PollCard.jsx
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import supabase from "../../supabaseClient";
 import { useUser } from "../../context/UserContext";
 
@@ -7,10 +7,12 @@ export default function PollCard({ pollId }) {
   const { user } = useUser();
   const uid = user?.id || null;
 
+  const rootRef = useRef(null);
   const [poll, setPoll] = useState(null);
   const [options, setOptions] = useState([]);
   const [myVotes, setMyVotes] = useState(new Set());     // Set<option_id>
   const [counts, setCounts] = useState({});              // { [option_id]: number }
+  const [isVisible, setIsVisible] = useState(true);
 
   const totalVotes = useMemo(
     () => Object.values(counts).reduce((a, b) => a + b, 0),
@@ -42,6 +44,25 @@ export default function PollCard({ pollId }) {
   // Initial load
   useEffect(() => { load(); }, [load]);
 
+  // Track visibility on screen to avoid background polling
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        setIsVisible(!!entry?.isIntersecting);
+      },
+      { threshold: 0.15 }
+    );
+    obs.observe(el);
+    return () => {
+      try {
+        obs.disconnect();
+      } catch {}
+    };
+  }, []);
+
   // Realtime (if available)
   useEffect(() => {
     if (!pollId) return;
@@ -53,16 +74,23 @@ export default function PollCard({ pollId }) {
     return () => { supabase.removeChannel(ch); };
   }, [pollId, load]);
 
-  // Lightweight polling fallback (works even if realtime not enabled)
+  // Lightweight polling fallback (only when visible)
   useEffect(() => {
-    const interval = setInterval(load, 4000);
+    if (!pollId || !isVisible) return;
+    if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+    const interval = setInterval(load, 12000);
     const onFocus = () => load();
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") load();
+    };
     window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
     return () => {
       clearInterval(interval);
       window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [load]);
+  }, [pollId, load, isVisible]);
 
   // Optimistic vote helper
   const applyOptimistic = useCallback((optionId) => {
@@ -130,7 +158,7 @@ export default function PollCard({ pollId }) {
   if (!poll) return null;
 
   return (
-    <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-4">
+    <div ref={rootRef} className="rounded-2xl border border-zinc-800 bg-zinc-900/80 p-4">
       <div className="flex items-center justify-between mb-3">
         <div>
           <div className="text-sm text-zinc-400">Poll</div>

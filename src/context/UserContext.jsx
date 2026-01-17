@@ -180,7 +180,10 @@ function UserProvider({ children }) {
   /* ---------------------------------------------------------------------- */
   // Single source of truth for entitlements: profiles
   const isPremium = useMemo(() => {
-    const plan = String(profile?.plan || "").toLowerCase();
+    const plan = String(profile?.plan || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
     const planHit = plan === "premium" || plan === "directors_cut";
     return profile?.is_premium === true || planHit;
   }, [profile?.is_premium, profile?.plan]);

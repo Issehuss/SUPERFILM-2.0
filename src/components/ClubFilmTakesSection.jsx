@@ -4,6 +4,7 @@ import supabase from "../supabaseClient";
 import { useUser } from "../context/UserContext";
 import { createNotification } from "../utils/notify";
 import DirectorsCutBadge from "./DirectorsCutBadge";
+import usePageVisibility from "../hooks/usePageVisibility";
 
 const CLAPS_TABLE = "club_take_claps"; // ← use the actual table you created
 
@@ -21,6 +22,7 @@ export default function ClubFilmTakesSection({
   const [err, setErr] = useState(null);
   const [index, setIndex] = useState(0);
   const timerRef = useRef(null);
+  const isVisible = usePageVisibility();
 
   async function fetchTakes() {
     if (!clubId || !filmId) {
@@ -118,13 +120,13 @@ export default function ClubFilmTakesSection({
 
   useEffect(() => {
     clearInterval(timerRef.current);
-    if (!safeTakes.length) return;
+    if (!safeTakes.length || !isVisible) return;
     timerRef.current = setInterval(
       () => setIndex((i) => (i + 1) % safeTakes.length),
       rotateMs
     );
     return () => clearInterval(timerRef.current);
-  }, [safeTakes.length, rotateMs]);
+  }, [safeTakes.length, rotateMs, isVisible]);
 
   if (!canSeeMembersOnly) {
     return (

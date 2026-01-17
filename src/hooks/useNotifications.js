@@ -42,12 +42,12 @@ export default function useNotifications({ pageSize = 20 } = {}) {
       setNextCursor(cursor);
 
       // unread count
-      const { data: unreadRows } = await supabase
+      const { count: unreadCount, error: unreadErr } = await supabase
         .from("notifications")
         .select("id", { count: "exact", head: true })
         .eq("user_id", userId)
         .is("read_at", null);
-      setUnread(unreadRows?.length ?? (unreadRows?.count ?? 0)); // safety
+      if (!unreadErr) setUnread(unreadCount ?? 0);
     } finally {
       setLoading(false);
     }

@@ -4,6 +4,8 @@ import { toast } from "react-hot-toast";
 import { Bell, Download, Mail, Shield, Trash2 } from "lucide-react";
 import supabase from "../supabaseClient";
 import { useUser } from "../context/UserContext";
+import { env } from "../lib/env";
+import { getPushSubscription, subscribeToPush, sendTestPush } from "../lib/push";
 
 export default function SettingsProfile() {
   const { user } = useUser();
@@ -13,6 +15,9 @@ export default function SettingsProfile() {
   const [saving, setSaving] = useState(false);
   const [sendingReset, setSendingReset] = useState(false);
   const [savingPrefs, setSavingPrefs] = useState(false);
+  const [pushStatus, setPushStatus] = useState("default");
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushEnabled, setPushEnabled] = useState(false);
 
   const defaultPrefs = useMemo(
     () => ({
@@ -33,6 +38,24 @@ export default function SettingsProfile() {
       setPrefs(defaultPrefs);
     }
   }, [user?.email, user?.user_metadata?.notification_prefs, defaultPrefs]);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      if (typeof window === "undefined") return;
+      if (!("Notification" in window)) return;
+      const permission = Notification.permission;
+      if (!mounted) return;
+      setPushStatus(permission);
+      try {
+        const sub = await getPushSubscription();
+        if (mounted) setPushEnabled(!!sub);
+      } catch {}
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const handleUpdateEmail = async (e) => {
     e.preventDefault();
@@ -94,6 +117,32 @@ export default function SettingsProfile() {
       toast.error(err?.message || "Couldn’t save preferences.");
     } finally {
       setSavingPrefs(false);
+    }
+  };
+
+  const handleEnablePush = async () => {
+    setPushBusy(true);
+    try {
+      await subscribeToPush();
+      setPushEnabled(true);
+      setPushStatus("granted");
+      toast.success("Push notifications enabled.");
+    } catch (err) {
+      toast.error(err?.message || "Couldn’t enable push notifications.");
+    } finally {
+      setPushBusy(false);
+    }
+  };
+
+  const handleTestPush = async () => {
+    setPushBusy(true);
+    try {
+      await sendTestPush();
+      toast.success("Test notification sent.");
+    } catch (err) {
+      toast.error(err?.message || "Couldn’t send test notification.");
+    } finally {
+      setPushBusy(false);
     }
   };
 
@@ -234,6 +283,43 @@ export default function SettingsProfile() {
         >
           {savingPrefs ? "Saving…" : "Save preferences"}
         </button>
+
+        <div className="mt-4 rounded-xl border border-zinc-800 bg-black/30 p-4">
+          <div className="text-sm font-semibold text-zinc-200">Push notifications</div>
+          <p className="mt-1 text-xs text-zinc-400">
+            Get instant updates from SuperFilm. On iOS, install the app to your home screen
+            before enabling push.
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={handleEnablePush}
+              disabled={pushBusy || pushEnabled || pushStatus === "denied"}
+              className={`rounded-lg px-4 py-2 text-sm font-semibold ${
+                pushEnabled
+                  ? "bg-white/10 text-zinc-300"
+                  : "bg-yellow-500 hover:bg-yellow-400 text-black"
+              } ${pushBusy ? "cursor-wait" : ""}`}
+            >
+              {pushEnabled ? "Enabled" : pushBusy ? "Enabling…" : "Enable notifications"}
+            </button>
+            {pushStatus === "denied" && (
+              <span className="text-xs text-red-300">
+                Notifications are blocked in your browser settings.
+              </span>
+            )}
+            {env.IS_DEV && (
+              <button
+                type="button"
+                onClick={handleTestPush}
+                disabled={pushBusy}
+                className="rounded-lg px-3 py-2 text-xs font-semibold bg-white/10 text-zinc-100 hover:bg-white/15"
+              >
+                Send test push
+              </button>
+            )}
+          </div>
+        </div>
       </section>
 
       <section className="rounded-2xl border border-zinc-800 bg-black/40 p-6 space-y-4">

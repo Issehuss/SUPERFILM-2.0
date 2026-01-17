@@ -3,6 +3,7 @@ import supabase from "../supabaseClient";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import TmdbImage from "./TmdbImage";
 import { toast } from "react-hot-toast";
+import usePageVisibility from "../hooks/usePageVisibility";
 
 const TMDB_BASE = "https://image.tmdb.org/t/p/w500";
 const AUTO_MS = 6000;
@@ -18,6 +19,7 @@ export default function NominationsCarousel({
   const [isHover, setHover] = useState(false);
   const [confirmingId, setConfirmingId] = useState(null);
   const ref = useRef(null);
+  const isVisible = usePageVisibility();
   const pageCount = useMemo(
     () => (rows.length ? Math.ceil(rows.length / 4) : 0),
     [rows.length]
@@ -57,12 +59,12 @@ export default function NominationsCarousel({
 
   // --- Auto scroll ---
   useEffect(() => {
-    if (pageCount <= 1 || isHover) return;
+    if (pageCount <= 1 || isHover || !isVisible) return;
     const t = setInterval(() => {
       setIdx((i) => (i + 1) % pageCount);
     }, AUTO_MS);
     return () => clearInterval(t);
-  }, [pageCount, isHover]);
+  }, [pageCount, isHover, isVisible]);
 
   // --- Page grouping ---
   const pages = useMemo(() => {

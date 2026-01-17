@@ -9,6 +9,7 @@ import {
   Crop as CropIcon,
   CalendarClock,
   Trash2,
+  Lock,
   Shield,
   Info,
   MoreHorizontal,
@@ -403,6 +404,9 @@ function mapClubRowToUI(row) {
     profileImageUrl: safeImageSrc(row.profile_image_url, ""),
     nameLastChangedAt: row.name_last_changed_at || null,
     type: row.type || null,
+    isPrivate: !!row.is_private || row.privacy_mode === "private",
+    privacyMode: row.privacy_mode || null,
+    visibility: row.visibility || null,
 
     // ---------------------------------------------------------------
     // NEXT EVENT (now correctly pulled ONLY from club_next_screening)
@@ -1365,7 +1369,7 @@ useEffect(() => {
   id, slug, name, tagline, about, location,
   banner_url, profile_image_url, name_last_changed_at,
   featured_posters,
-  type,
+  type, is_private, privacy_mode, visibility,
   next_screening:club_next_screening(*)
 `;
 
@@ -2674,7 +2678,7 @@ const postActivity = async (summary) => {
   const memberCreatedExtras = (
     <>
       {/* Chat teaser (members only) */}
-      <div ref={teaserWrapRef} className="mt-3 hidden md:block">
+      <div ref={teaserWrapRef} className="mt-3">
         {canSeeMembersOnly || isCuratedClub ? (
           <div
             className="rounded-2xl border border-zinc-800 bg-black/50 overflow-hidden"
@@ -2854,7 +2858,14 @@ const postActivity = async (summary) => {
             )}
           </div>
         ) : (
-          <h1 className="text-3xl font-bold">{club.name}</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-3xl font-bold">{club.name}</h1>
+            {club?.isPrivate && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-white/10 px-2 py-1 text-xs font-semibold text-zinc-200 ring-1 ring-white/20">
+                <Lock size={12} /> Private
+              </span>
+            )}
+          </div>
         )}
       </div>
     </div>

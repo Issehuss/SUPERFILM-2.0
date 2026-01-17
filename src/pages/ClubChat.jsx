@@ -549,7 +549,7 @@ async function handleDeleteMessage(arg) {
       </div>
 
       {/* Messages list */}
-      <div ref={listRef} className="mx-auto max-w-3xl px-4 pb-[168px] pt-4">
+      <div ref={listRef} className="mx-auto max-w-3xl px-4 pb-[220px] pt-4">
       {(resolvingClub || loadingMsgs) && (
   <div className="text-center text-zinc-400 py-12">Loading…</div>
 )}
@@ -583,7 +583,7 @@ async function handleDeleteMessage(arg) {
       </div>
 
       {/* Composer – docked */}
-      <div className="sticky bottom-0 left-0 right-0 z-20 pb-[env(safe-area-inset-bottom)] bg-gradient-to-t from-black via-black/80 to-transparent">
+      <div className="fixed bottom-0 left-0 right-0 z-30 pb-[env(safe-area-inset-bottom)] bg-gradient-to-t from-black via-black/80 to-transparent">
         <div className="mx-auto max-w-3xl px-4 pb-4 pointer-events-auto">
           <div className="rounded-2xl border border-zinc-800 bg-black/70 backdrop-blur px-3 py-3">
             {/* Attach preview */}
@@ -743,9 +743,18 @@ async function uploadChatImage(file, clubId, userId) {
 }
 
 // Client-side banned-words precheck (server trigger still enforces)
+let bannedWordsUnavailable = false;
 async function messageViolatesFilter(text) {
   try {
-    const { data } = await supabase.from("banned_words").select("pattern");
+    if (bannedWordsUnavailable) return false;
+    const { data, error } = await supabase.from("banned_words").select("pattern");
+    if (error) {
+      if (error.code === "PGRST205" || error.status === 404) {
+        bannedWordsUnavailable = true;
+        return false;
+      }
+      return false;
+    }
     if (!data) return false;
     for (const { pattern } of data) {
       try {

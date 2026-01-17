@@ -588,7 +588,7 @@ alert("ERROR: " + (e?.message || JSON.stringify(e)));
                   </div>
                   <textarea
                     className={`${textAreaCls} h-32`}
-                    placeholder="Tell people the vibe, focus, and what to expect."
+                    placeholder="What do you personally enjoy? What cinema gravitates to you? Build and they will come."
                     value={about}
                     onChange={(e) => setAbout(e.target.value)}
                     aria-label="About the club"

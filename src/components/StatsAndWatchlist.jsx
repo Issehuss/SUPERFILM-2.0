@@ -4,7 +4,15 @@ import { useNavigate } from "react-router-dom";
 import useWatchlist from "../hooks/useWatchlist";
 import TmdbImage from "./TmdbImage";
 
-export default function StatsAndWatchlist({ statsData, userId, movieRoute = "/movies", onFollowersClick, onFollowingClick }) {
+export default function StatsAndWatchlist({
+  statsData,
+  userId,
+  movieRoute = "/movies",
+  onFollowersClick,
+  onFollowingClick,
+  watchlistRefreshKey = 0,
+  disableWatchlistAutoRefresh = false,
+}) {
     // premium check (passed implicitly via theme)
     const isPremium = Boolean(statsData?.isPremium);
 
@@ -17,7 +25,12 @@ export default function StatsAndWatchlist({ statsData, userId, movieRoute = "/mo
   const roleClub = null;
 
   // ---- Watchlist ----
-  const { items: watchlist = [] } = useWatchlist?.() ?? { items: [] };
+  const { items: watchlist = [] } = useWatchlist?.(undefined, {
+    auto: !disableWatchlistAutoRefresh,
+    realtime: !disableWatchlistAutoRefresh,
+    useCache: true,
+    refreshKey: watchlistRefreshKey,
+  }) ?? { items: [] };
 
   const posterUrl = (m) => {
     // accepts { poster_path } or direct url; supports { tmdb_id } if needed
@@ -43,19 +56,19 @@ export default function StatsAndWatchlist({ statsData, userId, movieRoute = "/mo
   };
 
   return (
-    <div className="w-full px-0 sm:px-6 pt-4 sm:pt-6">
+    <div className="w-full px-0 sm:px-6 pt-3 sm:pt-6">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-6">
         {/* LEFT: Stats (centered) */}
         <div
           className={
             isPremium
-              ? "themed-card themed-outline forge rounded-none sm:rounded-2xl p-4 sm:p-5 w-full"
-              : "rounded-none border-t border-b border-zinc-900 bg-black/50 p-4 sm:p-5 sm:rounded-2xl sm:border sm:border-zinc-800"
+              ? "themed-card themed-outline forge rounded-none sm:rounded-2xl p-3 sm:p-5 w-full"
+              : "rounded-none border-t border-b border-zinc-900 bg-black/50 p-3 sm:p-5 sm:rounded-2xl sm:border sm:border-zinc-800"
           }
         >
 
           <div className="flex flex-col items-center gap-2">
-            <div className="mt-1 grid grid-cols-2 gap-4 sm:gap-6 text-center">
+            <div className="mt-1 grid grid-cols-2 gap-3 sm:gap-6 text-center">
               <button
                 type="button"
                 onClick={onFollowersClick}
@@ -64,7 +77,7 @@ export default function StatsAndWatchlist({ statsData, userId, movieRoute = "/mo
                 <div className="text-zinc-400 text-xs uppercase tracking-wide">
                   Followers
                 </div>
-                <div className="text-xl sm:text-2xl font-semibold">{followers}</div>
+                <div className="text-lg sm:text-2xl font-semibold">{followers}</div>
               </button>
               <button
                 type="button"
@@ -74,7 +87,7 @@ export default function StatsAndWatchlist({ statsData, userId, movieRoute = "/mo
                 <div className="text-zinc-400 text-xs uppercase tracking-wide">
                   Following
                 </div>
-                <div className="text-xl sm:text-2xl font-semibold">{following}</div>
+                <div className="text-lg sm:text-2xl font-semibold">{following}</div>
               </button>
             </div>
           </div>
@@ -84,8 +97,8 @@ export default function StatsAndWatchlist({ statsData, userId, movieRoute = "/mo
         <div
           className={
             isPremium
-              ? "themed-card themed-outline forge rounded-none sm:rounded-2xl p-4 sm:p-5 w-full"
-              : "rounded-none border-t border-b border-zinc-900 bg-black/50 p-4 sm:p-5 sm:rounded-2xl sm:border sm:border-zinc-800"
+              ? "themed-card themed-outline forge rounded-none sm:rounded-2xl p-3 sm:p-5 w-full"
+              : "rounded-none border-t border-b border-zinc-900 bg-black/50 p-3 sm:p-5 sm:rounded-2xl sm:border sm:border-zinc-800"
           }
         >
 
@@ -96,7 +109,7 @@ export default function StatsAndWatchlist({ statsData, userId, movieRoute = "/mo
               <button
                 type="button"
                 onClick={goWatchlist}
-                className="text-[11px] uppercase tracking-wide text-zinc-400 hover:text-white transition"
+                className="text-[10px] sm:text-[11px] uppercase tracking-wide text-zinc-400 hover:text-white transition"
               >
                 View all
               </button>
@@ -104,7 +117,7 @@ export default function StatsAndWatchlist({ statsData, userId, movieRoute = "/mo
           </div>
 
           {watchlist.length > 0 ? (
-            <div className="flex gap-3 overflow-x-auto no-scrollbar py-1">
+            <div className="flex gap-2 sm:gap-3 overflow-x-auto no-scrollbar py-1">
               {watchlist.map((m) => {
                 const poster = posterUrl(m);
                 const id = movieId(m);
@@ -112,7 +125,7 @@ export default function StatsAndWatchlist({ statsData, userId, movieRoute = "/mo
                   <button
                     key={id || poster}
                     onClick={() => goMovie(m)}
-                    className="group w-[72px] h-[108px] rounded-lg overflow-hidden border border-zinc-800 bg-zinc-900/40 shrink-0 transition-transform hover:scale-[1.03] focus:scale-[1.03]"
+                    className="group w-[60px] h-[90px] sm:w-[72px] sm:h-[108px] rounded-lg overflow-hidden border border-zinc-800 bg-zinc-900/40 shrink-0 transition-transform hover:scale-[1.03] focus:scale-[1.03]"
                     title={m?.title || ""}
                   >
                     {poster ? (

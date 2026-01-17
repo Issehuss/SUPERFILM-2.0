@@ -1,6 +1,7 @@
 import { useState } from "react";
 import useNotifications from "../hooks/useNotifications";
 import { Link } from "react-router-dom";
+import supabase from "../supabaseClient";
 
 function resolveNotificationHref(notification) {
   const d = notification?.data || {};
@@ -18,6 +19,7 @@ function resolveNotificationHref(notification) {
 export default function NotificationsPage() {
   const { items, loading, loadMore, hasMore, markItemRead, markAllAsRead } = useNotifications({ pageSize: 30 });
   const [confirmingAll, setConfirmingAll] = useState(false);
+  const [hiddenIds, setHiddenIds] = useState(() => new Set());
 
   const handleMarkAllClick = () => {
     if (!confirmingAll) {
@@ -70,23 +72,57 @@ export default function NotificationsPage() {
           <div className="p-6 text-zinc-400 text-sm">No notifications yet.</div>
         ) : (
           <ul className="divide-y divide-white/10">
-            {items.map((n) => {
+            {items.filter((n) => !hiddenIds.has(n.id)).map((n) => {
               const d = n.data || {};
               const clubName = d.club_name || d.group_name || d.chat_name || d.title || "Club chat";
               const snippet = d.snippet || d.message || d.summary || "";
               const href = resolveNotificationHref(n);
+              const isPwa = n.type?.startsWith("pwa.install");
+              const dismissPwa = async (e) => {
+                e.preventDefault();
+                const now = new Date().toISOString();
+                try {
+                  await supabase
+                    .from("notifications")
+                    .update({
+                      read_at: now,
+                      seen_at: now,
+                      data: { ...(n.data || {}), dismissed: true, dismissed_at: now },
+                    })
+                    .eq("id", n.id);
+                } catch {}
+                await markItemRead(n.id);
+                setHiddenIds((prev) => new Set(prev).add(n.id));
+                try {
+                  localStorage.setItem("sf:pwa-installed", "1");
+                } catch {}
+              };
               return (
                 <li key={n.id} className={`p-5 ${!n.read_at ? "bg-white/[0.03]" : ""}`}>
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="font-semibold">
-                        {n.type.startsWith("chat.mention")
+                        {isPwa
+                          ? d.title || "Install SuperFilm"
+                          : n.type.startsWith("chat.mention")
                           ? `Mention in ${clubName}`
                           : n.type.startsWith("chat.new")
                           ? `New messages in ${clubName}`
                           : d.title || clubName}
                       </div>
                       {snippet && <div className="text-sm text-zinc-400 mt-1">{snippet}</div>}
+                      {isPwa && d.question && (
+                        <div className="text-xs text-zinc-500 mt-1">{d.question}</div>
+                      )}
+                      {isPwa && (
+                        <button
+                          type="button"
+                          onClick={dismissPwa}
+                          className="mt-2 inline-flex items-center rounded-full bg-white/10 px-2.5 py-1 text-[11px] text-zinc-200 hover:bg-white/15"
+                        >
+                          Yes, installed
+                        </button>
+                      )}
                     </div>
                     <Link
                       to={href}

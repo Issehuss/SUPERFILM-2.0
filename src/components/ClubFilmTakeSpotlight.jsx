@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import DirectorsCutBadge from "./DirectorsCutBadge";
+import usePageVisibility from "../hooks/usePageVisibility";
 
 export default function ClubFilmTakeSpotlight({ takes = [], intervalMs = 8000 }) {
   const [index, setIndex] = useState(0);
   const timerRef = useRef(null);
+  const isVisible = usePageVisibility();
 
   const safeTakes = useMemo(
     () => (Array.isArray(takes) ? takes.filter(Boolean) : []),
@@ -17,12 +19,12 @@ export default function ClubFilmTakeSpotlight({ takes = [], intervalMs = 8000 })
 
   useEffect(() => {
     clearInterval(timerRef.current);
-    if (!safeTakes.length) return;
+    if (!safeTakes.length || !isVisible) return;
     timerRef.current = setInterval(() => {
       setIndex((i) => (i + 1) % safeTakes.length);
     }, intervalMs);
     return () => clearInterval(timerRef.current);
-  }, [safeTakes.length, intervalMs]);
+  }, [safeTakes.length, intervalMs, isVisible]);
 
   if (!safeTakes.length) {
     return (

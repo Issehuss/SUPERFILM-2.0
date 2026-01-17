@@ -124,17 +124,26 @@ export default function EditProfilePanel({
   
 // Pull context early so Moodboard can use the same id as view mode
 const { user, profile: ctxProfile, saveProfilePatch, refreshProfile } = useUser();
-const effectiveProfile = profile || ctxProfile;
+const effectiveProfile = useMemo(() => {
+  if (profile?.id && user?.id && profile.id === user.id && ctxProfile) {
+    return { ...profile, ...ctxProfile };
+  }
+  return profile || ctxProfile;
+}, [profile, ctxProfile, user?.id]);
 const moodProfileId = profileId || effectiveProfile?.id || user?.id || null;
 // --- PREMIUM FLAGS (must be inside the component) ---
 const { limits } = useEntitlements(); // ✅ safe: inside component
 
 // Decide premium from profile + server entitlements
+const plan = String(effectiveProfile?.plan || "").toLowerCase();
+const limitsPlan = String(limits?.plan || "").toLowerCase();
 const isPremium =
-  (effectiveProfile?.plan === "directors_cut") ||
-  (effectiveProfile?.is_premium === true) ||
-  (limits?.plan === "directors_cut") ||
-  (limits?.isPremium === true);
+  plan === "directors_cut" ||
+  plan === "premium" ||
+  effectiveProfile?.is_premium === true ||
+  limitsPlan === "directors_cut" ||
+  limitsPlan === "premium" ||
+  limits?.isPremium === true;
 
 const premiumFlag = !!isPremium;
 
@@ -359,6 +368,7 @@ function applyBanner(url) {
   // accept TMDB image hosts only
   const ok = /^https?:\/\/(image\.tmdb\.org|media\.themoviedb\.org)\//i.test(u);
   if (!ok) return; // silently ignore anything else
+  setPendingBannerUrl(u);
   onUpdated?.({ banner_url: u });
 }
 
@@ -378,7 +388,89 @@ function applyBanner(url) {
   const bannerSave = useSaveFeedback();   // reserved
   const avatarSave = useSaveFeedback();   // reserved
   const [pendingBannerUrl, setPendingBannerUrl] = useState(null);
+  const [bannerFallbackUrl, setBannerFallbackUrl] = useState(null);
 
+  useEffect(() => {
+    if (!open || !user?.id) return;
+    try {
+      const ls = localStorage.getItem(`sf.userBanner:${user.id}`);
+      setBannerFallbackUrl(ls || null);
+    } catch {
+      setBannerFallbackUrl(null);
+    }
+  }, [open, user?.id]);
+
+  const bannerHasImage = !!(
+    pendingBannerUrl ||
+    effectiveProfile?.banner_url ||
+    effectiveProfile?.banner_image ||
+    bannerFallbackUrl
+  );
+  const activeGradient =
+    typeof effectiveProfile?.banner_gradient === "string"
+      ? effectiveProfile.banner_gradient
+      : "";
+  const gradientPresets = [
+    { id: "none", label: "None", value: "" },
+    {
+      id: "golden",
+      label: "Golden Hour",
+      value: "linear-gradient(135deg, rgba(255,210,128,0.55), rgba(20,10,0,0.15))",
+    },
+    {
+      id: "noir",
+      label: "Noir Smoke",
+      value: "linear-gradient(135deg, rgba(0,0,0,0.65), rgba(90,90,90,0.2))",
+    },
+    {
+      id: "midnight",
+      label: "Midnight Ink",
+      value: "linear-gradient(135deg, rgba(14,16,38,0.6), rgba(0,0,0,0.15))",
+    },
+    {
+      id: "ember",
+      label: "Ember",
+      value: "linear-gradient(135deg, rgba(255,120,70,0.45), rgba(40,10,5,0.25))",
+    },
+    {
+      id: "cobalt",
+      label: "Cobalt",
+      value: "linear-gradient(135deg, rgba(60,120,255,0.45), rgba(10,15,40,0.35))",
+    },
+    {
+      id: "forest",
+      label: "Forest",
+      value: "linear-gradient(135deg, rgba(40,140,90,0.45), rgba(5,20,12,0.35))",
+    },
+    {
+      id: "rose",
+      label: "Rose Noir",
+      value: "linear-gradient(135deg, rgba(210,90,140,0.45), rgba(25,10,20,0.35))",
+    },
+    {
+      id: "slate",
+      label: "Slate",
+      value: "linear-gradient(135deg, rgba(120,130,140,0.45), rgba(15,20,24,0.35))",
+    },
+    {
+      id: "amber",
+      label: "Amber Dust",
+      value: "linear-gradient(135deg, rgba(245,190,90,0.45), rgba(20,15,5,0.35))",
+    },
+  ];
+
+  const handleGradientPick = (value) => {
+    const isClear = !value;
+    if (!isClear && !bannerHasImage) {
+      toast.error("Add a banner image first to use gradients.");
+      return;
+    }
+    if (!isClear && !isPremium) {
+      toast.error("Director’s Cut is required for gradients.");
+      return;
+    }
+    onUpdated?.({ banner_gradient: value });
+  };
   
 
 
@@ -1116,31 +1208,91 @@ async function handleSaveAll() {
         </button>
       </div>
 
-      <div className="grid grid-cols-3 gap-2">
-        {tmdbSearching ? (
-          <div className="col-span-3 h-24 animate-pulse rounded-md bg-zinc-900" />
-        ) : (
-          tmdbResults.map((m) => {
-            const poster = m?.backdropUrl || m?.posterUrl || "";
-            if (!poster) return null;
+      <div className="max-h-64 overflow-y-auto pr-1">
+        <div className="grid grid-cols-3 gap-2">
+          {tmdbSearching ? (
+            <div className="col-span-3 h-24 animate-pulse rounded-md bg-zinc-900" />
+          ) : (
+            tmdbResults.map((m) => {
+              const poster = m?.backdropUrl || m?.posterUrl || "";
+              if (!poster) return null;
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => applyBanner(poster)}
+                  className="aspect-[2/3] overflow-hidden rounded-md border border-zinc-800 hover:ring-2 hover:ring-yellow-500 transition"
+                  title="Use this image"
+                >
+                  <img
+                    src={poster}
+                    alt="TMDB result"
+                    className="h-full w-full object-cover"
+                    loading="lazy"
+                  />
+                </button>
+              );
+            })
+          )}
+        </div>
+      </div>
+
+      <div className="mt-5">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="text-xs uppercase tracking-wide text-zinc-500">
+              Banner gradients
+            </div>
+            <div className="text-sm text-zinc-300">
+              Director’s Cut only. Applies to your banner image.
+            </div>
+          </div>
+          {!isPremium && (
+            <a
+              href="/premium"
+              className="text-xs text-yellow-400 hover:underline"
+            >
+              Go Premium
+            </a>
+          )}
+        </div>
+
+        {!bannerHasImage && (
+          <div className="mt-2 text-xs text-zinc-500">
+            Add a banner image to enable gradients.
+          </div>
+        )}
+
+        <div className="mt-3 grid grid-cols-2 sm:grid-cols-5 gap-2">
+          {gradientPresets.map((g) => {
+            const isActive = activeGradient === g.value;
+            const isDisabled = (!isPremium && g.id !== "none") || (!bannerHasImage && g.id !== "none");
             return (
               <button
-                key={m.id}
+                key={g.id}
                 type="button"
-                onClick={() => onUpdated?.({ banner_url: poster })}
-                className="aspect-[2/3] overflow-hidden rounded-md border border-zinc-800 hover:ring-2 hover:ring-yellow-500 transition"
-                title="Use this image"
+                onClick={() => handleGradientPick(g.value)}
+                disabled={isDisabled}
+                className={[
+                  "relative h-16 rounded-lg border transition overflow-hidden",
+                  isActive ? "border-yellow-400 ring-1 ring-yellow-400/50" : "border-zinc-800",
+                  isDisabled ? "opacity-50 cursor-not-allowed" : "hover:border-yellow-400",
+                ].join(" ")}
+                title={g.label}
               >
-                <img
-                  src={poster}
-                  alt="TMDB result"
-                  className="h-full w-full object-cover"
-                  loading="lazy"
+                <div
+                  className="absolute inset-0"
+                  style={{
+                    background: g.value || "linear-gradient(135deg, rgba(255,255,255,0.06), rgba(0,0,0,0.4))",
+                  }}
                 />
+                <div className="absolute inset-0 flex items-end p-2 text-[10px] text-white/80">
+                  {g.label}
+                </div>
               </button>
             );
-          })
-        )}
+          })}
+        </div>
       </div>
     </div>
   </section>

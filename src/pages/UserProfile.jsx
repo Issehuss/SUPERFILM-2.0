@@ -21,7 +21,9 @@ import uploadAvatar from "../lib/uploadAvatar";
 
 
 const PROFILE_CACHE_TTL = 1000 * 60 * 5; // 5 minutes
+const SECTION_CACHE_TTL = 1000 * 60 * 10; // 10 minutes
 const profileCacheKey = (id) => `sf.profile.cache.v1:${id}`;
+const sectionCacheKey = (id, section) => `sf.profile.section.v1:${id}:${section}`;
 
 const readProfileCache = (id) => {
   if (!id) return null;
@@ -44,6 +46,29 @@ const writeProfileCache = (id, data) => {
       profileCacheKey(id),
       JSON.stringify({ ts: Date.now(), data })
     );
+  } catch {
+    // ignore storage errors (e.g., private mode)
+  }
+};
+
+const readSectionCache = (key) => {
+  if (!key) return null;
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.ts || !parsed?.data) return null;
+    if (Date.now() - parsed.ts > SECTION_CACHE_TTL) return null;
+    return parsed.data;
+  } catch {
+    return null;
+  }
+};
+
+const writeSectionCache = (key, data) => {
+  if (!key || data == null) return;
+  try {
+    sessionStorage.setItem(key, JSON.stringify({ ts: Date.now(), data }));
   } catch {
     // ignore storage errors (e.g., private mode)
   }
@@ -247,6 +272,7 @@ const UserProfile = () => {
     profile,
     setAvatar,
     saveProfilePatch,
+    refreshProfile,
     loading,
   } = useUser();
   
@@ -254,6 +280,10 @@ const UserProfile = () => {
   // this is the profile we actually render (could be me, could be someone else)
   const [viewProfile, setViewProfile] = useState(null);
   const [viewLoading, setViewLoading] = useState(true);
+  const [refreshTick, setRefreshTick] = useState(0);
+  const lastProfileRefreshRef = useRef(0);
+  const lastStatsRefreshRef = useRef(0);
+  const lastTakesRefreshRef = useRef(0);
 
   // View vs edit
   const [editMode, setEditMode] = useState(false);
@@ -312,6 +342,14 @@ const UserProfile = () => {
   // anchor for Moodboard
   const moodboardAnchorRef = useRef(null);
 
+  useEffect(() => {
+    function onProfileRefresh() {
+      setRefreshTick((t) => t + 1);
+    }
+    window.addEventListener("sf:profile:refresh", onProfileRefresh);
+    return () => window.removeEventListener("sf:profile:refresh", onProfileRefresh);
+  }, []);
+
   /* =========================================================
      1. Decide whose profile to show (me vs /u/:slug vs /profile/:id)
      ========================================================= */
@@ -321,9 +359,21 @@ const UserProfile = () => {
     (async () => {
       setViewLoading(true);
       const identifier = routeSlug || routeId || null;
+      const shouldForceRefresh = refreshTick !== lastProfileRefreshRef.current;
 
       // No identifier in URL → show my own profile
       if (!identifier) {
+        if (shouldForceRefresh && refreshProfile) {
+          try {
+            const fresh = await refreshProfile();
+            if (mounted) setViewProfile(fresh || profile || null);
+          } catch {
+            if (mounted) setViewProfile(profile || null);
+          }
+          if (mounted) setViewLoading(false);
+          lastProfileRefreshRef.current = refreshTick;
+          return;
+        }
         setViewProfile(profile || null);
         setViewLoading(false);
         return;
@@ -348,19 +398,21 @@ const UserProfile = () => {
         setViewLoading(false);
       }
 
-      // 2) revalidate in background
+      // 2) revalidate in background (only when forced or no cache)
+      if (cached && !shouldForceRefresh) return;
       const fetched = await loadAnyProfileLocal(identifier);
       if (mounted) {
         if (fetched) writeProfileCache(identifier, fetched);
         setViewProfile(fetched);
         setViewLoading(false);
       }
+      lastProfileRefreshRef.current = refreshTick;
     })();
 
     return () => {
       mounted = false;
     };
-  }, [routeSlug, routeId, profile?.id, profile?.slug]);
+  }, [routeSlug, routeId, profile?.id, profile?.slug, refreshTick, refreshProfile]);
 
 
   /* =========================================================
@@ -480,16 +532,25 @@ const UserProfile = () => {
     let isMounted = true;
     (async () => {
       if (!viewProfile?.id) return;
+      const cacheKey = sectionCacheKey(viewProfile.id, "stats");
+      const shouldForceRefresh = refreshTick !== lastStatsRefreshRef.current;
+      const cached = readSectionCache(cacheKey);
+      if (cached && !shouldForceRefresh && isMounted) {
+        setRoleBadge(cached.roleBadge || null);
+        setRoleClub(cached.roleClub || null);
+        setCounts(cached.counts || { followers: 0, following: 0 });
+        return;
+      }
 
-      const { data: rolesRow } = await supabase
+    const { data: rolesRow } = await supabase
         .from("profile_roles")
         .select("roles")
         .eq("user_id", viewProfile.id)
         .maybeSingle();
 
+      const roles = rolesRow?.roles || [];
+      const top = roles?.[0] || null;
       if (isMounted) {
-        const roles = rolesRow?.roles || [];
-        const top = roles?.[0] || null;
         setRoleBadge(top?.role || null);
         setRoleClub(
           top
@@ -505,11 +566,21 @@ const UserProfile = () => {
         .maybeSingle();
 
       if (isMounted && fc) setCounts(fc);
+      if (isMounted) {
+        writeSectionCache(cacheKey, {
+          roleBadge: top?.role || null,
+          roleClub: top
+            ? { club_slug: top.club_slug, club_name: top.club_name, club_id: top.club_id }
+            : null,
+          counts: fc || { followers: 0, following: 0 },
+        });
+      }
+      lastStatsRefreshRef.current = refreshTick;
     })();
     return () => {
       isMounted = false;
     };
-  }, [viewProfile?.id]);
+  }, [viewProfile?.id, refreshTick]);
 
     /* =========================================================
      7b. Load film takes from Supabase (public)
@@ -517,18 +588,29 @@ const UserProfile = () => {
      useEffect(() => {
       let cancelled = false;
   
-      async function loadTakes() {
-        if (!viewProfile?.id) {
-          if (!cancelled) {
-            setFilmTakes([]);
-            setFilmTakesLoading(false);
-          }
-          return;
+    async function loadTakes() {
+      if (!viewProfile?.id) {
+        if (!cancelled) {
+          setFilmTakes([]);
+          setFilmTakesLoading(false);
         }
+        return;
+      }
+
+      const cacheKey = sectionCacheKey(viewProfile.id, "film_takes");
+      const shouldForceRefresh = refreshTick !== lastTakesRefreshRef.current;
+      const cached = readSectionCache(cacheKey);
+      if (cached && !shouldForceRefresh) {
+        if (!cancelled) {
+          setFilmTakes(cached);
+          setFilmTakesLoading(false);
+        }
+        return;
+      }
   
-        setFilmTakesLoading(true);
-        try {
-          // Load unified Film Takes (from club_film_takes)
+      setFilmTakesLoading(true);
+      try {
+        // Load unified Film Takes (from club_film_takes)
 const { data, error } = await supabase
 .from("club_film_takes")
 .select("*")
@@ -545,7 +627,7 @@ const { data, error } = await supabase
             console.error("[film_takes] load error:", error);
             setFilmTakes([]);
           } else {
-            setFilmTakes(
+            const mapped =
               Array.isArray(data)
                 ? data.map((t) => ({
                     id: t.id,
@@ -564,7 +646,10 @@ title: t.film_title,      // <-- THIS fixes missing names in FilmTakeCard
                     screening_id: t.screening_id,
                   }))
                 : []
-            );
+            ;
+            setFilmTakes(mapped);
+            writeSectionCache(cacheKey, mapped);
+            lastTakesRefreshRef.current = refreshTick;
             
           }
         } catch (e) {
@@ -733,6 +818,17 @@ title: t.film_title,      // <-- THIS fixes missing names in FilmTakeCard
       setLiveGlobalGlow(patch.taste_card_style_global ?? null);
     }
 
+    const premiumChanged =
+      Object.prototype.hasOwnProperty.call(patch, "theme_preset") ||
+      Object.prototype.hasOwnProperty.call(patch, "banner_gradient") ||
+      Object.prototype.hasOwnProperty.call(patch, "taste_card_style_global") ||
+      Object.prototype.hasOwnProperty.call(patch, "taste_cards");
+    if (premiumChanged) {
+      try {
+        window.dispatchEvent(new CustomEvent("sf:profile:refresh"));
+      } catch {}
+    }
+
     const { banner_url, banner_image, banner_gradient, taste_cards, ...rest } = patch;
     if (Object.keys(rest).length) {
       try {
@@ -838,7 +934,7 @@ title: t.film_title,      // <-- THIS fixes missing names in FilmTakeCard
   const bannerUrl =
     bannerOverride ?? viewProfile?.banner_url ?? viewProfile?.banner_image ?? "";
   const bannerGradient =
-    bannerGradientOverride ?? viewProfile?.banner_gradient ?? "";
+    isPremiumProfile ? (bannerGradientOverride ?? viewProfile?.banner_gradient ?? "") : "";
 
  // allow null (default/base look) when no theme is selected
 const themeId = isPremiumProfile ? (viewProfile?.theme_preset ?? null) : null;
@@ -856,7 +952,7 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
         }
       : {};
     return (
-      <div className="relative w-full h-[520px] sm:h-[500px] group rounded-none sm:rounded-2xl overflow-hidden" style={style}>
+      <div className="relative w-full h-[360px] sm:h-[500px] group rounded-none sm:rounded-2xl overflow-hidden" style={style}>
         {!bannerUrl && (
           <div className="absolute inset-0 grid place-items-center bg-zinc-800 text-zinc-400">
             No banner selected yet
@@ -865,7 +961,7 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
         <div className="absolute inset-0 bg-black/30 group-hover:bg-black/50 transition" />
         <div className="absolute bottom-0 left-0 w-full h-40 bg-gradient-to-b from-transparent via-black/60 to-black pointer-events-none" />
 
-        <div className="absolute top-4 right-4 z-20">
+        <div className="absolute top-3 right-3 sm:top-4 sm:right-4 z-20">
           {viewingOwn ? (
             <button
               type="button"
@@ -875,7 +971,7 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
                 setEditOpen(true);
                 setEditMode(true);
               }}
-              className="bg-black/70 text-white text-sm px-4 py-2 rounded-full hover:bg-black/90 transition border border-white/10"
+              className="bg-black/70 text-white text-xs sm:text-sm px-3 sm:px-4 py-1.5 sm:py-2 rounded-full hover:bg-black/90 transition border border-white/10"
             >
               Edit Profile
             </button>
@@ -884,9 +980,9 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
           )}
         </div>
 
-        <div className="absolute bottom-0 left-0 w-full px-6 pb-6 z-10 flex items-end">
-          <div className="flex items-end space-x-4 max-w-3xl w-full">
-            <div className="relative w-24 h-24 shrink-0">
+        <div className="absolute bottom-0 left-0 w-full px-4 sm:px-6 pb-4 sm:pb-6 z-10 flex items-end">
+          <div className="flex items-end space-x-3 sm:space-x-4 max-w-3xl w-full">
+            <div className="relative w-16 h-16 sm:w-24 sm:h-24 shrink-0">
               <div
                 className={
                   isPremiumProfile
@@ -937,10 +1033,10 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
                     const v = (e.target.value || "").trim();
                     if (v && v !== displayName) saveProfilePatch({ display_name: v });
                   }}
-                  className="text-xl font-bold bg-zinc-800/40 p-1 rounded w-full"
+                  className="text-lg sm:text-xl font-bold bg-zinc-800/40 p-1 rounded w-full"
                 />
               ) : (
-                <h2 className="text-xl font-bold">{displayName}</h2>
+                <h2 className="text-lg sm:text-xl font-bold">{displayName}</h2>
               )}
               {editMode && viewingOwn ? (
                 <input
@@ -950,10 +1046,10 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
                     const v = (e.target.value || "").trim();
                     if (v && v !== username) handleUsernameChange(v);
                   }}
-                  className="text-sm text-gray-300 bg-zinc-800/40 p-1 rounded w-full mt-1"
+                  className="text-xs sm:text-sm text-gray-300 bg-zinc-800/40 p-1 rounded w-full mt-1"
                 />
               ) : (
-                <p className="text-sm text-gray-300 mt-1 flex items-center">
+                <p className="text-xs sm:text-sm text-gray-300 mt-1 flex items-center">
                   <span>@{username}</span>
                   {isPremiumProfile && <DirectorsCutBadge className="ml-2" size="xs" active />}
                 </p>
@@ -967,10 +1063,10 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
                     if (v !== bio) saveProfilePatch({ bio: v });
                   }}
                   rows={2}
-                  className="mt-1 text-sm text-white bg-zinc-800/40 p-2 rounded w-full resize-none"
+                  className="mt-1 text-xs sm:text-sm text-white bg-zinc-800/40 p-2 rounded w-full resize-none"
                 />
               ) : (
-                <p className="mt-1 text-sm text-gray-200">{bio}</p>
+                <p className="mt-1 text-xs sm:text-sm text-gray-200">{bio}</p>
               )}
             </div>
           </div>
@@ -1008,6 +1104,8 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
           }}
           
           userId={viewProfile?.id}
+          watchlistRefreshKey={refreshTick}
+          disableWatchlistAutoRefresh
           movieRoute="/movie"
           onFollowersClick={() => {
             const handle = viewProfile?.slug || viewProfile?.id;
@@ -1028,6 +1126,8 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
               isOwner={viewingOwn}
               className="w-full"
               usePremiumTheme={isPremiumProfile}
+              disableAutoRefresh
+              refreshKey={refreshTick}
             />
           </div>
         </div>
@@ -1065,11 +1165,11 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
         )}
 
         {/* FILM TAKES — Preview (first 3 only) */}
-        <section className="mt-5 sm:mt-8 px-0 sm:px-6">
+        <section className="mt-4 sm:mt-8 px-0 sm:px-6">
           <div className={
             isPremiumProfile
-              ? "themed-card themed-outline forge rounded-none sm:rounded-2xl border-t border-b border-zinc-900 sm:border sm:border-zinc-800 bg-black/30 p-4"
-              : "rounded-none border-t border-b border-zinc-900 bg-black/30 p-4 sm:rounded-2xl sm:border sm:border-zinc-800"
+              ? "themed-card themed-outline forge rounded-none sm:rounded-2xl border-t border-b border-zinc-900 sm:border sm:border-zinc-800 bg-black/30 p-3 sm:p-4"
+              : "rounded-none border-t border-b border-zinc-900 bg-black/30 p-3 sm:p-4 sm:rounded-2xl sm:border sm:border-zinc-800"
           }>
             <div className="flex items-center justify-between mb-3 px-1 sm:px-0">
               <h3 className="text-sm font-semibold text-white">Film Takes</h3>
@@ -1088,7 +1188,7 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
             </div>
 
             {filmTakesLoading ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 sm:gap-3">
                 {Array.from({ length: 3 }).map((_, i) => (
                   <div
                     key={i}
@@ -1099,7 +1199,7 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
             ) : filmTakes.length === 0 ? (
               <p className="text-xs text-zinc-500">No takes yet.</p>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 sm:gap-3">
                 {filmTakes.slice(0, 3).map((take) => (
                   <div
                     key={take.id}
