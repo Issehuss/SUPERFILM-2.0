@@ -72,8 +72,8 @@ export default function BetaGate({ children }) {
     setHandoff(true);
     setTimeout(() => setHandoff(false), 1800);
     try {
-      if (typeof window !== "undefined" && window.location.pathname !== "/") {
-        window.location.replace("/");
+      if (typeof window !== "undefined") {
+        window.location.assign("/");
       }
     } catch {
       // ignore redirect failures

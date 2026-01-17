@@ -952,7 +952,7 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
         }
       : {};
     return (
-      <div className="relative w-full h-[360px] sm:h-[500px] group rounded-none sm:rounded-2xl overflow-hidden" style={style}>
+      <div className="relative w-full h-[300px] sm:h-[500px] group rounded-2xl sm:rounded-2xl overflow-hidden bg-top sm:bg-center" style={style}>
         {!bannerUrl && (
           <div className="absolute inset-0 grid place-items-center bg-zinc-800 text-zinc-400">
             No banner selected yet
@@ -1087,7 +1087,7 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
   /* ---------------- render ---------------- */
   return (
     <div
-      className="sf-theme w-full text-white py-4 sm:py-8 px-0 bg-black"
+      className="sf-theme w-full text-white py-4 sm:py-8 px-3 sm:px-0 bg-black"
       style={themeStyle}
       data-theme={themeId}
     >
@@ -1137,8 +1137,8 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
           <section className="mt-6 px-0 sm:px-6">
             <div className={
               isPremiumProfile
-                ? "themed-card themed-outline forge rounded-none sm:rounded-2xl border-t border-b border-zinc-900 sm:border sm:border-zinc-800 bg-black/40"
-                : "rounded-none border-t border-b border-zinc-900 bg-black/40 sm:rounded-2xl sm:border sm:border-zinc-800"
+                ? "themed-card themed-outline forge rounded-2xl border border-zinc-800 bg-black/40"
+                : "rounded-2xl border border-zinc-800 bg-black/40"
             }>
               <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-zinc-900 sm:border-zinc-800">
                 <h3 className="text-sm font-semibold text-white">Taste Cards</h3>
@@ -1153,8 +1153,8 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
           <section className="mt-6 px-0 sm:px-6">
             <div className={
               isPremiumProfile
-                ? "themed-card themed-outline forge rounded-none sm:rounded-2xl border-t border-b border-zinc-900 sm:border sm:border-zinc-800 bg-black/40"
-                : "rounded-none border-t border-b border-zinc-900 bg-black/40 sm:rounded-2xl sm:border sm:border-zinc-800"
+                ? "themed-card themed-outline forge rounded-2xl border border-zinc-800 bg-black/40"
+                : "rounded-2xl border border-zinc-800 bg-black/40"
             }>
               <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-zinc-900 sm:border-zinc-800">
                 <h3 className="text-sm font-semibold text-white">Rating Language</h3>
@@ -1168,8 +1168,8 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
         <section className="mt-4 sm:mt-8 px-0 sm:px-6">
           <div className={
             isPremiumProfile
-              ? "themed-card themed-outline forge rounded-none sm:rounded-2xl border-t border-b border-zinc-900 sm:border sm:border-zinc-800 bg-black/30 p-3 sm:p-4"
-              : "rounded-none border-t border-b border-zinc-900 bg-black/30 p-3 sm:p-4 sm:rounded-2xl sm:border sm:border-zinc-800"
+              ? "themed-card themed-outline forge rounded-2xl border border-zinc-800 bg-black/30 p-3 sm:p-4"
+              : "rounded-2xl border border-zinc-800 bg-black/30 p-3 sm:p-4"
           }>
             <div className="flex items-center justify-between mb-3 px-1 sm:px-0">
               <h3 className="text-sm font-semibold text-white">Film Takes</h3>

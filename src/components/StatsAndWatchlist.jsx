@@ -62,8 +62,8 @@ export default function StatsAndWatchlist({
         <div
           className={
             isPremium
-              ? "themed-card themed-outline forge rounded-none sm:rounded-2xl p-3 sm:p-5 w-full"
-              : "rounded-none border-t border-b border-zinc-900 bg-black/50 p-3 sm:p-5 sm:rounded-2xl sm:border sm:border-zinc-800"
+              ? "themed-card themed-outline forge rounded-2xl p-3 sm:p-5 w-full"
+              : "rounded-2xl border border-zinc-800 bg-black/50 p-3 sm:p-5"
           }
         >
 
@@ -97,8 +97,8 @@ export default function StatsAndWatchlist({
         <div
           className={
             isPremium
-              ? "themed-card themed-outline forge rounded-none sm:rounded-2xl p-3 sm:p-5 w-full"
-              : "rounded-none border-t border-b border-zinc-900 bg-black/50 p-3 sm:p-5 sm:rounded-2xl sm:border sm:border-zinc-800"
+              ? "themed-card themed-outline forge rounded-2xl p-3 sm:p-5 w-full"
+              : "rounded-2xl border border-zinc-800 bg-black/50 p-3 sm:p-5"
           }
         >
 
