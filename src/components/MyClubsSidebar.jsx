@@ -10,27 +10,59 @@ export default function MyClubsSidebar({ className = "" }) {
   const [member, setMember] = useState([]);
 
   useEffect(() => {
-    if (!user?.id) return;
     let ignore = false;
+    let retryTimer;
 
     async function load() {
+      const { data: auth } = await supabase.auth.getSession();
+      const sessionUserId = auth?.session?.user?.id || null;
+      const resolvedUserId = user?.id || sessionUserId;
+      if (!resolvedUserId) {
+        if (!ignore) retryTimer = setTimeout(load, 500);
+        return;
+      }
       const { data: o } = await supabase
         .from("club_members")
-        .select("role, clubs:club_id(id, name, slug)")
-        .eq("user_id", user.id)
+        .select("club_id, user_id, role, joined_at, accepted")
+        .eq("user_id", resolvedUserId)
         .eq("role", "president");
       const { data: m } = await supabase
         .from("club_members")
-        .select("role, clubs:club_id(id, name, slug)")
-        .eq("user_id", user.id)
+        .select("club_id, user_id, role, joined_at, accepted")
+        .eq("user_id", resolvedUserId)
         .in("role", ["admin", "member"]);
       if (!ignore) {
-        setOwned((o ?? []).map(r => r.clubs).filter(Boolean));
-        setMember((m ?? []).map(r => r.clubs).filter(Boolean));
+        const ownedIds = (o ?? []).map((r) => r.club_id).filter(Boolean);
+        const memberIds = (m ?? []).map((r) => r.club_id).filter(Boolean);
+        const allIds = Array.from(new Set([...ownedIds, ...memberIds]));
+        let clubsMap = {};
+        if (allIds.length) {
+          const { data: clubsData } = await supabase
+            .from("clubs_public")
+            .select("id, name, slug")
+            .in("id", allIds);
+          clubsMap = (clubsData || []).reduce((acc, c) => {
+            acc[c.id] = c;
+            return acc;
+          }, {});
+        }
+        setOwned(
+          ownedIds
+            .map((id) => clubsMap[id] || { id, name: "Club", slug: null })
+            .filter((c) => c.id)
+        );
+        setMember(
+          memberIds
+            .map((id) => clubsMap[id] || { id, name: "Club", slug: null })
+            .filter((c) => c.id)
+        );
       }
     }
     load();
-    return () => { ignore = true; };
+    return () => {
+      ignore = true;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
   }, [user?.id]);
 
   if (!user) return null;

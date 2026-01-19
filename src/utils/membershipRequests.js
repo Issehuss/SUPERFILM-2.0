@@ -32,14 +32,14 @@ export async function requestToJoinClub(clubId) {
         .maybeSingle();
 
       const { data: staffRows } = await supabase
-        .from("club_staff")
-        .select("user_id, role")
+        .from("club_members")
+        .select("club_id, user_id, role, joined_at, accepted")
         .eq("club_id", clubId)
         .eq("role", "president");
 
       const { data: memberRows } = await supabase
         .from("club_members")
-        .select("user_id, role")
+        .select("club_id, user_id, role, joined_at, accepted")
         .eq("club_id", clubId)
         .eq("role", "president");
 

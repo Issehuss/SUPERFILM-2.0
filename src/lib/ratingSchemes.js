@@ -1,6 +1,16 @@
 // src/lib/ratingSchemes.js
 import supabase from "../supabaseClient";
 
+const RATING_SCHEME_SELECT = [
+  "id",
+  "profile_id",
+  "name",
+  "is_active",
+  "tags",
+  "updated_at",
+  "created_at",
+].join(", ");
+
 /**
  * Tag shape (stored inside profile_rating_schemes.tags JSONB):
  * {
@@ -63,7 +73,7 @@ export async function fetchActiveScheme(profileId) {
   if (!profileId) return null;
   const { data, error } = await supabase
     .from("profile_rating_schemes")
-    .select("*")
+    .select(RATING_SCHEME_SELECT)
     .eq("profile_id", profileId)
     .eq("is_active", true)
     .maybeSingle();
@@ -83,7 +93,7 @@ export async function listSchemes(profileId) {
   if (!profileId) return [];
   const { data, error } = await supabase
     .from("profile_rating_schemes")
-    .select("*")
+    .select(RATING_SCHEME_SELECT)
     .eq("profile_id", profileId)
     .order("is_active", { ascending: false })
     .order("updated_at", { ascending: false });
@@ -107,7 +117,7 @@ export async function upsertScheme(profileId, scheme) {
   const { data, error } = await supabase
     .from("profile_rating_schemes")
     .upsert(payload, { onConflict: "id" })
-    .select("*")
+    .select(RATING_SCHEME_SELECT)
     .maybeSingle();
 
   if (error) {

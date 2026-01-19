@@ -29,7 +29,7 @@ export default function useClubRoles(clubId) {
   return {
     members,
     myRole: myRow?.role || "member",
-    hasSigned: Boolean(myRow?.role_signed_at),
+    hasSigned: Boolean(myRow?.accepted),
     isLeader,
     loading,
     error: err,

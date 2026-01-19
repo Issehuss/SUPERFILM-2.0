@@ -126,7 +126,7 @@ export async function updateReportStatus(reportId, status) {
 export async function listMyReports() {
   const { data, error } = await supabase
     .from("content_reports")
-    .select("*")
+    .select("id, created_at, target_type, target_id, reason, details, club_id, status, handled_at")
     .order("created_at", { ascending: false });
   if (error) return { ok: false, error: error.message };
   return { ok: true, data };
@@ -134,7 +134,10 @@ export async function listMyReports() {
 
 /** moderators view (RLS enforces scope) */
 export async function listReportsForModeration({ clubId } = {}) {
-  let q = supabase.from("content_reports").select("*").order("created_at", { ascending: false });
+  let q = supabase
+    .from("content_reports")
+    .select("id, created_at, target_type, target_id, reason, details, club_id, status, handled_at")
+    .order("created_at", { ascending: false });
   if (clubId) q = q.eq("club_id", clubId);
   const { data, error } = await q;
   if (error) return { ok: false, error: error.message };

@@ -33,9 +33,10 @@ export default function NominationsCarousel({
     (async () => {
       const { data, error } = await supabase
         .from("nominations")
-        .select("*")
+        .select("id, movie_id, movie_title, poster_path, created_at")
         .eq("club_id", clubId)
-        .order("created_at", { ascending: false });
+        .order("created_at", { ascending: false })
+        .limit(20);
 
       if (!active) return;
       if (error) console.error(error);
@@ -47,7 +48,6 @@ export default function NominationsCarousel({
         poster: r.poster_path
           ? `${TMDB_BASE}${r.poster_path}`
           : "/poster_fallback.jpg",
-        votes: r.votes ?? 0,
       }));
       setRows(mapped);
     })();
@@ -155,11 +155,6 @@ export default function NominationsCarousel({
                   <span className="text-[13px] text-white truncate max-w-[80%]">
                     {r.title}
                   </span>
-                  {r.votes > 0 && (
-                    <span className="text-xs font-semibold text-yellow-400">
-                      +{r.votes}
-                    </span>
-                  )}
                 </div>
 
                 {canEdit && isEditing && (

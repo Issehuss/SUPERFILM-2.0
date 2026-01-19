@@ -11,13 +11,15 @@ export default function MyClubGate() {
 
   useEffect(() => {
     let cancelled = false;
+    let retryTimer;
 
-    (async () => {
-      // Not signed in → go to clubs list
-      if (!user?.id) {
+    const load = async () => {
+      const { data: auth } = await supabase.auth.getSession();
+      const sessionUserId = auth?.session?.user?.id || null;
+      const resolvedUserId = user?.id || sessionUserId;
+      if (!resolvedUserId) {
         if (!cancelled) {
-          navigate("/clubs", { replace: true });
-          setDone(true);
+          retryTimer = setTimeout(load, 500);
         }
         return;
       }
@@ -34,8 +36,8 @@ export default function MyClubGate() {
       // 1) Find one membership for this user (no joins to avoid policy recursion)
       const { data: mem, error: mErr } = await supabase
         .from("club_members")
-        .select("club_id")
-        .eq("user_id", user.id)
+        .select("club_id, user_id, role, joined_at, accepted")
+        .eq("user_id", resolvedUserId)
         .limit(1)
         .maybeSingle();
 
@@ -65,10 +67,14 @@ export default function MyClubGate() {
         navigate(dest, { replace: true });
         setDone(true);
       }
-    })();
+    };
+    load();
 
-    return () => { cancelled = true; };
-  }, [user, navigate]);
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  }, [user?.id, navigate]);
 
   // Tiny placeholder (renders only for a split second)
   if (done) return null;

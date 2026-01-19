@@ -314,7 +314,7 @@ export default function AccountMenu({ className = "" }) {
             className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-white/10 rounded-2xl"
           >
             <Download className="h-4 w-4" />
-            <span>Install SuperFilm</span>
+            <span>Install SuperFilm PWA</span>
           </button>
 
 {/* View Tutorial Again */}

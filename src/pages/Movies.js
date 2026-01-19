@@ -133,6 +133,11 @@ function Movies({ searchQuery = "" }) {
     }
 
     setNominating((prev) => ({ ...prev, [movie.id]: true }));
+    setNominatedIds((prev) => {
+      const next = new Set(prev);
+      next.add(movie.id);
+      return next;
+    });
     try {
       const { error } = await supabase
         .from("nominations")
@@ -148,6 +153,11 @@ function Movies({ searchQuery = "" }) {
         );
 
       if (error) {
+        setNominatedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(movie.id);
+          return next;
+        });
         const msg = String(error.message || "").toLowerCase();
         if (msg.includes("policy")) {
           alert("You need to be a member of this club to nominate.");
@@ -158,12 +168,12 @@ function Movies({ searchQuery = "" }) {
       }
 
       toast.success("Nominated!");
+    } catch (e2) {
       setNominatedIds((prev) => {
         const next = new Set(prev);
-        next.add(movie.id);
+        next.delete(movie.id);
         return next;
       });
-    } catch (e2) {
       alert(e2.message || "Could not add nomination.");
     } finally {
       setNominating((prev) => {

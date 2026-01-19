@@ -3,10 +3,36 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import "./Events.css";
 import supabase from "../supabaseClient.js";
+import useRealtimeResume from "../hooks/useRealtimeResume";
 
 const EVENTS_CACHE_KEY = "cache:events:v1";
 const EVENTS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const FALLBACK_EVENT_IMAGE = "https://placehold.co/600x800?text=Event";
+const EVENTS_SELECT_FULL = [
+  "id",
+  "slug",
+  "title",
+  "date",
+  "venue",
+  "poster_url",
+  "tags",
+  "summary",
+  "club_id",
+  "club_name",
+  "lat",
+  "lon",
+  "city_name",
+].join(", ");
+const EVENTS_SELECT_MIN = [
+  "id",
+  "slug",
+  "title",
+  "date",
+  "venue",
+  "poster_url",
+  "club_id",
+  "club_name",
+].join(", ");
 
 function readEventsCache() {
   try {
@@ -35,13 +61,7 @@ function writeEventsCache(data) {
 
 // ---------------- Row → UI mapper (tolerant to schema) ----------------
 function mapRowToEvent(row) {
-  const dateIso =
-    row.datetime ??
-    row.date_time ??
-    row.date ??
-    row.starts_at ??
-    row.start_time ??
-    null;
+  const dateIso = row.date ?? null;
 
   const club = row.clubs || row.club || {};
 
@@ -61,9 +81,7 @@ function mapRowToEvent(row) {
     date: dateIso ? new Date(dateIso).toISOString() : new Date().toISOString(),
     venue: row.venue ?? row.location ?? "Venue",
     posterUrl:
-      row.poster_url ??
-      row.image_url ??
-      FALLBACK_EVENT_IMAGE,
+      row.poster_url ?? FALLBACK_EVENT_IMAGE,
     tags: Array.isArray(row.tags)
       ? row.tags
       : typeof row.tags === "string"
@@ -131,6 +149,7 @@ export default function Events() {
   const [liveEvents, setLiveEvents] = useState(cached || []);
   const [loadingLive, setLoadingLive] = useState(!cached);
   const [query, setQuery] = useState("");
+  const resumeTick = useRealtimeResume();
 
   const location = useLocation();
   const navigate = useNavigate();
@@ -177,7 +196,8 @@ export default function Events() {
         try {
           const { data, error } = await supabase
             .from("events")
-            .select("*")
+            .select(EVENTS_SELECT_FULL)
+            .order("date", { ascending: true })
             .limit(300);
           if (error) throw error;
           mapped = (data || []).map(mapRowToEvent);
@@ -186,7 +206,8 @@ export default function Events() {
           // Fallback: conservative column list to avoid 400s on missing columns
           const { data, error } = await supabase
             .from("events")
-            .select("id, slug, title, date, datetime, starts_at, venue, location, poster_url, image_url, tags, summary, club_id, club_name")
+            .select(EVENTS_SELECT_MIN)
+            .order("date", { ascending: true })
             .limit(300);
           if (error) throw error;
           mapped = (data || []).map(mapRowToEvent);
@@ -246,7 +267,7 @@ export default function Events() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [resumeTick]);
 
   // Only live events — no mock fallback
   const base = liveEvents;

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useUser } from "../context/UserContext";
 import supabase from "../supabaseClient";
+import useRealtimeResume from "../hooks/useRealtimeResume";
 
 // Safe lowercasing that tolerates null/undefined/non-strings
 const toKey = (v) => (v == null ? "" : String(v)).trim().toLowerCase();
@@ -10,6 +11,7 @@ export default function PartnerChatAuditPanel({ clubId, limit = 20 }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+  const resumeTick = useRealtimeResume();
 
   useEffect(() => {
     let alive = true;
@@ -31,7 +33,9 @@ export default function PartnerChatAuditPanel({ clubId, limit = 20 }) {
 
       const { data, error } = await supabase
         .from("club_messages_audit_v")
-        .select("*")
+        .select(
+          "id, club_id, created_at, type, body, content, image_url, is_deleted, author_name, author_slug"
+        )
         .eq("club_id", clubId)
         .order("created_at", { ascending: false })
         .limit(limit);
@@ -74,7 +78,7 @@ export default function PartnerChatAuditPanel({ clubId, limit = 20 }) {
       alive = false;
       if (channel) supabase.removeChannel(channel);
     };
-  }, [clubId, isPartner, limit]);
+  }, [clubId, isPartner, limit, resumeTick]);
 
   if (!isPartner || !clubId) return null;
 
@@ -154,4 +158,3 @@ export default function PartnerChatAuditPanel({ clubId, limit = 20 }) {
     </div>
   );
 }
-

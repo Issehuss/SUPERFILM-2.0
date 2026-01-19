@@ -1,6 +1,8 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import supabase from '../supabaseClient';
 import { useUser } from '../context/UserContext';
+import useSafeSupabaseFetch from "./useSafeSupabaseFetch";
+import useAppResume from "./useAppResume";
 
 const CACHE_KEY = 'cache:myClubs:v1';
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
@@ -32,100 +34,107 @@ function writeCache(userId, clubs) {
 }
 
 export default function useMyClubs(userIdOverride) {
-  const { user, sessionLoaded } = useUser();
+  const { user } = useUser();
   const userId = userIdOverride || user?.id || null;
   const cached = readCache(userId);
 
   const [clubs, setClubs] = useState(cached || []);
   const [loading, setLoading] = useState(() => !!userId && !cached);
   const [error, setError] = useState(null);
-  const mountedRef = useRef(true);
+  const cachedRef = useRef(cached);
+  const appResumeTick = useAppResume();
 
-  useEffect(() => () => { mountedRef.current = false; }, []);
+  const { data: fetchResult, loading: fetchLoading, error: fetchError, timedOut, retry } =
+    useSafeSupabaseFetch(
+      async (session) => {
+        const resolvedUserId = userIdOverride || session?.user?.id;
+        if (!resolvedUserId) throw new Error("no-user");
 
-  const loadClubs = useCallback(async () => {
-    const cachedClubs = readCache(userId);
-    if (cachedClubs?.length) setClubs(cachedClubs);
+        const { data, error } = await supabase
+          .from('club_members')
+          .select('club_id, user_id, role, joined_at, accepted')
+          .eq('user_id', resolvedUserId);
+        if (error) throw error;
 
-    if (!sessionLoaded) {
-      // Keep showing skeletons until the JWT is restored
-      setLoading((prev) => prev || (!!userId && !cachedClubs));
-      return;
-    }
+        const clubIds = (data || []).map((row) => row.club_id).filter(Boolean);
+        let clubsMap = {};
+        if (clubIds.length) {
+          const { data: clubsData } = await supabase
+            .from('clubs_public')
+            .select('id, slug, name, profile_image_url')
+            .in('id', clubIds);
+          clubsMap = (clubsData || []).reduce((acc, c) => {
+            acc[c.id] = c;
+            return acc;
+          }, {});
+        }
 
-    if (!userId) {
-      setClubs([]);
-      setLoading(false);
-      return;
-    }
+        const flattened = (data || [])
+          .map((row) => {
+            const club = clubsMap[row.club_id] || {};
+            return {
+              role: row.role,
+              id: row.club_id,
+              slug: club.slug || null,
+              name: club.name || "Club",
+              profile_image_url: club.profile_image_url || null,
+              next_screening: null,
+            };
+          })
+          .filter((c) => c.id);
 
-    // Only show loading states when we don't already have cached data
-    setLoading((prev) => prev || !cachedClubs);
-    setError(null);
+        let combined = flattened;
+        if (!combined.length) {
+          const { data: owned, error: ownedErr } = await supabase
+            .from('clubs')
+            .select('id, slug, name, profile_image_url')
+            .eq('owner_id', resolvedUserId);
+          if (ownedErr) {
+            console.warn("[useMyClubs] owned fetch error:", ownedErr.message);
+          }
+          if (!ownedErr && owned?.length) {
+            combined = owned.map((c) => ({ role: "owner", ...c, next_screening: null }));
+          }
+        }
 
-    // Join memberships -> clubs; alias nested select as "club"
-    const { data, error } = await supabase
-      .from('club_members')
-      .select(`
-        role,
-        club:clubs (
-          id, slug, name, profile_image_url, banner_url,
-          next_screening:club_next_screening (
-            film_title,
-            screening_at,
-            location
-          )
-        )
-      `)
-      .eq('user_id', userId);
-
-    if (!mountedRef.current) return;
-    if (error) {
-      console.warn("[useMyClubs] membership fetch error:", error.message);
-      setError(error);
-      setLoading(false);
-      return;
-    }
-
-    // Flatten and filter out null joins (shouldn’t happen but safe)
-    const flattened = (data || [])
-      .map(row => {
-        const club = row.club || {};
-        const nextScreening = Array.isArray(club.next_screening)
-          ? club.next_screening[0]
-          : club.next_screening;
-        return {
-          role: row.role,
-          ...club,
-          next_screening: nextScreening || null,
-        };
-      })
-      .filter(c => c.id);
-
-    let combined = flattened;
-
-    // Fallback: include owned clubs if memberships are empty
-    if (!combined.length) {
-      const { data: owned, error: ownedErr } = await supabase
-        .from('clubs')
-        .select('id, slug, name, profile_image_url, banner_url')
-        .eq('owner_id', userId);
-      if (ownedErr) {
-        console.warn("[useMyClubs] owned fetch error:", ownedErr.message);
-      }
-      if (!ownedErr && owned?.length) {
-        combined = owned.map((c) => ({ role: "owner", ...c, next_screening: null }));
-      }
-    }
-
-    setClubs(combined);
-    writeCache(userId, combined);
-    setLoading(false);
-  }, [sessionLoaded, userId]);
+        return { userId: resolvedUserId, clubs: combined };
+      },
+      [userIdOverride, appResumeTick],
+      { enabled: true, timeoutMs: 8000 }
+    );
 
   useEffect(() => {
-    loadClubs();
-  }, [loadClubs]);
+    const cachedClubs = readCache(userId);
+    if (cachedClubs?.length) {
+      setClubs(cachedClubs);
+      cachedRef.current = cachedClubs;
+      setLoading(false);
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    setLoading(fetchLoading || (!!userId && !cachedRef.current));
+  }, [fetchLoading, userId]);
+
+  useEffect(() => {
+    if (!fetchResult) return;
+    setClubs(fetchResult.clubs || []);
+    writeCache(fetchResult.userId, fetchResult.clubs || []);
+    setError(null);
+  }, [fetchResult]);
+
+  useEffect(() => {
+    if (fetchError && fetchError.message !== "no-user") {
+      setError(fetchError);
+      setLoading(false);
+    }
+  }, [fetchError]);
+
+  useEffect(() => {
+    if (timedOut) {
+      setError(new Error("My clubs loading timed out"));
+    }
+  }, [timedOut]);
 
   // Re-run when Supabase refreshes the JWT to avoid "needs refresh" blanks
   useEffect(() => {
@@ -136,14 +145,15 @@ export default function useMyClubs(userIdOverride) {
         return;
       }
       const sessionUserId = session?.user?.id;
-      if (!sessionUserId || sessionUserId !== userId) return;
+      const resolvedUserId = userIdOverride || userId;
+      if (!sessionUserId || (resolvedUserId && sessionUserId !== resolvedUserId)) return;
       if (event === "TOKEN_REFRESHED" || event === "SIGNED_IN") {
-        loadClubs();
+        retry();
       }
     });
 
     return () => auth?.subscription?.unsubscribe();
-  }, [loadClubs, userId]);
+  }, [retry, userId, userIdOverride]);
 
   return { clubs, loading, error };
 }

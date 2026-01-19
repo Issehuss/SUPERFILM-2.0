@@ -58,7 +58,9 @@ export default function UserFilmRatings({
       // If you created the view:
       const { data, error } = await supabase
         .from("user_screening_ratings")
-        .select("*")
+        .select(
+          "stars, created_at, screening_id, film_id, starts_at, screening_title, club_id, club_name, club_slug"
+        )
         .eq("user_id", userId)
         .order("created_at", { ascending: false })
         .limit(limit);

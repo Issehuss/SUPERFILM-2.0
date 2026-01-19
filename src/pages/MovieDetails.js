@@ -198,27 +198,36 @@ function MovieDetails() {
   // Check if already nominated by this user for active club (same behavior as Movies page)
   useEffect(() => {
     let cancelled = false;
-    const activeClubId = localStorage.getItem("activeClubId");
-    if (!activeClubId || !user?.id || !movie?.id) {
-      setNominated(false);
-      return;
-    }
-    (async () => {
+    let retryTimer;
+    const loadNomination = async () => {
+      const activeClubId = localStorage.getItem("activeClubId");
+      const { data: auth } = await supabase.auth.getSession();
+      const sessionUserId = auth?.session?.user?.id || null;
+      const resolvedUserId = user?.id || sessionUserId;
+      if (!activeClubId || !resolvedUserId || !movie?.id) {
+        if (!cancelled) {
+          setNominated(false);
+          if (!resolvedUserId) retryTimer = setTimeout(loadNomination, 500);
+        }
+        return;
+      }
       try {
         const { count, error } = await supabase
           .from("nominations")
-          .select("*", { count: "exact", head: true })
+          .select("id, movie_id, movie_title, poster_path, created_at", { count: "exact", head: true })
           .eq("club_id", activeClubId)
           .eq("movie_id", movie.id)
-          .eq("created_by", user.id);
+          .eq("created_by", resolvedUserId);
         if (error) throw error;
         if (!cancelled) setNominated((count || 0) > 0);
       } catch {
         if (!cancelled) setNominated(false);
       }
-    })();
+    };
+    loadNomination();
     return () => {
       cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
     };
   }, [movie?.id, user?.id, clubId]);
 
@@ -251,6 +260,8 @@ function MovieDetails() {
     }
 
     setNominating(true);
+    setConfirmed(true);
+    setNominated(true);
     try {
       const { error } = await supabase
         .from("nominations")
@@ -266,6 +277,8 @@ function MovieDetails() {
         );
 
       if (error) {
+        setConfirmed(false);
+        setNominated(false);
         const msg = String(error.message || "").toLowerCase();
         if (msg.includes("policy")) {
           alert("You need to be a member of this club to nominate.");
@@ -276,9 +289,9 @@ function MovieDetails() {
       }
 
       toast.success("Nominated!");
-      setConfirmed(true);
-      setNominated(true);
     } catch (e) {
+      setConfirmed(false);
+      setNominated(false);
       alert(e.message || "Could not add nomination.");
     } finally {
       setNominating(false);

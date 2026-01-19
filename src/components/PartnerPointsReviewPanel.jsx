@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { useUser } from "../context/UserContext";
 import supabase from "../supabaseClient";
+import useRealtimeResume from "../hooks/useRealtimeResume";
 
 // Safe lowercasing that tolerates null/undefined/non-strings
 const toKey = (v) => (v == null ? "" : String(v)).trim().toLowerCase();
@@ -17,6 +18,7 @@ export default function PartnerPointsReviewPanel({ clubId, onChange }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState("");
+  const resumeTick = useRealtimeResume();
 
   useEffect(() => {
     let alive = true;
@@ -38,7 +40,9 @@ export default function PartnerPointsReviewPanel({ clubId, onChange }) {
 
       const { data, error } = await supabase
         .from("point_events")
-        .select("*")
+        .select(
+          "id, club_id, status, reason, points, created_at, evidence_url, proof_url, attachment_url, media_url, evidence"
+        )
         .eq("club_id", clubId)
         .eq("status", "pending")
         .order("created_at", { ascending: false })
@@ -81,7 +85,7 @@ export default function PartnerPointsReviewPanel({ clubId, onChange }) {
       alive = false;
       if (ch) supabase.removeChannel(ch);
     };
-  }, [clubId, isPartner]);
+  }, [clubId, isPartner, resumeTick]);
 
   if (!isPartner) return null;
 

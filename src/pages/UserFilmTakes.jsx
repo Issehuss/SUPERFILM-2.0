@@ -4,6 +4,7 @@ import { useParams, Link } from "react-router-dom";
 import { ChevronDown, Search } from "lucide-react";
 import supabase from "../supabaseClient";
 import FilmTakeCard from "../components/FilmTakeCard.jsx";
+import { PROFILE_SELECT } from "../lib/profileSelect";
 
 const UUID_RX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -14,7 +15,7 @@ async function loadProfileByIdentifier(identifier) {
     if (UUID_RX.test(String(identifier))) {
       const { data, error } = await supabase
         .from("profiles")
-        .select("*")
+        .select(PROFILE_SELECT)
         .eq("id", identifier)
         .maybeSingle();
       if (error) throw error;
@@ -23,7 +24,7 @@ async function loadProfileByIdentifier(identifier) {
 
     const { data, error } = await supabase
       .from("profiles")
-      .select("*")
+      .select(PROFILE_SELECT)
       .eq("slug", String(identifier))
       .maybeSingle();
     if (error) throw error;
@@ -34,7 +35,34 @@ async function loadProfileByIdentifier(identifier) {
   }
 }
 
-const PAGE_SIZE = 12;
+const PAGE_SIZE = 20;
+const FILM_TAKES_SELECT = [
+  "id",
+  "user_id",
+  "club_id",
+  "film_id",
+  "film_title",
+  "take",
+  "rating_5",
+  "rating",
+  "aspect_key",
+  "poster_path",
+  "created_at",
+  "updated_at",
+].join(", ");
+
+function TakeCardSkeleton() {
+  return (
+    <div className="rounded-2xl border border-zinc-800 bg-black/40 p-3 flex gap-3 animate-pulse">
+      <div className="w-12 h-16 rounded-xl bg-zinc-800" />
+      <div className="flex-1 space-y-2">
+        <div className="h-4 w-2/3 rounded bg-zinc-800" />
+        <div className="h-3 w-full rounded bg-zinc-800" />
+        <div className="h-3 w-1/2 rounded bg-zinc-800" />
+      </div>
+    </div>
+  );
+}
 
 export default function UserFilmTakes() {
   const { slug, id } = useParams();
@@ -82,7 +110,7 @@ export default function UserFilmTakes() {
 
       const { data, error } = await supabase
         .from("club_film_takes")
-        .select("*")
+        .select(FILM_TAKES_SELECT)
         .eq("user_id", profile.id)
         .eq("is_archived", false)
         .order("created_at", { ascending: false })
@@ -305,16 +333,14 @@ export default function UserFilmTakes() {
         )}
 
         <div className="mt-4 text-sm text-zinc-400">
-          {loadingPage && !initialLoaded
-            ? "Loading takes..."
-            : `${filtered.length} results`}
+          {loadingPage && !initialLoaded ? "Loading takes…" : `${filtered.length} results`}
         </div>
 
         {/* Grid */}
         <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filtered.map((take) => (
-            <FilmTakeCard key={take.id} take={take} />
-          ))}
+          {loadingPage && !initialLoaded
+            ? Array.from({ length: 6 }).map((_, idx) => <TakeCardSkeleton key={`take-skel-${idx}`} />)
+            : filtered.map((take) => <FilmTakeCard key={take.id} take={take} />)}
         </div>
 
         {/* Infinite Scroll Sentinel */}

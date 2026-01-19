@@ -26,14 +26,21 @@ export default function ProfileQuickEditor({ onUpdated }) {
   // Load existing basics (incl. username + username meta)
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      if (!user?.id) return;
+    let retryTimer;
+    const loadBasics = async () => {
+      const { data: auth } = await supabase.auth.getSession();
+      const sessionUserId = auth?.session?.user?.id || null;
+      const resolvedUserId = user?.id || sessionUserId;
+      if (!resolvedUserId) {
+        retryTimer = setTimeout(loadBasics, 500);
+        return;
+      }
       const { data, error } = await supabase
         .from("profiles")
         .select(
           "display_name, username, bio, avatar_url, created_at, username_last_changed_at, username_changes_in_window, username_window_started_at"
         )
-        .eq("id", user.id)
+        .eq("id", resolvedUserId)
         .single();
 
       if (cancelled || error) return;
@@ -49,8 +56,12 @@ export default function ProfileQuickEditor({ onUpdated }) {
         username_changes_in_window: data?.username_changes_in_window ?? 0,
       });
       setUsernameWarning(warn || "");
-    })();
-    return () => { cancelled = true; };
+    };
+    loadBasics();
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, user?.name]);
 

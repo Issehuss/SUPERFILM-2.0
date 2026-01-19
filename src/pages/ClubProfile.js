@@ -29,6 +29,9 @@ import { ASPECTS } from "../constants/aspects";
 import FilmAverageCell from "../components/FilmAverageCell.jsx";
 import DatePicker from "react-datepicker";
 import { leaveClubAndMaybeDelete } from "../lib/leaveClub";
+import useRealtimeResume from "../hooks/useRealtimeResume";
+import useSafeSupabaseFetch from "../hooks/useSafeSupabaseFetch";
+import useAppResume from "../hooks/useAppResume";
 
 
 
@@ -130,7 +133,7 @@ const writeClubCache = (id, data) => {
 /* -----------------------------
    Ticket UI
 ------------------------------*/
-const TicketCard = ({ title, tagline, location, datetime, onClick }) => (
+const TicketCard = ({ title, tagline, location, dateLabel, onClick }) => (
   <div
     role={onClick ? 'button' : undefined}
     tabIndex={onClick ? 0 : undefined}
@@ -171,10 +174,10 @@ const TicketCard = ({ title, tagline, location, datetime, onClick }) => (
               <span className="text-zinc-200">{location}</span>
             </div>
           )}
-          {datetime && (
+          {dateLabel && (
             <div className="flex items-center gap-2">
               <CalendarClock className="w-4 h-4 text-yellow-400" />
-              <span className="text-zinc-200">{datetime}</span>
+              <span className="text-zinc-200">{dateLabel}</span>
             </div>
           )}
         </div>
@@ -567,7 +570,7 @@ function MembersDialog({
 
   
 function useFilmTakes() {
-  const { user, profile, saveProfilePatch, isPartner, hasRole, sessionLoaded } = useUser();
+  const { user, profile, saveProfilePatch, isPartner, hasRole } = useUser();
 
   async function addTake({ text, rating_5 = null, aspect_key = null, movie, club }) {
     if (!user?.id) throw new Error("Not signed in");
@@ -624,6 +627,7 @@ function ClubAddTake({ movie, club }) {
 
   const { user } = useUser();
   const { addTake } = useFilmTakes();
+  const resumeTick = useAppResume();
 
   // ✅ Hooks must come before any early return
   useEffect(() => {
@@ -638,24 +642,26 @@ function ClubAddTake({ movie, club }) {
     return () => window.removeEventListener("open-take-editor", onOpen);
   }, []);
 
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      if (!user?.id || !club?.id || !movie?.id) {
-        if (active) setHasExisting(false);
-        return;
-      }
-      const { count } = await supabase
+  const { data: existingTakeCount } = useSafeSupabaseFetch(
+    async () => {
+      if (!user?.id || !club?.id || !movie?.id) return 0;
+      const { count, error } = await supabase
         .from("club_film_takes")
-        .select("*", { count: "exact", head: true })
+        .select("id", { count: "exact", head: true })
         .eq("club_id", club.id)
         .eq("user_id", user.id)
         .eq("film_id", Number(movie.id))
         .eq("is_archived", false);
-      if (active) setHasExisting((count || 0) > 0);
-    })();
-    return () => { active = false; };
-  }, [user?.id, club?.id, movie?.id]);
+      if (error) throw error;
+      return count || 0;
+    },
+    [user?.id, club?.id, movie?.id, resumeTick],
+    { enabled: Boolean(user?.id && club?.id && movie?.id), timeoutMs: 8000, initialData: 0 }
+  );
+
+  useEffect(() => {
+    setHasExisting((existingTakeCount || 0) > 0);
+  }, [existingTakeCount]);
 
   // ✅ Early return AFTER hooks (now it's not conditional for the hooks)
   if (!user) return null;
@@ -828,7 +834,8 @@ const [aspect, setAspect] = useState(null);  // standout craft key
   // 0.5–5.0
         // blurb
   
-        const { user, profile, saveProfilePatch, isPartner, hasRole, sessionLoaded } = useUser();
+        const { user, profile, saveProfilePatch, isPartner, hasRole } = useUser();
+        const resumeTick = useAppResume();
 
   const [isMember, setIsMember] = useState(false);
   const [showLazy, setShowLazy] = useState(false);
@@ -926,72 +933,8 @@ const saveNextScreening = async () => {
   console.info("🔥 Payload to save:", payload);
   toast.loading("Saving next screening…", { id: "next-save" });
 
-  setSavingNext(true);
-  const { data, error } = await supabase
-    .from("club_next_screening")
-    .upsert(payload, { onConflict: "club_id" })
-    .select()
-    .maybeSingle();
-
-  if (error) {
-    console.error("❌ Save failed:", error);
-    toast.error(error.message || "Could not save next screening.", { id: "next-save" });
-    setSavingNext(false);
-    return;
-  }
-
-  console.log("✅ Saved row:", data);
-  toast.success("Next screening saved", { id: "next-save" });
-
-  // Update local state so UI reflects DB
-  const normalized = normalizeTmdbPoster(data.film_poster);
-  const posterUrl = normalized.url || fallbackNext;
-  setNextScreening({
-    filmId: data.film_id,
-    title: data.film_title,
-    poster: posterUrl,
-    posterPath: normalized.path ?? nextScreening?.posterPath ?? null,
-    date: data.screening_at,
-    location: data.location,
-    caption: data.caption,
-    id: data.id,
-  });
-
-  // Keep club.nextEvent in sync for any components that still read from it
-  setClub((prev) =>
-    prev
-      ? {
-          ...prev,
-          nextEvent: {
-            ...(prev.nextEvent || {}),
-            title: data.film_title,
-            date: data.screening_at,
-            location: data.location,
-            caption: data.caption,
-            poster: posterUrl || prev.nextEvent?.poster,
-            movieId: data.film_id,
-          },
-        }
-      : prev
-  );
-
-  // Best-effort cleanup: if the table is missing a UNIQUE constraint on club_id,
-  // previous saves may have created extra rows. Remove any siblings so reloads
-  // can safely pick a single record.
-  try {
-    await supabase
-      .from("club_next_screening")
-      .delete()
-      .eq("club_id", club.id)
-      .neq("id", data.id);
-  } catch (cleanupErr) {
-    console.warn("[nextScreening] cleanup duplicate rows failed:", cleanupErr);
-  }
-
-  // Track which film is persisted (used elsewhere)
-  setPersistedFilmId(data.film_id ?? null);
-  setPersistedPosterPath(normalized.path ?? nextScreening?.posterPath ?? null);
   setSavingNext(false);
+  toast.error("Next screening updates are disabled.");
 };
 
 
@@ -1034,6 +977,7 @@ const [rawAvatarImage, setRawAvatarImage] = useState(null);
 
   // NEW: avatar + rename UI state
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const resumeTick = useRealtimeResume();
 const [renameError, setRenameError] = useState('');
 const [renameOk, setRenameOk] = useState('');
 const [newName, setNewName] = useState('');
@@ -1042,12 +986,10 @@ const posterRef = useRef(null);
 const teaserWrapRef = useRef(null);
 const [teaserHeight, setTeaserHeight] = useState(null);
 const [members, setMembers] = useState([]);
-const membersFetchRef = useRef(null);
 const membersCount = useMemo(
   () => (Array.isArray(members) ? members.length : Number(club?.members) || 0),
   [members, club?.members]
 );
-const [membersLoading, setMembersLoading] = useState(true);
 const [selectedResultId, setSelectedResultId] = useState(null);
 const [membersErr, setMembersErr] = useState("");
 const myMembership = members?.find(m => m.user_id === user?.id);
@@ -1138,84 +1080,73 @@ useEffect(() => {
 
 
 
-// re-fetch members (used after role changes)
-const loadMembers = useCallback(async () => {
-  if (!club?.id) return;
-  if (membersFetchRef.current) return membersFetchRef.current;
+const {
+  data: membersResult,
+  loading: membersLoading,
+  error: membersError,
+  retry: retryMembers,
+} = useSafeSupabaseFetch(
+  async () => {
+    if (!club?.id) throw new Error("no-club");
+    const { data: memRows, error: memErr } = await supabase
+      .from("club_members")
+      .select("club_id, user_id, role, joined_at, accepted")
+      .eq("club_id", club.id);
 
-  const p = (async () => {
-    try {
-      // 1) raw member rows
-      const { data: memRows, error: memErr } = await supabase
-        .from("club_members")
-        .select("user_id, role")
-        .eq("club_id", club.id);
+    if (memErr) throw memErr;
 
-      if (memErr) throw memErr;
+    const ids = (memRows || []).map(r => r.user_id).filter(Boolean);
+    let profilesMap = {};
 
-      const ids = (memRows || []).map(r => r.user_id).filter(Boolean);
-      let profilesMap = {};
+    if (ids.length) {
+      const { data: profRows, error: profErr } = await supabase
+        .from("profiles")
+        .select("id, slug, display_name, avatar_url, is_premium, plan")
+        .in("id", ids);
 
-      if (ids.length) {
-        // 2) fetch profiles in bulk
-        const { data: profRows, error: profErr } = await supabase
-          .from("profiles")
-          .select("id, slug, display_name, avatar_url, is_premium, plan")
-          .in("id", ids);
-
-        if (profErr) {
-          // fail-safe: keep going with empty profiles
-          profilesMap = {};
-        } else {
-          profilesMap = Object.fromEntries(
-            (profRows || []).map(p => [p.id, p])
-          );
-        }
+      if (!profErr) {
+        profilesMap = Object.fromEntries(
+          (profRows || []).map(p => [p.id, p])
+        );
       }
-
-      // merge + sort
-      const priority = { president: 0, vice_president: 1, member: 2 };
-      const merged = (memRows || []).map(r => ({
-        user_id: r.user_id,
-        role: r.role || "member",
-        profiles: profilesMap[r.user_id] || null,
-      }));
-
-      const sorted = merged.slice().sort((a, b) => {
-        const pa = priority[a.role] ?? 9;
-        const pb = priority[b.role] ?? 9;
-        if (pa !== pb) return pa - pb;
-        const an = (a.profiles?.display_name || "").toLowerCase();
-        const bn = (b.profiles?.display_name || "").toLowerCase();
-        return an.localeCompare(bn);
-      });
-
-      setMembers(sorted);
-    } catch (e) {
-      console.error("loadMembers failed:", e);
-      setMembers([]);
-    } finally {
-      setMembersLoading(false);
     }
-  })();
 
-  membersFetchRef.current = p.finally(() => {
-    membersFetchRef.current = null;
-  });
-  return membersFetchRef.current;
-}, [club?.id]);
+    const priority = { president: 0, vice_president: 1, member: 2 };
+    const merged = (memRows || []).map(r => ({
+      user_id: r.user_id,
+      role: r.role || "member",
+      profiles: profilesMap[r.user_id] || null,
+    }));
 
+    const sorted = merged.slice().sort((a, b) => {
+      const pa = priority[a.role] ?? 9;
+      const pb = priority[b.role] ?? 9;
+      if (pa !== pb) return pa - pb;
+      const an = (a.profiles?.display_name || "").toLowerCase();
+      const bn = (b.profiles?.display_name || "").toLowerCase();
+      return an.localeCompare(bn);
+    });
 
+    return sorted;
+  },
+  [club?.id, resumeTick],
+  { enabled: Boolean(club?.id), timeoutMs: 8000, initialData: [] }
+);
 
-
-
-
-// call it on mount/club change
 useEffect(() => {
-  if (!club?.id) return;
-  setMembersLoading(true);
-  loadMembers();
-}, [club?.id, loadMembers, sessionLoaded]);
+  if (Array.isArray(membersResult)) {
+    setMembers(membersResult);
+    setMembersErr("");
+  }
+}, [membersResult]);
+
+useEffect(() => {
+  if (membersError) {
+    console.error("loadMembers failed:", membersError);
+    setMembers([]);
+    setMembersErr(membersError.message || String(membersError));
+  }
+}, [membersError]);
 
 
 // RPC helpers
@@ -1231,7 +1162,7 @@ const setMemberRole = async (userId, role) => {
     return;
   }
   toast?.success ? toast.success("Role updated") : console.log("Role updated");
-  await loadMembers();
+  await retryMembers();
 };
 
 const transferPresidency = async (userId) => {
@@ -1247,7 +1178,7 @@ const transferPresidency = async (userId) => {
     return;
   }
   toast?.success ? toast.success("Presidency transferred") : console.log("Presidency transferred");
-  await loadMembers();
+  await retryMembers();
 };
 
 
@@ -1288,13 +1219,9 @@ useEffect(() => {
   };
 }, []);
 
-useEffect(() => {
-  let cancelled = false;
-  async function fetchOpenReview() {
-    if (!club?.id || !nextFilmId) {
-      if (!cancelled) setOpenReview(null);
-      return;
-    }
+const { data: openReviewRow, error: openReviewError } = useSafeSupabaseFetch(
+  async () => {
+    if (!club?.id || !nextFilmId) return null;
     const { data, error } = await supabase
       .from("club_reviews")
       .select("id, club_id, tmdb_id, title, poster_url, year, state, opens_at, closes_at")
@@ -1304,14 +1231,22 @@ useEffect(() => {
       .order("opens_at", { ascending: false })
       .limit(1)
       .maybeSingle();
+    if (error) throw error;
+    return data || null;
+  },
+  [club?.id, nextFilmId, resumeTick],
+  { enabled: Boolean(club?.id && nextFilmId), timeoutMs: 8000, initialData: null }
+);
 
-    if (!cancelled) setOpenReview(error ? null : data || null);
+useEffect(() => {
+  setOpenReview(openReviewRow || null);
+}, [openReviewRow]);
+
+useEffect(() => {
+  if (openReviewError) {
+    setOpenReview(null);
   }
-  fetchOpenReview();
-  return () => {
-    cancelled = true;
-  };
-}, [club?.id, nextFilmId]);
+}, [openReviewError]);
 
 
 
@@ -1325,7 +1260,7 @@ useEffect(() => {
       { event: "*", schema: "public", table: "club_members", filter: `club_id=eq.${club.id}` },
       () => {
         // just re-use existing loader
-        loadMembers();
+        retryMembers();
       }
     )
     .subscribe();
@@ -1333,17 +1268,22 @@ useEffect(() => {
   return () => {
     supabase.removeChannel(ch);
   };
-}, [club?.id, loadMembers]);
+}, [club?.id, retryMembers, resumeTick]);
 
 
 
   
+
+  const clubSelectCols = `
+  id, slug, name, tagline, about, location,
+  banner_url, profile_image_url, name_last_changed_at,
+  featured_posters,
+  type, is_private, privacy_mode, visibility,
+  next_screening:club_next_screening(*)
+`;
 
   // Loader: try UUID → slug → id (covers numeric IDs too)
   useEffect(() => {
-    if (!sessionLoaded) return;   // ★ DO NOT LOAD CLUB UNTIL JWT READY
-    let cancelled = false;
-  
     const cached = readClubCache(idParam);
     if (cached) {
       setClub(cached);
@@ -1352,306 +1292,208 @@ useEffect(() => {
       setClub(null);
       setLoading(true);
     }
+  }, [idParam]);
 
-    const loadClub = async () => {
-      setDebugParam(idParam);
-      if (!idParam) return;
-      setLoading((prev) => prev && !cached);
-      setNotFound(false);
-      setLastError(null);
-      setLastTried('');
-   
+  const { data: clubLoadResult, error: clubLoadError } = useSafeSupabaseFetch(
+    async () => {
+      if (!idParam) return null;
+      let lastTried = "";
+      let lastError = null;
 
-
-      // SELECT now includes avatar + name_last_changed_at
-
-  const selectCols = `
-  id, slug, name, tagline, about, location,
-  banner_url, profile_image_url, name_last_changed_at,
-  featured_posters,
-  type, is_private, privacy_mode, visibility,
-  next_screening:club_next_screening(*)
-`;
-
-
-
-      try {
-        // 1) UUID → by id
-        if (UUID_RX.test(idParam)) {
-          setLastTried('id (uuid)');
-          const { data, error } = await supabase
-            .from('clubs')
-            .select(selectCols)
-            .eq('id', idParam)
-            .maybeSingle();
-
-          if (cancelled) return;
-
-          if (error) setLastError(error);
-          if (data) {
-            const mapped = mapClubRowToUI(data);
-            if (mapped.nextEvent && !mapped.nextEvent.poster && mapped.nextEvent.title) {
-              const guess = await fetchPosterFromTMDB(cleanTitleForSearch(mapped.nextEvent.title));
-              mapped.nextEvent.poster = guess?.poster || fallbackNext;
-            }
-            try {
-              const raw = localStorage.getItem(`sf_featured_map_${data.id}`);
-              mapped.featuredMap = raw ? JSON.parse(raw) : {};
-            } catch {}
-            writeClubCache(idParam, mapped);
-            setClub(mapped);
-setPersistedFilmId(mapped?.nextEvent?.movieId ?? null); // ← add this
-setNewName(mapped.name || '');
-setLoading(false);
-return;
-          }
-        }
-
-        // 2) Try slug
-        setLastTried((s) => (s ? `${s} → slug` : 'slug'));
-        let { data, error } = await supabase
-          .from('clubs')
-          .select(selectCols)
-          .eq('slug', idParam)
+      const tryFetch = async (field, value, label) => {
+        lastTried = lastTried ? `${lastTried} → ${label}` : label;
+        const { data, error } = await supabase
+          .from("clubs")
+          .select(clubSelectCols)
+          .eq(field, value)
           .maybeSingle();
+        if (error) lastError = error;
+        return data || null;
+      };
 
-        if (cancelled) return;
-
-        if (error) setLastError(error);
-        if (!data && UUID_RX.test(idParam)) {
-          // 3) Try id when it looks like a valid UUID
-          setLastTried((s) => `${s} → id`);
-          const alt = await supabase
-            .from('clubs')
-            .select(selectCols)
-            .eq('id', idParam)
-            .maybeSingle();
-          data = alt.data;
-          if (alt.error) setLastError(alt.error);
-        }
-
-        if (data) {
-          const mapped = mapClubRowToUI(data);
-          if (mapped.nextEvent && !mapped.nextEvent.poster && mapped.nextEvent.title) {
-            const guess = await fetchPosterFromTMDB(cleanTitleForSearch(mapped.nextEvent.title));
-            mapped.nextEvent.poster = guess?.poster || fallbackNext;
-          }
-          try {
-            const raw = localStorage.getItem(`sf_featured_map_${data.id}`);
-            mapped.featuredMap = raw ? JSON.parse(raw) : {};
-          } catch {}
-          writeClubCache(idParam, mapped);
-          setClub(mapped);
-setPersistedFilmId(mapped?.nextEvent?.movieId ?? null); // ← add this
-setNewName(mapped.name || '');
-setLoading(false);
-return;
-
-        }
-
-        setNotFound(true);
-        setLoading(false);
-      } catch (e) {
-        if (!cancelled) {
-          setLastError({ message: e?.message || 'Unknown runtime error' });
-          setNotFound(true);
-          setLoading(false);
-        }
+      let data = null;
+      if (UUID_RX.test(idParam)) {
+        data = await tryFetch("id", idParam, "id (uuid)");
       }
-    };
+      if (!data) {
+        data = await tryFetch("slug", idParam, "slug");
+      }
+      if (!data && UUID_RX.test(idParam)) {
+        data = await tryFetch("id", idParam, "id");
+      }
 
-    loadClub();
-    return () => { cancelled = true; };
-  }, [idParam, sessionLoaded]);
+      if (!data) {
+        return { data: null, lastTried, error: lastError };
+      }
 
+      const mapped = mapClubRowToUI(data);
+      if (mapped.nextEvent && !mapped.nextEvent.poster && mapped.nextEvent.title) {
+        const guess = await fetchPosterFromTMDB(cleanTitleForSearch(mapped.nextEvent.title));
+        mapped.nextEvent.poster = guess?.poster || fallbackNext;
+      }
+      try {
+        const raw = localStorage.getItem(`sf_featured_map_${data.id}`);
+        mapped.featuredMap = raw ? JSON.parse(raw) : {};
+      } catch {}
 
+      return { data: mapped, lastTried, error: lastError };
+    },
+    [idParam, resumeTick],
+    { enabled: Boolean(idParam), timeoutMs: 8000, initialData: null }
+  );
 
+  useEffect(() => {
+    if (!idParam) return;
+    if (clubLoadResult) {
+      setDebugParam(idParam);
+      setLastTried(clubLoadResult.lastTried || "");
+      setLastError(clubLoadResult.error || null);
 
-
-  // Load featured films from the table (new source) and hydrate the UI shape
-useEffect(() => {
-  let alive = true;
-  (async () => {
-    if (!sessionLoaded) return;
-if (!club?.id) return;
-
-
-    try {
-      const { data: rows, error } = await supabase
-        .from("club_featured_films")
-        .select("tmdb_id, title, poster_path, added_at")
-        .eq("club_id", club.id)
-        .order("added_at", { ascending: false });
-
-              // table might not exist yet → 404/42P01
-      if (error && (error.code === "42P01" || error.message?.includes("relation") || error.status === 404)) {
-        // keep using clubs.featured_posters fallback silently
+      if (clubLoadResult.data) {
+        writeClubCache(idParam, clubLoadResult.data);
+        setClub(clubLoadResult.data);
+        setPersistedFilmId(clubLoadResult.data?.nextEvent?.movieId ?? null);
+        setNewName(clubLoadResult.data?.name || "");
+        setNotFound(false);
+        setLoading(false);
         return;
       }
-
-
-      if (error) throw error;
-      if (!alive) return;
-
-      // If table is empty, keep whatever is already in clubs.featured_posters
-      if (!rows || rows.length === 0) return;
-
-      // Build URLs + map that your <FeaturedFilms> expects
-      const TMDB = "https://image.tmdb.org/t/p/w500";
-      const urls = [];
-      const map = {};
-
-      for (const r of rows) {
-        // Prefer poster_path from table; if missing, leave empty (your component can backfill via TMDB)
-        const url = r?.poster_path ? `${TMDB}${r.poster_path}` : null;
-        if (url) {
-          urls.push(url);
-          map[url] = { id: r.tmdb_id, title: r.title || null };
-        }
-      }
-
-      // Only update if we actually produced URLs
-      if (urls.length) {
-        setClub((prev) =>
-          prev
-            ? {
-                ...prev,
-                featuredFilms: urls,
-                featuredMap: map,
-              }
-            : prev
-        );
-
-        // cache the map like the rest of your code already does
-        try {
-          localStorage.setItem(`sf_featured_map_${club.id}`, JSON.stringify(map));
-        } catch {}
-      }
-    } catch (e) {
-      console.warn("[featured] load from club_featured_films failed:", e?.message || e);
+      setNotFound(true);
+      setLoading(false);
     }
-  })();
+  }, [clubLoadResult, idParam]);
 
-  return () => {
-    alive = false;
-  };
-}, [club?.id]);
+  useEffect(() => {
+    if (clubLoadError) {
+      setLastError({ message: clubLoadError?.message || "Unknown runtime error" });
+      setNotFound(true);
+      setLoading(false);
+    }
+  }, [clubLoadError]);
 
-// Load Next Screening from DB into state
-useEffect(() => {
-  if (!sessionLoaded) return;
-  if (!club?.id) return;
 
-  let active = true;
 
-  (async () => {
-    // Try to load a single next screening row. If duplicates exist (no UNIQUE constraint on club_id),
-    // order and pick the newest so the UI can still hydrate.
-    const { data, error } = await supabase
-      .from("club_next_screening")
-      .select("*")
+
+
+// Load featured films from the table (new source) and hydrate the UI shape
+const { data: featuredRows, error: featuredError } = useSafeSupabaseFetch(
+  async () => {
+    if (!club?.id) return null;
+    const { data: rows, error } = await supabase
+      .from("club_featured_films")
+      .select("tmdb_id, title, poster_path, added_at")
       .eq("club_id", club.id)
-      .order("screening_at", { ascending: false, nullsLast: true })
-      .order("id", { ascending: false })
-      .limit(1);
+      .order("added_at", { ascending: false });
 
-    if (!active) return;
-
-    if (error) {
-      console.warn("[nextScreening] load error:", error);
-      return;
+    if (error && (error.code === "42P01" || error.message?.includes("relation") || error.status === 404)) {
+      return [];
     }
+    if (error) throw error;
+    return rows || [];
+  },
+  [club?.id, resumeTick],
+  { enabled: Boolean(club?.id), timeoutMs: 8000, initialData: null }
+);
 
-    const row = Array.isArray(data) ? data[0] : data;
+useEffect(() => {
+  if (!club?.id || !Array.isArray(featuredRows) || featuredRows.length === 0) return;
+  const TMDB = "https://image.tmdb.org/t/p/w500";
+  const urls = [];
+  const map = {};
 
-    if (!row) {
-      // No row — leave nextScreening null
-      return;
+  for (const r of featuredRows) {
+    const url = r?.poster_path ? `${TMDB}${r.poster_path}` : null;
+    if (url) {
+      urls.push(url);
+      map[url] = { id: r.tmdb_id, title: r.title || null };
     }
+  }
 
-    // ⭐ Map DB row → UI shape
-    if (row) {
-      const normalized = normalizeTmdbPoster(row.film_poster);
-      let posterUrl = normalized.url;
-      // Clean up bad poster values in DB (e.g., '/test.jpg' or blob URLs)
-      if (!normalized.path && row.film_poster) {
-        supabase
-          .from("club_next_screening")
-          .update({ film_poster: null })
-          .eq("id", row.id)
-          .eq("club_id", club.id)
-          .then(() => {
-            console.info("[nextScreening] cleaned invalid film_poster", row.film_poster);
-          })
-          .catch((err) => console.warn("[nextScreening] cleanup failed", err));
-        posterUrl = null;
-      }
-      // If DB poster missing, try TMDB fallback using title
-      if (!posterUrl && row.film_title) {
-        const guess = await fetchPosterFromTMDB(cleanTitleForSearch(row.film_title));
-        posterUrl = guess?.poster || null;
-        if (posterUrl) {
-          const guessedPath = extractTmdbPath(posterUrl);
-          if (guessedPath) {
-            setPersistedPosterPath(guessedPath);
-            // Persist the guessed poster so future loads don’t fall back again
-            try {
-              await supabase
-                .from("club_next_screening")
-                .update({ film_poster: guessedPath })
-                .eq("id", row.id)
-                .eq("club_id", club.id);
-            } catch (err) {
-              console.warn("[nextScreening] failed to persist guessed poster", err);
-            }
-          }
-        }
-      }
-      // Last resort: use static fallback
-      const finalPoster = posterUrl || fallbackNext;
-      setNextScreening({
-        filmId: row.film_id,
-        title: row.film_title,
-        poster: finalPoster,
-        posterPath: normalized.path || extractTmdbPath(posterUrl),
-        date: row.screening_at,
-        location: row.location,
-        caption: row.caption,
-        id: row.id,
-      });
-      setPersistedFilmId(row.film_id ?? null);
-      const pathToPersist = normalized.path || extractTmdbPath(posterUrl);
-      if (pathToPersist) setPersistedPosterPath(pathToPersist);
-    }
-    
-
-
-    // ⭐ Mirror into club.nextEvent for UI
+  if (urls.length) {
     setClub((prev) =>
       prev
         ? {
             ...prev,
-            nextEvent: {
-              ...prev.nextEvent,
-              title: row.film_title,
-              date: row.screening_at,
-              location: row.location,
-              caption: row.caption,
-              poster:
-                normalizeTmdbPoster(row.film_poster).url ||
-                prev.nextEvent?.poster ||
-                fallbackNext,
-              movieId: row.film_id,
-            },
+            featuredFilms: urls,
+            featuredMap: map,
           }
         : prev
     );
-  })();
 
-  return () => {
-    active = false;
-  };
-}, [club?.id, sessionLoaded]);
+    try {
+      localStorage.setItem(`sf_featured_map_${club.id}`, JSON.stringify(map));
+    } catch {}
+  }
+}, [featuredRows, club?.id]);
+
+useEffect(() => {
+  if (featuredError) {
+    console.warn("[featured] load from club_featured_films failed:", featuredError?.message || featuredError);
+  }
+}, [featuredError]);
+
+// Load Next Screening from DB into state
+const { data: nextScreeningRow, error: nextScreeningError } = useSafeSupabaseFetch(
+  async () => {
+    if (!club?.id) return null;
+    const { data, error } = await supabase
+      .from("club_next_screening_v")
+      .select("club_id, title, poster_path, screening_at, location")
+      .eq("club_id", club.id)
+      .limit(1);
+    if (error) throw error;
+    return Array.isArray(data) ? data[0] : data || null;
+  },
+  [club?.id, resumeTick],
+  { enabled: Boolean(club?.id), timeoutMs: 8000, initialData: null }
+);
+
+useEffect(() => {
+  const row = nextScreeningRow;
+  if (!row) return;
+
+  const posterUrl = row.poster_path
+    ? `https://image.tmdb.org/t/p/w500${row.poster_path}`
+    : fallbackNext;
+  const finalPoster = posterUrl || fallbackNext;
+  setNextScreening({
+    filmId: null,
+    title: row.title,
+    poster: finalPoster,
+    posterPath: row.poster_path || null,
+    date: row.screening_at,
+    location: row.location,
+    caption: null,
+    id: null,
+  });
+  setPersistedFilmId(null);
+
+  setClub((prev) =>
+    prev
+      ? {
+          ...prev,
+          nextEvent: {
+            ...prev.nextEvent,
+            title: row.title,
+            date: row.screening_at,
+            location: row.location,
+            caption: null,
+            poster:
+              normalizeTmdbPoster(row.poster_path).url ||
+              prev.nextEvent?.poster ||
+              fallbackNext,
+            movieId: null,
+          },
+        }
+      : prev
+  );
+}, [nextScreeningRow]);
+
+useEffect(() => {
+  if (nextScreeningError) {
+    console.warn("[nextScreening] load error:", nextScreeningError);
+  }
+}, [nextScreeningError]);
 
 
 
@@ -1690,92 +1532,44 @@ useEffect(() => {
 }, [nextScreening?.posterPath, nextScreening?.poster]);
   
   // Hydrate members for real UUID clubs
-  useEffect(() => {
-    let cancelled = false;
-    async function hydrateMembers() {
-      if (!club?.id || !UUID_RX.test(String(club.id))) return;
-      const { data: requests } = await supabase
-  .from('membership_requests')
-  .select('id, user_id, created_at')
-  .eq('club_id', club.id)
-  .eq('status', 'pending')
-  .order('created_at', { ascending: true });
+  const { data: memberListRows, error: memberListError } = useSafeSupabaseFetch(
+    async () => {
+      if (!club?.id || !UUID_RX.test(String(club.id))) return null;
+      const { data: rows, error } = await supabase
+        .from("club_members")
+        .select("club_id, user_id, role, joined_at, accepted")
+        .eq("club_id", club.id);
+      if (error) throw error;
+      return rows || [];
+    },
+    [club?.id, user?.id, resumeTick],
+    { enabled: Boolean(club?.id), timeoutMs: 8000, initialData: null }
+  );
 
-      try {
-        const { data: rows, error } = await supabase
-          .from('club_members')
-          .select('user_id, role')
-          .eq('club_id', club.id);
-        if (cancelled) return;
-        if (!error && rows?.length) {
-          setClub((prev) => prev ? {
+  useEffect(() => {
+    if (!Array.isArray(memberListRows) || !memberListRows.length) return;
+    setClub((prev) =>
+      prev
+        ? {
             ...prev,
-            membersList: rows.map(r => ({
+            membersList: memberListRows.map((r) => ({
               id: r.user_id,
-              name: r.user_id === user?.id ? (user?.name || 'You') : 'Member',
-              avatar: r.user_id === user?.id ? (user?.avatar || fallbackAvatar) : fallbackAvatar,
+              name: r.user_id === user?.id ? user?.name || "You" : "Member",
+              avatar: r.user_id === user?.id ? user?.avatar || fallbackAvatar : fallbackAvatar,
               role: r.role || ROLE.NONE,
             })),
-            members: rows.length
-          } : prev);
-        }
-      } catch {}
-    }
-    hydrateMembers();
-    return () => { cancelled = true; };
-  }, [club?.id, user]);
+            members: memberListRows.length,
+          }
+        : prev
+    );
+  }, [memberListRows, user?.id]);
 
   useEffect(() => {
-    let active = true;
-    (async () => {
-      if (!club?.id) return;
-      setMembersLoading(true);
-      setMembersErr("");
-      try {
-              // 1) raw
-      const { data: memRows, error: memErr } = await supabase
-      .from("club_members")
-      .select("user_id, role")
-      .eq("club_id", club.id);
-    if (memErr) throw memErr;
-
-    // 2) profiles
-    const ids = (memRows || []).map(r => r.user_id).filter(Boolean);
-    let profilesMap = {};
-    if (ids.length) {
-      const { data: profRows, error: profErr } = await supabase
-        .from("profiles")
-        .select("id, slug, display_name, avatar_url, is_premium, plan")
-        .in("id", ids);
-      if (!profErr) {
-        profilesMap = Object.fromEntries((profRows || []).map(p => [p.id, p]));
-      }
+    if (memberListError) {
+      console.warn("[membersList] load error:", memberListError);
     }
+  }, [memberListError]);
 
-    const priority = { president: 0, vice_president: 1, member: 2 };
-    const sorted = (memRows || []).map(r => ({
-      user_id: r.user_id,
-      role: r.role || "member",
-      profiles: profilesMap[r.user_id] || null,
-    })).sort((a, b) => {
-      const pa = priority[a.role] ?? 9;
-      const pb = priority[b.role] ?? 9;
-      if (pa !== pb) return pa - pb;
-      const an = (a.profiles?.display_name || "").toLowerCase();
-      const bn = (b.profiles?.display_name || "").toLowerCase();
-      return an.localeCompare(bn);
-    });
-
-    if (active) setMembers(sorted);
-
-      } catch (e) {
-        if (active) setMembersErr(e.message || String(e));
-      } finally {
-        if (active) setMembersLoading(false);
-      }
-    })();
-    return () => { active = false; };
-  }, [club?.id]);
 
   const currentUserId = user?.id || 'u_creator';
 
@@ -1801,27 +1595,25 @@ useEffect(() => {
     // Put this AFTER hasRole/isPresident/isVice/isStaff/canEdit/isMember are defined
 
 
-useEffect(() => {
-  let ignore = false;
-  (async () => {
-    if (!club?.id || !user?.id) return;
+const { data: memberRow } = useSafeSupabaseFetch(
+  async () => {
+    if (!club?.id || !user?.id) return null;
     const { data, error } = await supabase
       .from("club_members")
-      .select("user_id, role")
+      .select("club_id, user_id, role, joined_at, accepted")
       .eq("club_id", club.id)
       .eq("user_id", user.id)
       .maybeSingle();
-    if (!ignore) {
-      setIsMember(
-        !!data ||
-        isPresident ||
-        isVice ||
-        isStaff
-      );
-    }
-  })();
-  return () => { ignore = true; };
-}, [club?.id, user?.id, isPresident, isVice, isStaff]);
+    if (error) throw error;
+    return data || null;
+  },
+  [club?.id, user?.id, resumeTick],
+  { enabled: Boolean(club?.id && user?.id), timeoutMs: 8000, initialData: null }
+);
+
+useEffect(() => {
+  setIsMember(Boolean(memberRow) || isPresident || isVice || isStaff);
+}, [memberRow, isPresident, isVice, isStaff]);
 
 const canSeeMembersOnly =
   !!user?.id &&
@@ -1863,114 +1655,101 @@ const updateField = (field, value) => {
   
 
   // Hydrate recent activity feed for this club (uses the same view)
-useEffect(() => {
-  let cancelled = false;
-
-  (async () => {
-    if (!sessionLoaded) return;
-if (!club?.id) {
-
-      setClub(prev => prev ? { ...prev, activityFeed: [] } : prev);
-      return;
-    }
-
-    try {
-      const { data, error } = await supabase
-        .from("recent_activity_v")
-        .select("id, created_at, summary, actor_name, actor_avatar")
-        .eq("club_id", club.id)
-        .order("created_at", { ascending: false })
-        .limit(6);
-
-      if (cancelled) return;
-      if (!error) {
-        // Map to the shape your UI already expects: { id, text, ts }
-        const mapped = (data || []).map(r => ({
-          id: r.id,
-          text: r.summary || "",
-          ts: new Date(r.created_at).getTime(),
-        }));
-        setClub(prev => prev ? { ...prev, activityFeed: mapped } : prev);
-      }
-    } catch {
-      if (!cancelled) {
-        setClub(prev => prev ? { ...prev, activityFeed: [] } : prev);
-      }
-    }
-  })();
-
-  return () => { cancelled = true; };
-}, [club?.id, sessionLoaded]);
-
-
-useEffect(() => {
-  let ignore = false;
-  (async () => {
-    if (!club?.id || !user?.id) return;
+const { data: recentActivityRows, error: recentActivityError } = useSafeSupabaseFetch(
+  async () => {
+    if (!club?.id) return [];
     const { data, error } = await supabase
-      .from("club_members")
-      .select("user_id, role")
+      .from("recent_activity_v")
+      .select("id, created_at, summary, actor_name, actor_avatar")
       .eq("club_id", club.id)
-      .eq("user_id", user.id)
-      .maybeSingle();
-    if (!ignore) {
-      setIsMember(
-        !!data ||
-        isPresident ||
-        isVice ||
-        isStaff
-      );
-    }
-  })();
-  return () => { ignore = true; };
-// Tip: avoid putting the function `hasRole` in deps if it isn't memoized.
-}, [club?.id, user?.id, isPresident, isVice, isStaff]);
+      .order("created_at", { ascending: false })
+      .limit(6);
+    if (error) throw error;
+    return data || [];
+  },
+  [club?.id, resumeTick],
+  { enabled: Boolean(club?.id), timeoutMs: 8000, initialData: [] }
+);
+
+useEffect(() => {
+  if (!club?.id) {
+    setClub((prev) => (prev ? { ...prev, activityFeed: [] } : prev));
+    return;
+  }
+  if (Array.isArray(recentActivityRows)) {
+    const mapped = (recentActivityRows || []).map((r) => ({
+      id: r.id,
+      text: r.summary || "",
+      ts: new Date(r.created_at).getTime(),
+    }));
+    setClub((prev) => (prev ? { ...prev, activityFeed: mapped } : prev));
+  }
+}, [recentActivityRows, club?.id]);
+
+useEffect(() => {
+  if (recentActivityError) {
+    setClub((prev) => (prev ? { ...prev, activityFeed: [] } : prev));
+  }
+}, [recentActivityError]);
+
+
 /* end paste */
 
 // (optional) derive canSeeMembersOnly AFTER the effect and flags:
 
 
 
-useEffect(() => {
-  async function loadAvg() {
-    if (!sessionLoaded) return;
-    if (!club?.id || !nextFilmId) {
-      setNextAvg(null);
-      setNextRatingCounts([0, 0, 0, 0, 0]);
-      setNextRatingTotal(0);
-      return;
-    }
+const {
+  data: ratingRows,
+  error: ratingError,
+  retry: retryRatings,
+} = useSafeSupabaseFetch(
+  async () => {
+    if (!club?.id || !nextFilmId) return [];
     const { data, error } = await supabase
       .from("club_film_takes")
       .select("rating")
       .eq("club_id", club.id)
       .eq("film_id", nextFilmId);
+    if (error) throw error;
+    return data || [];
+  },
+  [club?.id, nextFilmId, resumeTick],
+  { enabled: Boolean(club?.id && nextFilmId), timeoutMs: 8000, initialData: [] }
+);
 
-    if (error) {
-      console.warn("avg rating error:", error.message);
-      setNextAvg(null);
-      setNextRatingCounts([0, 0, 0, 0, 0]);
-      setNextRatingTotal(0);
-      return;
-    }
-    const values = (data || [])
-      .map((r) => Number(r.rating))
-      .filter((v) => Number.isFinite(v) && v > 0)
-      .map((v) => (v > 5 ? v / 2 : v));
-    const avg = values.length
-      ? Number((values.reduce((s, v) => s + v, 0) / values.length).toFixed(1))
-      : null;
-    const counts = [0, 0, 0, 0, 0];
-    values.forEach((v) => {
-      const idx = Math.min(4, Math.max(0, Math.round(v) - 1));
-      counts[idx] += 1;
-    });
-    setNextAvg(avg);
-    setNextRatingCounts(counts);
-    setNextRatingTotal(values.length);
+useEffect(() => {
+  if (!club?.id || !nextFilmId) {
+    setNextAvg(null);
+    setNextRatingCounts([0, 0, 0, 0, 0]);
+    setNextRatingTotal(0);
+    return;
   }
-  loadAvg();
-}, [club?.id, nextFilmId, sessionLoaded]);
+  const values = (ratingRows || [])
+    .map((r) => Number(r.rating))
+    .filter((v) => Number.isFinite(v) && v > 0)
+    .map((v) => (v > 5 ? v / 2 : v));
+  const avg = values.length
+    ? Number((values.reduce((s, v) => s + v, 0) / values.length).toFixed(1))
+    : null;
+  const counts = [0, 0, 0, 0, 0];
+  values.forEach((v) => {
+    const idx = Math.min(4, Math.max(0, Math.round(v) - 1));
+    counts[idx] += 1;
+  });
+  setNextAvg(avg);
+  setNextRatingCounts(counts);
+  setNextRatingTotal(values.length);
+}, [ratingRows, club?.id, nextFilmId]);
+
+useEffect(() => {
+  if (ratingError) {
+    console.warn("avg rating error:", ratingError.message || ratingError);
+    setNextAvg(null);
+    setNextRatingCounts([0, 0, 0, 0, 0]);
+    setNextRatingTotal(0);
+  }
+}, [ratingError]);
 
 
 
@@ -1979,30 +1758,7 @@ useEffect(() => {
     if (!club?.id || !nextFilmId) return;
     if (e?.detail?.clubId !== club.id) return;
     if (e?.detail?.filmId !== nextFilmId) return;
-
-    (async () => {
-      const { data } = await supabase
-        .from("club_film_takes")
-        .select("rating")
-        .eq("club_id", club.id)
-        .eq("film_id", nextFilmId);
-
-      const values = (data || [])
-        .map((r) => Number(r.rating))
-        .filter((v) => Number.isFinite(v) && v > 0)
-        .map((v) => (v > 5 ? v / 2 : v));
-      const avg = values.length
-        ? Number((values.reduce((s, v) => s + v, 0) / values.length).toFixed(1))
-        : null;
-      const counts = [0, 0, 0, 0, 0];
-      values.forEach((v) => {
-        const idx = Math.min(4, Math.max(0, Math.round(v) - 1));
-        counts[idx] += 1;
-      });
-      setNextAvg(avg);
-      setNextRatingCounts(counts);
-      setNextRatingTotal(values.length);
-    })();
+    retryRatings();
   }
   window.addEventListener("ratings-updated", onRatingsUpdated);
   window.addEventListener("club-film-takes-updated", onRatingsUpdated);
@@ -2010,68 +1766,61 @@ useEffect(() => {
     window.removeEventListener("ratings-updated", onRatingsUpdated);
     window.removeEventListener("club-film-takes-updated", onRatingsUpdated);
   };
-}, [club?.id, nextFilmId]);
+}, [club?.id, nextFilmId, retryRatings]);
 
 
-useEffect(() => {
-  let cancelled = false;
-
-  async function check() {
-    if (!user?.id || !club?.id) {
-      if (!cancelled) setIsClubAdmin(false);
-      if (!sessionLoaded) return;
-
-      return;
-    }
-
+const { data: clubAdminOk, error: clubAdminError } = useSafeSupabaseFetch(
+  async () => {
+    if (!user?.id || !club?.id) return false;
     const allowed = ["president", "vice", "admin", "moderator"];
 
-    // 1) Try club_staff.role (singular)
     const { data: staffRow, error: staffErr } = await supabase
-      .from("club_staff")
-      .select("role")
+      .from("club_members")
+      .select("club_id, user_id, role, joined_at, accepted")
       .eq("club_id", club.id)
       .eq("user_id", user.id)
       .maybeSingle();
-
-    let ok = false;
+    if (staffErr) throw staffErr;
 
     if (staffRow?.role) {
-      ok = allowed.includes(String(staffRow.role).toLowerCase());
-    } else {
-      // 2) Fallback to profile_roles.roles (plural, likely an array/jsonb)
-      const { data: roleRow, error: roleErr } = await supabase
-        .from("profile_roles")
-        .select("roles")
-        .eq("club_id", club.id)
-        .eq("user_id", user.id)
-        .maybeSingle();
-
-      // Normalize roles into a string array
-      let rolesArr = [];
-      const raw = roleRow?.roles;
-
-      if (Array.isArray(raw)) {
-        rolesArr = raw;
-      } else if (raw && typeof raw === "object") {
-        // jsonb object? e.g., { roles: [...] } — try common shapes
-        if (Array.isArray(raw.roles)) rolesArr = raw.roles;
-      } else if (typeof raw === "string") {
-        // comma/space separated fallback
-        rolesArr = raw.split(/[, ]+/).filter(Boolean);
-      }
-
-      ok = rolesArr.some((r) => allowed.includes(String(r).toLowerCase()));
+      return allowed.includes(String(staffRow.role).toLowerCase());
     }
 
-    if (!cancelled) setIsClubAdmin(ok);
-  }
+    const { data: roleRow, error: roleErr } = await supabase
+      .from("profile_roles")
+      .select("roles")
+      .eq("club_id", club.id)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (roleErr) throw roleErr;
 
-  check();
-  return () => {
-    cancelled = true;
-  };
-}, [club?.id, user?.id, sessionLoaded]);
+    let rolesArr = [];
+    const raw = roleRow?.roles;
+    if (Array.isArray(raw)) {
+      rolesArr = raw;
+    } else if (raw && typeof raw === "object") {
+      if (Array.isArray(raw.roles)) rolesArr = raw.roles;
+    } else if (typeof raw === "string") {
+      rolesArr = raw.split(/[, ]+/).filter(Boolean);
+    }
+
+    return rolesArr.some((r) => allowed.includes(String(r).toLowerCase()));
+  },
+  [club?.id, user?.id, resumeTick],
+  { enabled: Boolean(club?.id && user?.id), timeoutMs: 8000, initialData: false }
+);
+
+useEffect(() => {
+  if (clubAdminOk !== null && clubAdminOk !== undefined) {
+    setIsClubAdmin(Boolean(clubAdminOk));
+  }
+}, [clubAdminOk]);
+
+useEffect(() => {
+  if (clubAdminError) {
+    setIsClubAdmin(false);
+  }
+}, [clubAdminError]);
 
 
 
@@ -2176,7 +1925,7 @@ function onFeaturedKeyDown(e) {
         { review_id, user_id: user.id, rating_5, blurb, aspect_key },
         { onConflict: "review_id,user_id" }
       )
-      .select("*")
+      .select("id, review_id, user_id, rating_5, blurb, aspect_key, created_at, updated_at")
       .single();
   
     if (!error) {
@@ -2488,23 +2237,18 @@ const handleNextEventSearch = useCallback(async () => {
       setUploadingAvatar(true);
       setRenameError('');
       setRenameOk('');
+      const form = new FormData();
+      form.append('club_id', club.id);
+      form.append('file', file);
+      form.append('filename', file.name || 'avatar.jpg');
 
-      const ext = file.name.split('.').pop() || 'jpg';
-      const path = `${club.id}/avatar.${ext}`;
+      const { data, error } = await supabase.functions.invoke('upload-club-avatar', {
+        body: form,
+      });
+      if (error) throw error;
 
-      const { error: upErr } = await supabase.storage
-        .from('club-avatars')
-        .upload(path, file, { upsert: true });
-      if (upErr) throw upErr;
-
-      const { data } = supabase.storage.from('club-avatars').getPublicUrl(path);
-      const publicUrl = data?.publicUrl;
-
-      const { error: updErr } = await supabase
-        .from('clubs')
-        .update({ profile_image_url: publicUrl })
-        .eq('id', club.id);
-      if (updErr) throw updErr;
+      const publicUrl = data?.avatar_url;
+      if (!publicUrl) throw new Error('Upload failed.');
 
       setClub((p) => ({ ...p, profileImageUrl: `${publicUrl}?t=${Date.now()}` }));
       setRenameOk('Club picture updated.');
@@ -2519,29 +2263,32 @@ const handleNextEventSearch = useCallback(async () => {
   const handleAvatarCropComplete = async (result /* Blob or dataURL */) => {
     try {
       if (!club?.id) return;
-  
-      // 1) Upload cropped avatar
-      const path = `${club.id}/avatar.jpg`;
-      const publicUrl = await uploadToBucket({
-        bucket: "club-avatars",        // you already use this bucket
-        path,
-        file: result,
-        contentType: "image/jpeg",
-      });
-  
-      // 2) Update DB
-      if (publicUrl) {
-        const { error: updErr } = await supabase
-          .from("clubs")
-          .update({ profile_image_url: publicUrl })
-          .eq("id", club.id);
-        if (updErr) throw updErr;
-  
-        // 3) Local UI
-        setClub((p) => ({ ...p, profileImageUrl: publicUrl }));
-        setRenameOk("Club picture updated.");
-        await postActivity("updated the club picture");
+
+      let file = result;
+      if (typeof result === "string") {
+        const fetched = await fetch(result);
+        const blob = await fetched.blob();
+        file = new File([blob], "avatar.jpg", { type: blob.type || "image/jpeg" });
+      } else if (result instanceof Blob && !(result instanceof File)) {
+        file = new File([result], "avatar.jpg", { type: result.type || "image/jpeg" });
       }
+
+      const form = new FormData();
+      form.append('club_id', club.id);
+      form.append('file', file);
+      form.append('filename', file.name || 'avatar.jpg');
+
+      const { data, error } = await supabase.functions.invoke('upload-club-avatar', {
+        body: form,
+      });
+      if (error) throw error;
+
+      const publicUrl = data?.avatar_url;
+      if (!publicUrl) throw new Error("Failed to save cropped avatar.");
+
+      setClub((p) => ({ ...p, profileImageUrl: publicUrl }));
+      setRenameOk("Club picture updated.");
+      await postActivity("updated the club picture");
     } catch (err) {
       setRenameError(err?.message || "Failed to save cropped avatar.");
     } finally {
@@ -2602,13 +2349,18 @@ const handleNextEventSearch = useCallback(async () => {
 const postActivity = async (summary) => {
   if (!club?.id || !user?.id) return;
   try {
-    await supabase.from("recent_activity").insert({
-      club_id: club.id,
-      summary,
-      actor_id: user.id,
-      actor_name: user.user_metadata?.name || "Leader",
-      actor_avatar: user.user_metadata?.avatar_url || null,
-    });
+    if (typeof window !== "undefined") {
+      const optimistic = {
+        id: `temp_${Date.now()}`,
+        summary,
+        created_at: new Date().toISOString(),
+        actor_avatar: user.user_metadata?.avatar_url || null,
+        actor_name: user.user_metadata?.name || "Leader",
+        club_id: club.id,
+        club_slug: club.slug || null,
+      };
+      window.dispatchEvent(new CustomEvent("sf:home-feed:new", { detail: optimistic }));
+    }
   } catch (e) {
     console.warn("activity insert failed", e.message);
   }
@@ -2809,12 +2561,7 @@ const postActivity = async (summary) => {
               onChange={(e) => {
                 const f = e.target.files?.[0];
                 if (!f) return;
-                const reader = new FileReader();
-                reader.onloadend = () => {
-                  setRawAvatarImage(reader.result);
-                  setShowAvatarCropper(true);
-                };
-                reader.readAsDataURL(f);
+                handleAvatarUpload(f);
                 e.currentTarget.value = "";
               }}
             />
@@ -3351,7 +3098,7 @@ const postActivity = async (summary) => {
           title={nextScreening?.title}
           tagline={nextScreening?.caption}
           location={nextScreening?.location}
-          datetime={
+          dateLabel={
             nextScreening?.date
               ? new Date(nextScreening.date).toLocaleString([], {
                   dateStyle: "medium",
@@ -3359,7 +3106,6 @@ const postActivity = async (summary) => {
                 })
               : ""
           }
-
           onClick={() => {
             navigate(`/clubs/${club.slug || club.id}/events/next`, {
               state: { clubName: club.name, event: nextScreening, clubId: club.id },

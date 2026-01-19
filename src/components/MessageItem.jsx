@@ -108,7 +108,7 @@ export default function MessageItem({
   const canHardDelete = isAdmin && typeof onHardDelete === "function" && !!msg?.is_deleted;
 
   const avatarSrc = p?.avatar_url || "/avatar-fallback.png";
-  const displayName = p?.display_name || "Unknown";
+  const displayName = p?.display_name || "Member";
 
   // bubble styles (reserve space for kebab)
   const bubbleBase =
@@ -262,7 +262,7 @@ export default function MessageItem({
               }`}
             >
               <span onClick={goToProfile} className="cursor-pointer hover:underline">
-                {p?.display_name || "Unknown"}
+                {p?.display_name || "Member"}
               </span>
               <RoleBadge role={msg?.role} />
               <span>• {timeLabel}</span>

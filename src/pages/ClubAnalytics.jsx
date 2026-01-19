@@ -82,7 +82,7 @@ export default function ClubAnalytics() {
       if (user?.id) {
         const { data: mem } = await supabase
           .from("club_members")
-          .select("role")
+          .select("club_id, user_id, role, joined_at, accepted")
           .eq("club_id", clubRow.id)
           .eq("user_id", user.id)
           .maybeSingle();

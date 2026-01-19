@@ -16,18 +16,11 @@ export async function signMyClubRole({ clubId }) {
   if (error) throw error;
 }
 
-/** Fetch members with roles for a club (joins profile basics) */
+/** Fetch members with roles for a club */
 export async function fetchClubMembersWithRoles(clubId) {
   const { data, error } = await supabase
     .from("club_members")
-    .select(`
-      user_id,
-      role,
-      role_signed_at,
-      profiles:profiles!club_members_user_id_fkey (
-        id, slug, display_name, avatar_url
-      )
-    `)
+    .select("club_id, user_id, role, joined_at, accepted")
     .eq("club_id", clubId);
   if (error) throw error;
   return data || [];

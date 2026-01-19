@@ -60,7 +60,7 @@ export default function useClubAnalytics({ clubParam, year }) {
         }
 
         const { data, error } = await supabase
-          .from("clubs")
+          .from("clubs_public")
           .select("id")
           .eq("slug", clubParam)
           .maybeSingle();

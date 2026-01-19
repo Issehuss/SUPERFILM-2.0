@@ -15,6 +15,9 @@ import { Link, useNavigate } from "react-router-dom";
 import useNotifications from "../hooks/useNotifications";
 import { useUser } from "../context/UserContext";
 import supabase from "../supabaseClient";
+import useRealtimeResume from "../hooks/useRealtimeResume";
+import useSafeSupabaseFetch from "../hooks/useSafeSupabaseFetch";
+import useAppResume from "../hooks/useAppResume";
 
 function timeAgo(date) {
   try {
@@ -42,6 +45,9 @@ function typeIcon(type) {
 
 function resolveNotificationHref(notification) {
   const d = notification?.data || {};
+  if (notification?.type?.startsWith("pwa.install")) {
+    return "/pwa";
+  }
   if (notification?.type?.startsWith("club.membership.pending")) {
     const clubParam = d.slug || d.club_slug || notification?.club_id;
     return clubParam ? `/clubs/${clubParam}/requests` : "/notifications";
@@ -68,6 +74,8 @@ export default function NotificationsBell() {
   // Admin/Staff clubs with pending join requests
   const [adminClubs, setAdminClubs] = useState([]); // [{club_id, name, slug, pending}]
   const [loadingAdminPending, setLoadingAdminPending] = useState(true);
+  const resumeTick = useRealtimeResume();
+  const appResumeTick = useAppResume();
 
   // Close on outside click
   useEffect(() => {
@@ -79,44 +87,51 @@ export default function NotificationsBell() {
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
 
-  // Load staff clubs + pending counts when panel opens (or user changes)
-  useEffect(() => {
-    let cancelled = false;
+  const {
+    data: adminPendingResult,
+    loading: adminPendingLoading,
+    error: adminPendingError,
+  } = useSafeSupabaseFetch(
+    async (session) => {
+      if (!open) return [];
+      const resolvedUserId = user?.id || session?.user?.id;
+      if (!resolvedUserId) throw new Error("no-user");
 
-    async function loadAdminPending() {
-      if (!user?.id) {
-        if (!cancelled) {
-          setAdminClubs([]);
-          setLoadingAdminPending(false);
-        }
-        return;
+      // 1) clubs where user is staff (roles on club_members)
+      const { data: staffRows } = await supabase
+        .from("club_members")
+        .select("club_id, user_id, role, joined_at, accepted")
+        .eq("user_id", resolvedUserId)
+        .in("role", REQUEST_ROLES);
+
+      let allowedClubs = [];
+      const staffClubIds = (staffRows || []).map((r) => r.club_id).filter(Boolean);
+      if (staffClubIds.length) {
+        const { data: staffClubs } = await supabase
+          .from("clubs_public")
+          .select("id, name, slug")
+          .in("id", staffClubIds);
+        allowedClubs = (staffClubs || []).filter(Boolean);
       }
-      setLoadingAdminPending(true);
-
-      // 1) clubs where user is staff (president)
-      const { data: staffClubs } = await supabase
-        .from("club_staff")
-        .select("club_id, role, clubs:clubs!inner(id, name, slug)")
-        .eq("user_id", user.id);
-
-      let allowedClubs =
-        (staffClubs || [])
-          .filter((r) => REQUEST_ROLES.includes(String(r.role || "").toLowerCase()))
-          .map((r) => r.clubs)
-          .filter(Boolean);
 
       // 1b) clubs where user is member with president role
       const { data: memberPres } = await supabase
         .from("club_members")
-        .select("club_id, role, clubs:clubs!inner(id, name, slug)")
-        .eq("user_id", user.id)
+        .select("club_id, user_id, role, joined_at, accepted")
+        .eq("user_id", resolvedUserId)
         .eq("role", "president");
 
       if (memberPres?.length) {
-        allowedClubs = [
-          ...allowedClubs,
-          ...memberPres.map((r) => r.clubs).filter(Boolean),
-        ];
+        const memberClubIds = memberPres.map((r) => r.club_id).filter(Boolean);
+        if (memberClubIds.length) {
+          const { data: memberClubs } = await supabase
+            .from("clubs_public")
+            .select("id, name, slug")
+            .in("id", memberClubIds);
+          if (memberClubs?.length) {
+            allowedClubs = [...allowedClubs, ...memberClubs];
+          }
+        }
       }
 
       // Fallback: profile_roles with an array "roles"
@@ -124,7 +139,7 @@ export default function NotificationsBell() {
         const { data: prClubs } = await supabase
           .from("profile_roles")
           .select("club_id, roles, clubs:clubs!inner(id, name, slug)")
-          .eq("user_id", user.id);
+          .eq("user_id", resolvedUserId);
 
         allowedClubs =
           (prClubs || [])
@@ -139,11 +154,7 @@ export default function NotificationsBell() {
       }
 
       if (!allowedClubs.length) {
-        if (!cancelled) {
-          setAdminClubs([]);
-          setLoadingAdminPending(false);
-        }
-        return;
+        return [];
       }
 
       // 2) pending counts per club
@@ -172,25 +183,57 @@ export default function NotificationsBell() {
         }
       });
 
-      if (!cancelled) {
-        setAdminClubs(Array.from(byId.values()).sort((a, b) => b.pending - a.pending));
-        setLoadingAdminPending(false);
-      }
-    }
+      return Array.from(byId.values()).sort((a, b) => b.pending - a.pending);
+    },
+    [open, user?.id, appResumeTick],
+    { enabled: open, timeoutMs: 8000, initialData: [] }
+  );
 
-    if (open) loadAdminPending();
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.id, open]);
+  useEffect(() => {
+    if (!open) {
+      setAdminClubs([]);
+      setLoadingAdminPending(false);
+      return;
+    }
+    setLoadingAdminPending(adminPendingLoading);
+  }, [open, adminPendingLoading]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (adminPendingResult) {
+      setAdminClubs(adminPendingResult);
+      setLoadingAdminPending(false);
+    }
+  }, [open, adminPendingResult]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (adminPendingError && adminPendingError.message !== "no-user") {
+      console.warn("[NotificationsBell] admin pending error:", adminPendingError);
+      setAdminClubs([]);
+      setLoadingAdminPending(false);
+    }
+  }, [open, adminPendingError]);
 
   // Live updates to pending counts while panel open
   useEffect(() => {
-    if (!open || !user?.id || adminClubs.length === 0) return;
+    if (!open || adminClubs.length === 0) return;
+    let cancelled = false;
+    let retryTimer;
+    let channel;
 
-    const clubIds = adminClubs.map((c) => c.club_id);
-    const channel = supabase
-      .channel(`pending-requests:${user.id}`)
+    const subscribe = async () => {
+      const { data: auth } = await supabase.auth.getSession();
+      const sessionUserId = auth?.session?.user?.id || null;
+      const resolvedUserId = user?.id || sessionUserId;
+      if (!resolvedUserId) {
+        if (!cancelled) retryTimer = setTimeout(subscribe, 500);
+        return;
+      }
+
+      const clubIds = adminClubs.map((c) => c.club_id);
+      channel = supabase
+        .channel(`pending-requests:${resolvedUserId}`)
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "membership_requests" },
@@ -241,13 +284,19 @@ export default function NotificationsBell() {
         }
       )
       .subscribe();
-
-    return () => {
-      try {
-        supabase.removeChannel(channel);
-      } catch {}
     };
-  }, [open, user?.id, adminClubs.map((c) => c.club_id).join(",")]);
+
+    subscribe();
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      if (channel) {
+        try {
+          supabase.removeChannel(channel);
+        } catch {}
+      }
+    };
+  }, [open, user?.id, adminClubs.map((c) => c.club_id).join(","), resumeTick]);
 
   // 🔒 If not signed in, hide bell entirely (no markup rendered)
   if (!user) return null;
@@ -302,7 +351,7 @@ export default function NotificationsBell() {
 
       {open && (
         <div
-          className="absolute right-0 mt-2 w-[360px] max-h-[70vh] overflow-auto rounded-2xl bg-black/90 backdrop-blur ring-1 ring-white/10 shadow-2xl"
+          className="absolute right-0 mt-2 w-[92vw] max-w-[360px] max-h-[70vh] overflow-auto rounded-2xl bg-black/90 backdrop-blur ring-1 ring-white/10 shadow-2xl left-1/2 -translate-x-1/2 sm:left-auto sm:-translate-x-0 sm:w-[360px]"
           role="listbox"
           aria-label="Notifications"
         >
@@ -386,7 +435,7 @@ export default function NotificationsBell() {
                       <div className="flex-1 min-w-0">
                         <div className={`truncate ${isUnread ? "font-semibold" : "font-medium"}`}>
                           {isPwa
-                            ? d.title || "Install SuperFilm"
+                            ? "Install SuperFilm PWA"
                             : n.type?.startsWith("chat.mention")
                             ? `Mention in ${clubName}`
                             : n.type?.startsWith("chat.new")

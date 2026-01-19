@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 const DISMISS_KEY = "sf:pwa-install-dismissed";
 
@@ -21,6 +22,7 @@ export default function PwaInstallPrompt() {
   const [dismissed, setDismissed] = useState(false);
   const ios = useMemo(() => isIos(), []);
   const standalone = useMemo(() => isStandalone(), []);
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -47,22 +49,16 @@ export default function PwaInstallPrompt() {
     } catch {}
   };
 
-  const handleInstall = async () => {
-    if (!deferredPrompt) return;
-    deferredPrompt.prompt();
-    try {
-      await deferredPrompt.userChoice;
-    } finally {
-      setDeferredPrompt(null);
-      dismiss();
-    }
+  const handleInstall = () => {
+    dismiss();
+    navigate("/pwa");
   };
 
   return (
     <div className="fixed bottom-20 sm:bottom-6 left-1/2 z-[60] w-[92%] max-w-md -translate-x-1/2 rounded-2xl border border-yellow-400/30 bg-black/90 px-4 py-3 text-sm text-white shadow-2xl">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="font-semibold text-white">Install SuperFilm</div>
+          <div className="font-semibold text-white">Install SuperFilm PWA</div>
           <div className="text-xs text-zinc-300 mt-1">
             {ios
               ? "Tap Share, then “Add to Home Screen”."

@@ -5,6 +5,9 @@ import supabase from "../supabaseClient";
 
 function resolveNotificationHref(notification) {
   const d = notification?.data || {};
+  if (notification?.type?.startsWith("pwa.install")) {
+    return "/pwa";
+  }
   if (notification?.type?.startsWith("club.membership.pending")) {
     const clubParam = d.slug || d.club_slug || notification?.club_id;
     return clubParam ? `/clubs/${clubParam}/requests` : "/notifications";
@@ -103,7 +106,7 @@ export default function NotificationsPage() {
                     <div>
                       <div className="font-semibold">
                         {isPwa
-                          ? d.title || "Install SuperFilm"
+                          ? "Install SuperFilm PWA"
                           : n.type.startsWith("chat.mention")
                           ? `Mention in ${clubName}`
                           : n.type.startsWith("chat.new")

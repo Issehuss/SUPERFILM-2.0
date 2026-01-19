@@ -25,6 +25,6 @@ export default function AuthGate({ children }) {
     };
   }, []);
 
-  if (!ready) return null; // could be a loader if desired
+  if (!ready) return children;
   return children;
 }

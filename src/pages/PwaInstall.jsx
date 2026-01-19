@@ -46,7 +46,7 @@ export default function PwaInstall() {
     <div className="min-h-[70vh] px-6 py-10">
       <div className="mx-auto w-full max-w-3xl">
         <div className="rounded-2xl border border-white/10 bg-black/60 p-6">
-          <h1 className="text-2xl font-semibold text-white">Install SuperFilm</h1>
+          <h1 className="text-2xl font-semibold text-white">Install SuperFilm PWA</h1>
           <p className="mt-2 text-sm text-zinc-300">
             Add SuperFilm to your home screen for instant access and a full-screen
             app experience.
@@ -65,7 +65,7 @@ export default function PwaInstall() {
                   disabled={installing}
                   className="rounded-full bg-yellow-400 px-4 py-2 text-sm font-semibold text-black hover:bg-yellow-300 disabled:opacity-60"
                 >
-                  {installing ? "Opening installer..." : "Install SuperFilm"}
+                  {installing ? "Opening installer..." : "Install SuperFilm PWA"}
                 </button>
               ) : (
                 <span className="text-xs text-zinc-400">
@@ -91,7 +91,7 @@ export default function PwaInstall() {
             <h2 className="text-lg font-semibold text-white">Android (Chrome)</h2>
             <ol className="mt-3 space-y-2 text-sm text-zinc-300">
               <li>1. Open SuperFilm in Chrome.</li>
-              <li>2. Tap the “Install SuperFilm” button above.</li>
+              <li>2. Tap the “Install SuperFilm PWA” button above.</li>
               <li>3. If you don’t see it, open the menu (⋮).</li>
               <li>4. Tap “Install app” or “Add to Home screen”.</li>
             </ol>

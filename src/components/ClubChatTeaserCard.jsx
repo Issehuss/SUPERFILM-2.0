@@ -3,6 +3,7 @@ import { MessageSquare, Users, ChevronRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import supabase from "../supabaseClient";
 import { useUser } from "../context/UserContext";
+import useRealtimeResume from "../hooks/useRealtimeResume";
 
 /**
  * Small, self-contained teaser. No styled-components, no macros.
@@ -15,6 +16,8 @@ export default function ClubChatTeaserCard({ clubId, slug }) {
   const [unread, setUnread] = useState(0);
   const [online, setOnline] = useState(0);
   const pres = useRef(null);
+  const ENABLE_PRESENCE = false;
+  const resumeTick = useRealtimeResume();
 
   // Non-breaking: if supabase isn’t ready, it’ll just render static UI
   useEffect(() => {
@@ -59,26 +62,28 @@ export default function ClubChatTeaserCard({ clubId, slug }) {
       )
       .subscribe();
 
-    pres.current = supabase.channel(`presence-club-${clubId}`, {
-      config: { presence: { key: user.id } },
-    });
-
-    pres.current
-      .on("presence", { event: "sync" }, () => {
-        const members = Object.values(pres.current.presenceState() || {}).flat();
-        setOnline(members.length);
-      })
-      .subscribe(async (status) => {
-        if (status === "SUBSCRIBED") {
-          await pres.current.track({ user_id: user.id, at: Date.now() });
-        }
+    if (ENABLE_PRESENCE) {
+      pres.current = supabase.channel(`presence-club-${clubId}`, {
+        config: { presence: { key: user.id } },
       });
+
+      pres.current
+        .on("presence", { event: "sync" }, () => {
+          const members = Object.values(pres.current.presenceState() || {}).flat();
+          setOnline(members.length);
+        })
+        .subscribe(async (status) => {
+          if (status === "SUBSCRIBED") {
+            await pres.current.track({ user_id: user.id, at: Date.now() });
+          }
+        });
+    }
 
     return () => {
       if (msgCh) supabase.removeChannel(msgCh);
       if (pres.current) supabase.removeChannel(pres.current);
     };
-  }, [clubId, user?.id]);
+  }, [clubId, user?.id, ENABLE_PRESENCE, resumeTick]);
 
 // inside the component
 const go = () => {

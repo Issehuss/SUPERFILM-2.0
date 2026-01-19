@@ -35,8 +35,8 @@ export default function ClubTakesArchive() {
 
         // 1) Load club by slug or id
         const clubQuery = supabase
-          .from("clubs")
-          .select("id, slug, name, banner_url, profile_image_url");
+          .from("clubs_public")
+          .select("id, slug, name, banner_url");
         const { data: clubRow, error: clubErr } = await (isUuid(clubParam)
           ? clubQuery.eq("id", clubParam)
           : clubQuery.eq("slug", clubParam)

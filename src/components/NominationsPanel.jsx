@@ -4,6 +4,7 @@ import supabase from "../supabaseClient.js";
 import { Trash2 } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import TmdbImage from "./TmdbImage";
+import useRealtimeResume from "../hooks/useRealtimeResume";
 
 const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -35,6 +36,7 @@ export default function NominationsPanel({
   const [loading, setLoading] = useState(true);
   const [resolving, setResolving] = useState(false);
   const [error, setError] = useState("");
+  const resumeTick = useRealtimeResume();
 
   // ─── Resolve Club ID ───────────────────────────────────────────────
   useEffect(() => {
@@ -58,7 +60,7 @@ export default function NominationsPanel({
       try {
         setResolving(true);
         const { data, error } = await supabase
-          .from("clubs")
+          .from("clubs_public")
           .select("id")
           .eq("slug", routeParam)
           .maybeSingle();
@@ -132,7 +134,7 @@ export default function NominationsPanel({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [resolvedClubId]);
+  }, [resolvedClubId, resumeTick]);
 
   // ─── Poster Click ─────────────────────────────────────────────────
   function handlePosterClick(movie) {

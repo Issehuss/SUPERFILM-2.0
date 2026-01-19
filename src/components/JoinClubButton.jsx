@@ -22,13 +22,20 @@ export default function JoinClubButton({ club, user, isMember }) {
   // Fetch latest request status for this user+club
   useEffect(() => {
     let mounted = true;
-    (async () => {
-      if (!user?.id || !club?.id) return;
+    let retryTimer;
+    const loadStatus = async () => {
+      const { data: auth } = await supabase.auth.getSession();
+      const sessionUserId = auth?.session?.user?.id || null;
+      const resolvedUserId = user?.id || sessionUserId;
+      if (!resolvedUserId || !club?.id) {
+        if (!resolvedUserId) retryTimer = setTimeout(loadStatus, 500);
+        return;
+      }
       const { data, error } = await supabase
         .from("membership_requests")
         .select("id,status")
         .eq("club_id", club.id)
-        .eq("user_id", user.id)
+        .eq("user_id", resolvedUserId)
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -41,8 +48,12 @@ export default function JoinClubButton({ club, user, isMember }) {
         setPending(false);
         setRequestId(null);
       }
-    })();
-    return () => { mounted = false; };
+    };
+    loadStatus();
+    return () => {
+      mounted = false;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
   }, [user?.id, club?.id]);
 
   if (!club) return null;
@@ -67,7 +78,7 @@ export default function JoinClubButton({ club, user, isMember }) {
     try {
       // Re-read privacy mode from DB in case it changed
       const { data: clubRow } = await supabase
-        .from("clubs")
+        .from("clubs_public")
         .select("privacy_mode, slug")
         .eq("id", club.id)
         .maybeSingle();

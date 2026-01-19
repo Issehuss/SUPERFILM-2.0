@@ -10,14 +10,22 @@ export default function AttendButton({ clubId, eventId, className = "" }) {
 
   useEffect(() => {
     let alive = true;
+    let retryTimer;
     async function load() {
-      if (!user?.id || !clubId || !eventId) { if (alive) setBusy(false); return; }
+      const { data: auth } = await supabase.auth.getSession();
+      const sessionUserId = auth?.session?.user?.id || null;
+      const resolvedUserId = user?.id || sessionUserId;
+      if (!resolvedUserId || !clubId || !eventId) {
+        if (alive) setBusy(false);
+        if (!resolvedUserId) retryTimer = setTimeout(load, 500);
+        return;
+      }
       const { data, error } = await supabase
         .from("event_attendance")
         .select("id")
         .eq("club_id", clubId)
         .eq("event_id", eventId)
-        .eq("user_id", user.id)
+        .eq("user_id", resolvedUserId)
         .maybeSingle();
       if (alive) {
         setAttending(Boolean(data?.id));
@@ -26,7 +34,10 @@ export default function AttendButton({ clubId, eventId, className = "" }) {
       if (error) console.warn("attendance check error:", error?.message);
     }
     load();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
   }, [user?.id, clubId, eventId]);
 
   async function handleAttend() {

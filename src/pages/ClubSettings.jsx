@@ -33,9 +33,17 @@ export default function ClubSettings() {
 
   useEffect(() => {
     let alive = true;
+    let retryTimer;
 
     async function load() {
-      if (!clubParam || !user?.id) return;
+      if (!clubParam) return;
+      const { data: auth } = await supabase.auth.getSession();
+      const sessionUserId = auth?.session?.user?.id || null;
+      const resolvedUserId = user?.id || sessionUserId;
+      if (!resolvedUserId) {
+        if (alive) retryTimer = setTimeout(load, 500);
+        return;
+      }
       setLoading(true);
       setErr("");
       setClub(null);
@@ -69,13 +77,13 @@ export default function ClubSettings() {
             .maybeSingle(),
           supabase
             .from("club_members")
-            .select("role")
+            .select("club_id, user_id, role, joined_at, accepted")
             .eq("club_id", resolvedId)
-            .eq("user_id", user.id)
+            .eq("user_id", resolvedUserId)
             .maybeSingle(),
           supabase
             .from("club_members")
-            .select("user_id, role")
+            .select("club_id, user_id, role, joined_at, accepted")
             .eq("club_id", resolvedId),
         ]);
 
@@ -118,6 +126,7 @@ export default function ClubSettings() {
     load();
     return () => {
       alive = false;
+      if (retryTimer) clearTimeout(retryTimer);
     };
   }, [clubParam, user?.id]);
 

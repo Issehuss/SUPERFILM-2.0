@@ -3,6 +3,8 @@ import { useParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import supabase from "../supabaseClient";
 import UserProfile from "./UserProfile"; // reuse your viewer component
+import { PROFILE_SELECT } from "../lib/profileSelect";
+import ProfileSkeleton from "../components/ProfileSkeleton";
 
 export default function PublicProfile() {
   const { slug } = useParams();
@@ -15,7 +17,7 @@ export default function PublicProfile() {
       setLoading(true);
       const { data, error } = await supabase
         .from("profiles")
-        .select("*")
+        .select(PROFILE_SELECT)
         .eq("slug", slug)
         .maybeSingle();
       if (on) {
@@ -26,7 +28,7 @@ export default function PublicProfile() {
     return () => (on = false);
   }, [slug]);
 
-  if (loading) return <div className="p-8 text-zinc-400">Loading…</div>;
+  if (loading) return <ProfileSkeleton />;
   if (!row) return <div className="p-8 text-zinc-400">Profile not found.</div>;
 
   // UserProfile already renders from context; for public view, pass "profileOverride"

@@ -7,6 +7,8 @@ import "../App.css";
 import "./Clubs.css";
 import { useUser } from "../context/UserContext";
 import usePageVisibility from "../hooks/usePageVisibility";
+import useRealtimeResume from "../hooks/useRealtimeResume";
+import useAppResume from "../hooks/useAppResume";
 import { Users, CalendarDays, Trophy, PlusCircle } from "lucide-react";
 import { Swiper, SwiperSlide } from "swiper/react";
 import "swiper/css";
@@ -119,14 +121,13 @@ const GENRES = [
 /* ---------- Cache + paging ---------- */
 const CACHE_KEY = "sf.clubs2.cache.v2";
 const CACHE_MAX_AGE = 1000 * 60 * 5; // 5 minutes
-const PAGE_SIZE = 40;
+const PAGE_SIZE = 20;
 const ENABLE_REALTIME = false;
 const svgPlaceholder = (w, h, label) =>
   `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><rect width="100%" height="100%" fill="#141414"/><text x="50%" y="50%" fill="#6b7280" font-family="Arial, sans-serif" font-size="16" text-anchor="middle" dominant-baseline="central">${label}</text></svg>`
   )}`;
 const CLUB_PLACEHOLDER = svgPlaceholder(300, 480, "Club");
-const CLUB_EVENT_PLACEHOLDER = svgPlaceholder(300, 160, "Club");
 const safeClubImage = (url, fallback = CLUB_PLACEHOLDER) => {
   if (!url || typeof url !== "string") return fallback;
   if (/^https?:\/\//i.test(url)) return url;
@@ -199,10 +200,6 @@ function HoverPreview({ sourceEl, club, scale = 1.06, showTooltip = false, toolt
           {tooltipData?.summary ?? "—"}
         </div>
         <div className="club-tooltip__row">
-          <span className="club-dot" /> <strong className="mr-1">Upcoming:</strong>{" "}
-          {tooltipData?.upcoming ?? "—"}
-        </div>
-        <div className="club-tooltip__row">
           <span className="club-dot" /> <strong className="mr-1">Fav genres:</strong>{" "}
           {tooltipData?.fav ?? "—"}
         </div>
@@ -263,36 +260,28 @@ function mapRowToClub(row) {
     path: row.slug || String(row.id),
     rawId: row.id,
     name: row.name ?? "Untitled Club",
-    image:
-      row.profile_image_url ??
-      row.image_url ??
-      row.image ??
-      CLUB_PLACEHOLDER,
+    image: row.profile_image_url || CLUB_PLACEHOLDER,
     meta: metaFromRow,
     createdAt: row.created_at ?? null,
   };
 }
 
-function formatEventDateTime(iso) {
-  if (!iso) return "";
-  try {
-    const d = new Date(iso);
-    return d.toLocaleString(undefined, {
-      weekday: "short",
-      hour: "2-digit",
-      minute: "2-digit",
-      month: "short",
-      day: "numeric",
-    });
-  } catch {
-    return iso;
-  }
+function ClubCardSkeleton() {
+  return (
+    <div className="club-card block overflow-hidden">
+      <div className="club-thumb bg-zinc-900/70 animate-pulse" />
+      <div className="p-3 space-y-2">
+        <div className="h-4 w-2/3 rounded bg-zinc-800 animate-pulse" />
+        <div className="h-3 w-1/2 rounded bg-zinc-800 animate-pulse" />
+      </div>
+    </div>
+  );
 }
 
 export default function Clubs() {
   const navigate = useNavigate();
   const { profile } = useUser();
-  const userClubId = profile?.club_id ?? profile?.current_club_id ?? null;
+  const userClubId = null;
   const userHasClub = !!userClubId;
 
   const [hover, setHover] = useState(null);
@@ -301,6 +290,8 @@ export default function Clubs() {
   const timerRef = useRef(null);
   const swiperRefs = useRef([]);
   const isPageVisible = usePageVisibility();
+  const resumeTick = useRealtimeResume();
+  const appResumeTick = useAppResume();
 
   const clearTipTimer = () => {
     if (timerRef.current) {
@@ -369,10 +360,6 @@ export default function Clubs() {
   const [initialFetchDone, setInitialFetchDone] = useState(false);
   const [realtimeAttached, setRealtimeAttached] = useState(false);
 
-  const [upcomingEvents, setUpcomingEvents] = useState([]);
-  const [loadingEvents, setLoadingEvents] = useState(true);
-  const [nextScreeningByClub, setNextScreeningByClub] = useState({});
-
   const saveCache = useCallback((list) => {
     try {
       localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), data: list }));
@@ -389,18 +376,28 @@ export default function Clubs() {
     });
   };
 
-  const CLUB_SELECT = `*`;
+  const CLUB_SELECT = [
+    "id",
+    "name",
+    "slug",
+    "profile_image_url",
+    "tagline",
+    "visibility",
+    "created_at",
+    "type",
+  ].join(", ");
 
   const fetchClubsPage = useCallback(
     async (pageIndex = 0, append = false) => {
-      const from = pageIndex * PAGE_SIZE;
-      const to = from + PAGE_SIZE - 1;
-
       if (append) setLoadingMore(true);
       else setLoadingClubs(true);
 
       try {
-        const { data, error } = await supabase.from("clubs").select(CLUB_SELECT).range(from, to);
+        const { data, error } = await supabase
+          .from("clubs_public")
+          .select(CLUB_SELECT)
+          .order("created_at", { ascending: false })
+          .limit(PAGE_SIZE);
 
         if (error) throw error;
 
@@ -429,7 +426,7 @@ export default function Clubs() {
     if (liveClubs.length > 0) setLoadingClubs(false);
     fetchClubsPage(0, false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchClubsPage]);
+  }, [fetchClubsPage, appResumeTick]);
 
   useEffect(() => {
     if (!ENABLE_REALTIME) return;
@@ -466,118 +463,18 @@ export default function Clubs() {
 
     setRealtimeAttached(true);
     return () => supabase.removeChannel(channel);
-  }, [initialFetchDone, realtimeAttached, saveCache]);
-
-  useEffect(() => {
-    if (loadingClubs) return;
-    let mounted = true;
-
-    (async () => {
-      try {
-        const now = new Date();
-        const in30 = new Date();
-        in30.setDate(now.getDate() + 30);
-
-        const { data, error } = await supabase
-          .from("screenings")
-          .select("*")
-          .gte("starts_at", now.toISOString())
-          .lte("starts_at", in30.toISOString())
-          .order("starts_at", { ascending: true })
-          .limit(20);
-
-        if (error) throw error;
-
-        const joined = (data || [])
-          .map((ev) => {
-            const club = liveClubs.find((c) => c.rawId === ev.club_id);
-            if (!club) return null;
-
-            const title = ev.title || ev.name || ev.film_title || "Club event";
-
-            return {
-              id: ev.id,
-              title,
-              starts_at: ev.starts_at,
-              clubId: club.id,
-              clubRawId: club.rawId,
-              clubName: club.name,
-              clubImage: safeClubImage(club.image, CLUB_EVENT_PLACEHOLDER),
-            };
-          })
-          .filter(Boolean);
-
-        if (mounted) {
-          setUpcomingEvents(joined);
-          setLoadingEvents(false);
-        }
-      } catch (e) {
-        console.error("⚠️ Upcoming events fetch crashed:", e);
-        if (mounted) {
-          setUpcomingEvents([]);
-          setLoadingEvents(false);
-        }
-      }
-    })();
-
-    return () => {
-      mounted = false;
-    };
-  }, [loadingClubs, liveClubs]);
-
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      const ids = (liveClubs || [])
-        .map((c) => c.rawId)
-        .filter(Boolean);
-      if (!ids.length) {
-        if (mounted) setNextScreeningByClub({});
-        return;
-      }
-
-      try {
-        const { data, error } = await supabase
-          .from("club_next_screening_v")
-          .select("club_id, film_title, screening_at, location")
-          .in("club_id", ids);
-        if (error) throw error;
-
-        const map = {};
-        (data || []).forEach((row) => {
-          if (!row?.club_id) return;
-          map[row.club_id] = row;
-        });
-        if (mounted) setNextScreeningByClub(map);
-      } catch (e) {
-        if (mounted) setNextScreeningByClub({});
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, [liveClubs]);
+  }, [initialFetchDone, realtimeAttached, saveCache, resumeTick]);
 
   const getTooltipData = useCallback(
     (club) => {
       const m = club.meta || {};
-      const firstEvent = upcomingEvents.find((ev) => ev.clubId === club.id);
-      const nextRow = nextScreeningByClub[club.rawId];
-      const upcoming =
-        nextRow?.screening_at
-          ? `${nextRow.film_title || "Screening"} — ${formatEventDateTime(nextRow.screening_at)}`
-          : firstEvent
-          ? `${firstEvent.title} — ${formatEventDateTime(firstEvent.starts_at)}`
-          : "No upcoming events scheduled.";
-
       return {
         members: m.members ?? null,
         summary: m.summary || m.tagline || null,
-        upcoming,
         fav: Array.isArray(m.genres) && m.genres.length ? m.genres.join(", ") : null,
       };
     },
-    [upcomingEvents, nextScreeningByClub]
+    []
   );
 
   const handleEnter = useCallback(
@@ -632,6 +529,7 @@ export default function Clubs() {
     () => combined.filter((c) => !isOfficialClub(c)),
     [combined, isOfficialClub]
   );
+  const hasCurated = curatedClubs.length > 0;
   const filteredSet = useMemo(() => new Set(filtered.map((c) => c.id)), [filtered]);
   const filteredCurated = useMemo(
     () => curatedClubs.filter((c) => filteredSet.has(c.id)),
@@ -643,7 +541,9 @@ export default function Clubs() {
   );
 
   const baseCurated = filteredCurated.length > 0 ? filteredCurated : curatedClubs;
-  const baseForCarousel = filteredCommunity.length > 0 ? filteredCommunity : communityClubs;
+  const baseForCarousel = hasCurated
+    ? (filteredCommunity.length > 0 ? filteredCommunity : communityClubs)
+    : (filtered.length > 0 ? filtered : combined);
   const noMatches = !loadingClubs && combined.length > 0 && filtered.length === 0;
 
   useEffect(() => {
@@ -990,7 +890,15 @@ export default function Clubs() {
             </div>
           )}
 
-          {baseCurated.length > 0 && (
+          {loadingClubs && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+              {Array.from({ length: 8 }).map((_, idx) => (
+                <ClubCardSkeleton key={`club-skel-${idx}`} />
+              ))}
+            </div>
+          )}
+
+          {hasCurated && baseCurated.length > 0 && (
             <div className="mb-8">
               <div className="mb-3">
                 <h3 className="text-xl font-semibold text-[rgb(var(--brand-yellow))]">
@@ -1051,10 +959,12 @@ export default function Clubs() {
             <>
               <div className="mb-3">
                 <h3 className="text-xl font-semibold text-[rgb(var(--brand-yellow))]">
-                  Member-Created Clubs
+                  {hasCurated ? "Member-Created Clubs" : "Clubs"}
                 </h3>
                 <p className="text-sm text-zinc-400">
-                  Clubs made by the community, for the community.
+                  {hasCurated
+                    ? "Clubs made by the community, for the community."
+                    : "Discover clubs across the SuperFilm community."}
                 </p>
               </div>
               <Swiper {...swiperConfig} onSwiper={(s) => (swiperRefs.current[1] = s)} className="!w-full">
@@ -1117,58 +1027,6 @@ export default function Clubs() {
               </Swiper>
 
             </>
-          )}
-        </section>
-
-        <section className="mb-10">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-xl font-semibold text-[rgb(var(--brand-yellow))]">Happening soon</h3>
-            <Link to="/events" className="text-sm text-zinc-400 hover:text-zinc-200">
-              See all
-            </Link>
-          </div>
-
-          {loadingEvents ? (
-            <p className="text-sm text-zinc-400">Loading upcoming events…</p>
-          ) : !upcomingEvents.length ? (
-            <p className="text-sm text-zinc-500">Events taking place soon will show up here.</p>
-          ) : (
-            <div className="events-grid">
-              {upcomingEvents.slice(0, 6).map((ev) => (
-                <Link key={`soon-${ev.id}`} to={`/events/${ev.id}`} className="event-card">
-                  <div className="event-thumb">
-                    <img
-                      src={safeClubImage(ev.clubImage, CLUB_EVENT_PLACEHOLDER)}
-                      alt={ev.clubName}
-                      className="w-full h-full object-cover"
-                      onError={(e) => {
-                        e.currentTarget.src = CLUB_EVENT_PLACEHOLDER;
-                      }}
-                    />
-                  </div>
-
-                  <div className="event-info">
-                    <div className="event-title">{ev.title}</div>
-                    <div className="event-sub">
-                      <span className="event-dot" /> {ev.clubName} • {formatEventDateTime(ev.starts_at)}
-                    </div>
-                  </div>
-
-                  <div className="event-go" aria-label="Go to event">
-                    <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
-                      <path
-                        d="M8 5l8 7-8 7"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </div>
-                </Link>
-              ))}
-            </div>
           )}
         </section>
 

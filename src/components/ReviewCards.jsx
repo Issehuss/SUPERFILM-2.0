@@ -87,7 +87,7 @@ const filmValue = Number(filmId) || null;
     if (isPremium) {
       const { data: sch } = await supabase
         .from("profile_rating_schemes")
-        .select("*")
+        .select("id, profile_id, name, is_active, tags, updated_at, created_at")
         .eq("profile_id", uid)
         .eq("is_active", true)
         .maybeSingle();

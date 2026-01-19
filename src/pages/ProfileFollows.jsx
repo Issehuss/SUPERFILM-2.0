@@ -19,6 +19,9 @@ export default function ProfileFollows() {
     [modeKey]
   );
 
+  const UUID_RX =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
   useEffect(() => {
     let cancelled = false;
 
@@ -26,18 +29,43 @@ export default function ProfileFollows() {
       setLoading(true);
       setError("");
       try {
+        await supabase.auth.getSession();
         const identifier = slug || id || user?.id;
         if (!identifier) {
           setError("No profile to load.");
           return;
         }
 
-        // load profile by slug or id
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("id, display_name, slug, username, avatar_url")
-          .or(`slug.eq.${identifier},id.eq.${identifier}`)
-          .maybeSingle();
+        // load profile by id OR slug/username (avoid invalid uuid errors)
+        let profile = null;
+        if (UUID_RX.test(String(identifier))) {
+          const { data, error } = await supabase
+            .from("profiles")
+            .select("id, display_name, slug, username, avatar_url")
+            .eq("id", identifier)
+            .maybeSingle();
+          if (error) throw error;
+          profile = data || null;
+        } else {
+          const { data: bySlug, error: slugErr } = await supabase
+            .from("profiles")
+            .select("id, display_name, slug, username, avatar_url")
+            .eq("slug", String(identifier))
+            .maybeSingle();
+          if (slugErr) throw slugErr;
+          profile = bySlug || null;
+
+          if (!profile) {
+            const { data: byUsername, error: userErr } = await supabase
+              .from("profiles")
+              .select("id, display_name, slug, username, avatar_url")
+              .eq("username", String(identifier))
+              .maybeSingle();
+            if (userErr) throw userErr;
+            profile = byUsername || null;
+          }
+        }
+
         if (!profile) {
           setError("Profile not found.");
           return;
@@ -49,7 +77,8 @@ export default function ProfileFollows() {
         let query = supabase
           .from("profile_follows")
           .select("follower_id, followee_id, created_at")
-          .order("created_at", { ascending: false });
+          .order("created_at", { ascending: false })
+          .limit(50);
 
         if (modeKey === "following") {
           query = query.eq("follower_id", profile.id);
@@ -75,11 +104,10 @@ export default function ProfileFollows() {
           .in("id", ids);
         if (pErr) throw pErr;
 
-        // preserve order of ids
+        // preserve order of ids; fall back to id-only rows if profile missing
         const profMap = new Map((profs || []).map((p) => [p.id, p]));
         const ordered = ids
-          .map((id) => profMap.get(id))
-          .filter(Boolean);
+          .map((id) => profMap.get(id) || { id });
 
         if (!cancelled) setRows(ordered);
       } catch (e) {

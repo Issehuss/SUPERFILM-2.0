@@ -5,14 +5,11 @@ import { useNavigate } from "react-router-dom";
 import slides from "./slideData";
 import Slide from "./Slide";
 import "./onboarding.css";
-import supabase from "../../supabaseClient";
-import { useUser } from "../../context/UserContext";
 import usePageVisibility from "../../hooks/usePageVisibility";
 
 export default function OnboardingTutorial() {
   const [index, setIndex] = useState(0);
   const navigate = useNavigate();
-  const { user } = useUser();
   const isVisible = usePageVisibility();
 
   const current = slides[index];
@@ -42,19 +39,6 @@ export default function OnboardingTutorial() {
   }, [index, lastIndex, isVisible]);
 
   async function finishOnboarding() {
-    // Fire-and-forget profile flag updates
-    if (user) {
-      const updates = [
-        supabase
-          .from("profiles")
-          .update({ has_seen_onboarding: true })
-          .eq("id", user.id),
-        supabase.auth.updateUser({
-          data: { has_seen_onboarding: true },
-        }),
-      ];
-      Promise.allSettled(updates).catch(() => {});
-    }
     try {
       localStorage.setItem("sf:onboarding_seen", "1");
     } catch {

@@ -23,10 +23,30 @@ export default function LeaveClub() {
 
   // redirect if not signed in
   useEffect(() => {
-    if (user === null) {
-      navigate("/auth", { replace: true });
-    }
-  }, [user, navigate]);
+    let cancelled = false;
+    let retryTimer;
+    let attempts = 0;
+
+    const check = async () => {
+      const { data: auth } = await supabase.auth.getSession();
+      const sessionUserId = auth?.session?.user?.id || null;
+      const resolvedUserId = user?.id || sessionUserId;
+      if (!resolvedUserId) {
+        attempts += 1;
+        if (!cancelled && attempts >= 6) {
+          navigate("/auth", { replace: true });
+          return;
+        }
+        retryTimer = setTimeout(check, 500);
+      }
+    };
+
+    check();
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  }, [user?.id, navigate]);
 
   const isPresident = membership?.role === "president";
   const hasSuccessors = successors.length > 0;
@@ -34,10 +54,21 @@ export default function LeaveClub() {
   // Load club + role + possible successors
   useEffect(() => {
     let cancelled = false;
+    let retryTimer;
 
     async function run() {
-      if (!user?.id || !clubParam) {
+      if (!clubParam) {
         setLoading(false);
+        return;
+      }
+      const { data: auth } = await supabase.auth.getSession();
+      const sessionUserId = auth?.session?.user?.id || null;
+      const resolvedUserId = user?.id || sessionUserId;
+      if (!resolvedUserId) {
+        if (!cancelled) {
+          setLoading(true);
+          retryTimer = setTimeout(run, 500);
+        }
         return;
       }
 
@@ -83,9 +114,9 @@ export default function LeaveClub() {
         // 2) Load membership/role for current user
         const { data: mem, error: memErr } = await supabase
           .from("club_members")
-          .select("role, user_id")
+          .select("club_id, user_id, role, joined_at, accepted")
           .eq("club_id", clubRow.id)
-          .eq("user_id", user.id)
+          .eq("user_id", resolvedUserId)
           .maybeSingle();
 
         if (memErr) throw memErr;
@@ -108,7 +139,7 @@ export default function LeaveClub() {
           // Load all other members
           const { data: others, error: othersErr } = await supabase
             .from("club_members")
-            .select("user_id, role")
+            .select("club_id, user_id, role, joined_at, accepted")
             .eq("club_id", clubRow.id)
             .neq("user_id", user.id);
 
@@ -170,6 +201,7 @@ export default function LeaveClub() {
     run();
     return () => {
       cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
     };
   }, [user?.id, clubParam]);
 

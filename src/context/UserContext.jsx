@@ -9,19 +9,13 @@ import {
   useRef,
 } from "react";
 import supabase from "../supabaseClient.js";
-import { trackEvent } from "../lib/analytics";
 
 const UserContext = createContext(null);
 export const useUser = () => useContext(UserContext);
 
-const sanitizeAvatarUrl = (url) => {
-  if (!url || typeof url !== "string") return null;
-  if (url.startsWith("blob:") || url.startsWith("data:")) return null;
-  return url;
-};
-
 function UserProvider({ children }) {
   const [user, setUser] = useState(null);            // supabase.auth user
+  const [session, setSession] = useState(null);      // supabase.auth session
   const [profile, setProfile] = useState(null);      // row in profiles
   const [avatar, setAvatar] = useState(null);        // convenience
   const [loading, setLoading] = useState(true);      // full hydration state
@@ -48,6 +42,7 @@ function UserProvider({ children }) {
 
         setSessionLoaded(true);  // ★ session token now available
 
+        setSession(session || null);
         const authUser = session?.user ?? null;
         if (!cancelled) {
           setUser(authUser);
@@ -55,11 +50,9 @@ function UserProvider({ children }) {
 
         // 2) Fetch profile if logged in
         if (authUser?.id) {
-          const { data: prof, error: pErr } = await supabase
-            .from("profiles")
-            .select("*")
-            .eq("id", authUser.id)
-            .maybeSingle();
+          const { data, error: pErr } = await supabase.rpc("get_profile_display", {
+            p_user_id: authUser.id,
+          });
 
           if (!cancelled) {
             if (pErr) {
@@ -67,11 +60,8 @@ function UserProvider({ children }) {
               setProfile(null);
               setAvatar(null);
             } else {
-              const clean = prof
-                ? { ...prof, avatar_url: sanitizeAvatarUrl(prof.avatar_url) }
-                : null;
-              setProfile(clean);
-              setAvatar(clean?.avatar_url || null);
+              setProfile(data || null);
+              setAvatar(data?.avatar_url || null);
               lastProfileFetchRef.current = Date.now();
             }
           }
@@ -104,27 +94,23 @@ function UserProvider({ children }) {
     } = supabase.auth.onAuthStateChange(async (_event, session) => {
       setSessionLoaded(true); // ★ ensure app sees session immediately
 
+      setSession(session || null);
       const authUser = session?.user ?? null;
       setUser(authUser);
 
       // refresh profile
       if (authUser?.id) {
-        const { data: prof, error: pErr } = await supabase
-          .from("profiles")
-          .select("*")
-          .eq("id", authUser.id)
-          .maybeSingle();
+        const { data, error: pErr } = await supabase.rpc("get_profile_display", {
+          p_user_id: authUser.id,
+        });
 
         if (pErr) {
           console.warn("[UserContext] profile fetch (auth change) failed:", pErr.message);
           setProfile(null);
           setAvatar(null);
         } else {
-          const clean = prof
-            ? { ...prof, avatar_url: sanitizeAvatarUrl(prof.avatar_url) }
-            : null;
-          setProfile(clean);
-          setAvatar(clean?.avatar_url || null);
+          setProfile(data || null);
+          setAvatar(data?.avatar_url || null);
           lastProfileFetchRef.current = Date.now();
         }
       } else {
@@ -140,53 +126,73 @@ function UserProvider({ children }) {
     };
   }, []);
 
+  /* ---------------------------------------------------------------------- */
+  /*                   SESSION REHYDRATION ON RESUME                         */
+  /* ---------------------------------------------------------------------- */
+  const rehydrateSession = useCallback(async () => {
+    try {
+      const {
+        data: { session: nextSession },
+        error,
+      } = await supabase.auth.getSession();
+      if (error) throw error;
+
+      setSessionLoaded(true);
+      setSession(nextSession || null);
+      const authUser = nextSession?.user ?? null;
+      setUser(authUser);
+
+      if (authUser?.id && (!profile || !avatar)) {
+        const { data, error: pErr } = await supabase.rpc("get_profile_display", {
+          p_user_id: authUser.id,
+        });
+        if (!pErr) {
+          setProfile(data || null);
+          setAvatar(data?.avatar_url || null);
+          lastProfileFetchRef.current = Date.now();
+        }
+      }
+    } catch (e) {
+      console.warn("[UserContext] rehydrate failed:", e?.message || e);
+    }
+  }, [profile, avatar]);
+
+  useEffect(() => {
+    const onFocus = () => {
+      rehydrateSession();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        rehydrateSession();
+      }
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [rehydrateSession]);
+
   const isReady = sessionLoaded && !loading;
 
   /* ---------------------------------------------------------------------- */
   /*                                ROLES                                   */
   /* ---------------------------------------------------------------------- */
-  const roles = useMemo(() => {
-    const arr = [];
-
-    if (profile?.roles && Array.isArray(profile.roles)) arr.push(...profile.roles);
-    if (profile?.app_roles && Array.isArray(profile.app_roles)) arr.push(...profile.app_roles);
-
-    if (user?.user_metadata?.roles && Array.isArray(user.user_metadata.roles)) {
-      arr.push(...user.user_metadata.roles);
-    }
-
-    return Array.from(
-      new Set(
-        arr
-          .filter(Boolean)
-          .map((r) => String(r).trim())
-          .filter(Boolean)
-      )
-    );
-  }, [profile?.roles, profile?.app_roles, user?.user_metadata?.roles]);
+  const roles = useMemo(() => [], []);
 
   const hasRole = useCallback(
-    (role) => {
-      if (!role) return false;
-      return roles.some((r) => r.toLowerCase() === role.toLowerCase());
-    },
-    [roles]
+    () => false,
+    []
   );
 
-  const isPartner = hasRole("partner");
+  const isPartner = false;
 
   /* ---------------------------------------------------------------------- */
   /*                           PREMIUM / DIRECTORS CUT                      */
   /* ---------------------------------------------------------------------- */
   // Single source of truth for entitlements: profiles
-  const isPremium = useMemo(() => {
-    const plan = String(profile?.plan || "")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "_")
-      .replace(/^_+|_+$/g, "");
-    const planHit = plan === "premium" || plan === "directors_cut";
-    return profile?.is_premium === true || planHit;
-  }, [profile?.is_premium, profile?.plan]);
+  const isPremium = false;
 
   /* ---------------------------------------------------------------------- */
   /*                           UPDATE PROFILE HELPER                         */
@@ -200,22 +206,25 @@ function UserProvider({ children }) {
         delete safePatch.theme_preset;
       }
 
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from("profiles")
         .update(safePatch)
-        .eq("id", user.id)
-        .select()
-        .maybeSingle();
+        .eq("id", user.id);
 
       if (error) {
         console.warn("[UserContext] saveProfilePatch failed:", error.message);
         return;
       }
 
-      const merged = { ...(profile || {}), ...(data || safePatch) };
-      const clean = { ...merged, avatar_url: sanitizeAvatarUrl(merged.avatar_url) };
-      setProfile(clean);
-      if (clean?.avatar_url) setAvatar(clean.avatar_url);
+      const { data, error: pErr } = await supabase.rpc("get_profile_display", {
+        p_user_id: user.id,
+      });
+      if (pErr) {
+        console.warn("[UserContext] saveProfilePatch refresh failed:", pErr.message);
+        return;
+      }
+      setProfile(data || null);
+      if (data?.avatar_url) setAvatar(data.avatar_url);
     },
     [user?.id, profile]
   );
@@ -233,11 +242,9 @@ function UserProvider({ children }) {
       return refreshInFlightRef.current;
     }
     const p = (async () => {
-      const { data: prof, error } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", user.id)
-        .maybeSingle();
+      const { data, error } = await supabase.rpc("get_profile_display", {
+        p_user_id: user.id,
+      });
 
       if (error) {
         console.warn("[UserContext] refreshProfile failed:", error.message);
@@ -246,13 +253,10 @@ function UserProvider({ children }) {
         return null;
       }
 
-      const clean = prof
-        ? { ...prof, avatar_url: sanitizeAvatarUrl(prof.avatar_url) }
-        : null;
-      setProfile(clean);
-      setAvatar(clean?.avatar_url || null);
+      setProfile(data || null);
+      setAvatar(data?.avatar_url || null);
       lastProfileFetchRef.current = Date.now();
-      return clean;
+      return data || null;
     })();
     refreshInFlightRef.current = p.finally(() => {
       refreshInFlightRef.current = null;
@@ -391,29 +395,6 @@ function UserProvider({ children }) {
   /* ---------------------------------------------------------------------- */
   /*                      PREMIUM DOWNGRADE (TRIAL CHURN)                   */
   /* ---------------------------------------------------------------------- */
-  const prevIsPremiumRef = useRef(false);
-  const prevPlanRef = useRef("");
-  const churnFiredRef = useRef(false);
-  useEffect(() => {
-    const plan = String(profile?.plan || "").toLowerCase();
-    const nowIsPremium = profile?.is_premium === true || plan === "directors_cut";
-    const wasPremium = prevIsPremiumRef.current;
-    const prevPlan = prevPlanRef.current;
-    const expiredAt = profile?.premium_expires_at ? new Date(profile.premium_expires_at).getTime() : null;
-    const expired = expiredAt ? expiredAt < Date.now() : false;
-    if (wasPremium && !nowIsPremium && expired && !churnFiredRef.current && prevPlan === "directors_cut") {
-      const started = profile?.premium_started_at ? new Date(profile.premium_started_at).getTime() : null;
-      const daysUsed =
-        started && !Number.isNaN(started)
-          ? Math.max(0, Math.floor((Date.now() - started) / 86400000))
-          : 0;
-      trackEvent("trial_churned", { days_used: daysUsed, last_feature_used: "other" });
-      churnFiredRef.current = true;
-    }
-    prevIsPremiumRef.current = nowIsPremium;
-    prevPlanRef.current = plan || prevPlan;
-  }, [profile?.is_premium, profile?.plan, profile?.premium_expires_at, profile?.premium_started_at]);
-
   /* ---------------------------------------------------------------------- */
   /*                             PROVIDER VALUE                              */
   /* ---------------------------------------------------------------------- */
@@ -421,6 +402,7 @@ function UserProvider({ children }) {
     <UserContext.Provider
       value={{
         user,
+        session,
         profile,
         avatar,
         loading,         // full hydration done

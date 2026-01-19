@@ -1,5 +1,5 @@
 // src/hooks/useEntitlements.js
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import supabase from "../supabaseClient";
 import { useUser } from "../context/UserContext";
 import { trackEvent } from "../lib/analytics";
@@ -17,6 +17,21 @@ export default function useEntitlements() {
   const [presidentsClubs, setPresidentsClubs] = useState([]);
   const [loading, setLoading] = useState(false);
   const limitHitRef = useMemo(() => ({ moodboard: false, clubs: false }), []);
+  const resolveUserId = useCallback(async () => {
+    const { data: auth } = await supabase.auth.getSession();
+    return user?.id || auth?.session?.user?.id || null;
+  }, [user?.id]);
+
+  const waitForUserId = useCallback(async () => {
+    let id = await resolveUserId();
+    let tries = 0;
+    while (!id && tries < 10) {
+      await new Promise((r) => setTimeout(r, 500));
+      id = await resolveUserId();
+      tries += 1;
+    }
+    return id;
+  }, [resolveUserId]);
 
   // ─────────────────────────────── Plan derivation ───────────────────────────────
   const normalizePlan = (value) =>
@@ -41,39 +56,62 @@ export default function useEntitlements() {
 
   // ─────────────────────────────── Fetch owned clubs ───────────────────────────────
   useEffect(() => {
-    if (!user?.id) {
-      setPresidentsClubs([]);
-      return;
-    }
-    let mounted = true;
+    let cancelled = false;
+    let retryTimer;
 
-    (async () => {
+    const load = async () => {
       setLoading(true);
+      const resolvedUserId = await resolveUserId();
+      if (!resolvedUserId) {
+        if (!cancelled) {
+          setPresidentsClubs([]);
+          retryTimer = setTimeout(load, 500);
+        }
+        return;
+      }
+
       const { data, error } = await supabase
         .from("club_members")
-        .select("club_id, role, clubs:club_id (id, slug, name)")
-        .eq("user_id", user.id)
+        .select("club_id, user_id, role, joined_at, accepted")
+        .eq("user_id", resolvedUserId)
         .eq("role", "president");
 
-      if (!mounted) return;
+      if (cancelled) return;
       if (error) console.error("Error loading president clubs:", error);
 
       const rows = Array.isArray(data) ? data : [];
+      const clubIds = rows.map((r) => r.club_id).filter(Boolean);
+      let clubsMap = {};
+      if (clubIds.length) {
+        const { data: clubsData } = await supabase
+          .from("clubs_public")
+          .select("id, slug, name")
+          .in("id", clubIds);
+        clubsMap = (clubsData || []).reduce((acc, c) => {
+          acc[c.id] = c;
+          return acc;
+        }, {});
+      }
       const mapped = rows
-        .map((r) => ({
-          id: r?.clubs?.id || r.club_id,
-          slug: r?.clubs?.slug || null,
-          name: r?.clubs?.name || "Club",
-        }))
+        .map((r) => {
+          const c = clubsMap[r.club_id] || {};
+          return {
+            id: r.club_id,
+            slug: c.slug || null,
+            name: c.name || "Club",
+          };
+        })
         .filter((c) => c.id);
       setPresidentsClubs(mapped);
       setLoading(false);
-    })();
-
-    return () => {
-      mounted = false;
     };
-  }, [user?.id]);
+
+    load();
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  }, [resolveUserId]);
 
   // ─────────────────────────────── Helpers ───────────────────────────────
   const idOrSlugMatch = (clubIdOrSlug, c) =>
@@ -88,11 +126,12 @@ export default function useEntitlements() {
 
   // Count owned clubs (local)
   async function getOwnedClubsCount() {
-    if (!user?.id) return 0;
+    const resolvedUserId = await waitForUserId();
+    if (!resolvedUserId) return 0;
     const { count, error } = await supabase
       .from("club_members")
-      .select("id", { count: "exact", head: true })
-      .eq("user_id", user.id)
+      .select("club_id, user_id, role, joined_at, accepted", { count: "exact", head: true })
+      .eq("user_id", resolvedUserId)
       .eq("role", "president");
     if (error) {
       console.error("Error counting owned clubs:", error);
@@ -103,7 +142,8 @@ export default function useEntitlements() {
 
   // Check via RPC if user can create another club (matches RLS guard)
   async function canCreateAnotherClub() {
-    if (!user?.id) return false;
+    const resolvedUserId = await waitForUserId();
+    if (!resolvedUserId) return false;
     const { data, error } = await supabase.rpc("can_create_club");
     if (error) {
       console.error("RPC can_create_club error:", error);

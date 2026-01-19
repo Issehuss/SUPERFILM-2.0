@@ -1,6 +1,8 @@
 // Fetch a user's club memberships and expose the first (primary) club.
 import { useEffect, useState } from "react";
 import supabase from "../supabaseClient";
+import useSafeSupabaseFetch from "./useSafeSupabaseFetch";
+import useAppResume from "./useAppResume";
 
 const CACHE_KEY = "cache:myClub:v1";
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
@@ -37,83 +39,85 @@ export default function useMyClub(userId) {
   const [club, setClub] = useState(cached || null);
   const [loading, setLoading] = useState(!!userId && !cached);
   const [error, setError] = useState(null);
+  const appResumeTick = useAppResume();
 
   useEffect(() => {
-    let cancelled = false;
     const cachedClub = readCache(userId);
     if (cachedClub) {
       setClub(cachedClub);
       setClubs([cachedClub]);
       setLoading(false);
     }
+  }, [userId]);
 
-    async function run() {
-      if (!userId) {
-        setClubs([]);
-        setClub(null);
-        setLoading(false);
-        return;
-      }
+  const { data: fetchResult, loading: fetchLoading, error: fetchError, timedOut } =
+    useSafeSupabaseFetch(
+      async (session) => {
+        const resolvedUserId = userId || session?.user?.id;
+        if (!resolvedUserId) throw new Error("no-user");
 
-      setLoading((prev) => prev || !cachedClub);
-      try {
         const { data, error: qErr } = await supabase
           .from("club_members")
-          .select(`
-            club_id,
-            role,
-            clubs:club_id (
-              id,
-              slug,
-              name,
-              profile_image_url,
-              banner_url,
-              next_screening:club_next_screening (
-                film_title,
-                screening_at,
-                location
-              )
-            )
-          `)
-          .eq("user_id", userId);
-
+          .select("club_id, user_id, role, joined_at, accepted")
+          .eq("user_id", resolvedUserId);
         if (qErr) throw qErr;
 
-        if (!cancelled) {
-          const list = (data || [])
-            .map((row) => {
-              const clubData = row.clubs || {};
-              const nextScreening = Array.isArray(clubData.next_screening)
-                ? clubData.next_screening[0]
-                : clubData.next_screening;
-              return {
-                ...clubData,
-                role: row.role,
-                next_screening: nextScreening || null,
-              };
-            })
-            .filter((c) => c.id);
-          setClubs(list);
-          setClub(list[0] || null);
-          writeCache(userId, list[0] || null);
+        const clubIds = (data || []).map((row) => row.club_id).filter(Boolean);
+        let clubsMap = {};
+        if (clubIds.length) {
+          const { data: clubsData } = await supabase
+            .from("clubs_public")
+            .select("id, slug, name, profile_image_url")
+            .in("id", clubIds);
+          clubsMap = (clubsData || []).reduce((acc, c) => {
+            acc[c.id] = c;
+            return acc;
+          }, {});
         }
-      } catch (e) {
-        console.warn("[useMyClub] fetch failed:", e.message);
-        if (!cancelled) {
-          setError(e);
-          setClubs([]);
-          setClub(null);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
 
-    run();
-    return () => {
-      cancelled = true;
-    };
-  }, [userId]);
+        const list = (data || [])
+          .map((row) => {
+            const clubData = clubsMap[row.club_id] || {};
+            return {
+              id: row.club_id,
+              slug: clubData.slug || null,
+              name: clubData.name || "Club",
+              profile_image_url: clubData.profile_image_url || null,
+              role: row.role,
+              next_screening: null,
+            };
+          })
+          .filter((c) => c.id);
+
+        return { userId: resolvedUserId, clubs: list };
+      },
+      [userId, appResumeTick],
+      { enabled: true, timeoutMs: 8000 }
+    );
+
+  useEffect(() => {
+    setLoading(fetchLoading || (!!userId && !club));
+  }, [fetchLoading, userId, club]);
+
+  useEffect(() => {
+    if (!fetchResult) return;
+    setClubs(fetchResult.clubs || []);
+    setClub(fetchResult.clubs?.[0] || null);
+    writeCache(fetchResult.userId, fetchResult.clubs?.[0] || null);
+    setError(null);
+  }, [fetchResult]);
+
+  useEffect(() => {
+    if (fetchError && fetchError.message !== "no-user") {
+      setError(fetchError);
+    }
+  }, [fetchError]);
+
+  useEffect(() => {
+    if (timedOut) {
+      setError(new Error("My club loading timed out"));
+    }
+  }, [timedOut]);
 
   return { club, clubs, loading, error };
 }

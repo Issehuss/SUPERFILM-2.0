@@ -158,7 +158,7 @@ function RequirePresidentPremium({ children }) {
           clubId = clubParam;
         } else {
           const { data: bySlug } = await supabase
-            .from("clubs")
+            .from("clubs_public")
             .select("id")
             .eq("slug", clubParam)
             .maybeSingle();
@@ -171,7 +171,7 @@ function RequirePresidentPremium({ children }) {
 
         const { data: mem } = await supabase
           .from("club_members")
-          .select("role")
+          .select("club_id, user_id, role, joined_at, accepted")
           .eq("club_id", clubId)
           .eq("user_id", user.id)
           .maybeSingle();
@@ -269,7 +269,7 @@ function NavClubSwitch() {
       try {
         const { data, error } = await supabase
           .from("club_members")
-          .select("club_id, clubs:club_id(id, slug)")
+          .select("club_id, user_id, role, joined_at, accepted")
           .eq("user_id", user.id)
           .limit(1);
 
@@ -278,9 +278,14 @@ function NavClubSwitch() {
         if (error) throw error;
 
         const row = data?.[0];
-        if (row?.clubs?.id) {
-          const slug = row.clubs.slug || row.clubs.id;
-          localStorage.setItem("activeClubId", String(row.clubs.id));
+        if (row?.club_id) {
+          const { data: clubRow } = await supabase
+            .from("clubs_public")
+            .select("id, slug")
+            .eq("id", row.club_id)
+            .maybeSingle();
+          const slug = clubRow?.slug || row.club_id;
+          localStorage.setItem("activeClubId", String(row.club_id));
           localStorage.setItem("activeClubSlug", String(slug));
           localStorage.setItem("myClubId", String(slug));
           setTarget({ to: "/myclub", label: "My Club" });
@@ -337,33 +342,19 @@ function MainShell() {
 
   usePerfLogger({ enabled: perfEnabled, intervalMs: 30000 });
 
-  // Clears the onboarding "stuck" state if user already completed it (e.g., DB flag set) but local flag missing
-  useEffect(() => {
-    if (profile?.has_seen_onboarding === true || user?.user_metadata?.has_seen_onboarding === true) {
-      try {
-        localStorage.setItem("sf:onboarding_seen", "1");
-      } catch {}
-    }
-  }, [profile?.has_seen_onboarding, user?.user_metadata?.has_seen_onboarding]);
-
   // ⬇️ Onboarding redirect: only show onboarding once (post-signup)
   useEffect(() => {
     if (userLoading || !isReady || !user) return;
 
-    const seenProfile = profile?.has_seen_onboarding === true;
-    const seenMeta = user?.user_metadata?.has_seen_onboarding === true;
     const seenLocal =
       typeof window !== "undefined" &&
       localStorage.getItem("sf:onboarding_seen") === "1";
 
-    const seen = seenProfile || seenMeta || seenLocal;
-    if (!seen) {
+    if (!seenLocal) {
       navigate("/onboarding", { replace: true });
     }
   }, [
     user,
-    profile?.has_seen_onboarding,
-    user?.user_metadata?.has_seen_onboarding,
     navigate,
     userLoading,
     isReady,
@@ -402,7 +393,7 @@ function MainShell() {
           user_id: user.id,
           type: "pwa.install",
           data: {
-            title: "Install SuperFilm",
+            title: "Install SuperFilm PWA",
             message: "Get instant access from your home screen.",
             question: "Already got the PWA? Tap yes to dismiss this reminder.",
           },
@@ -735,8 +726,8 @@ function MainShell() {
               path="/clubs/:clubParam/requests"
               element={<ClubRequests />}
             />
-            <Route path="/u/:slug/:mode(followers|following)" element={<ProfileFollows />} />
-            <Route path="/profile/:id/:mode(followers|following)" element={<ProfileFollows />} />
+            <Route path="/u/:slug/:mode" element={<ProfileFollows />} />
+            <Route path="/profile/:id/:mode" element={<ProfileFollows />} />
             <Route path="/auth" element={<AuthPage />} />
 
             {/* Premium routing */}

@@ -56,7 +56,7 @@ export default function StatsAndWatchlist({
   };
 
   return (
-    <div className="w-full px-0 sm:px-6 pt-3 sm:pt-6">
+    <div className="w-full px-3 sm:px-6 pt-3 sm:pt-6">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-6">
         {/* LEFT: Stats (centered) */}
         <div

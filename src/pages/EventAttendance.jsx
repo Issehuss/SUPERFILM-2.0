@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Users, ArrowLeft } from "lucide-react";
 import supabase from "../supabaseClient";
 import { useUser } from "../context/UserContext";
+import useRealtimeResume from "../hooks/useRealtimeResume";
 
 const AVATAR_FALLBACK = "/avatar_placeholder.png";
 
@@ -37,15 +38,24 @@ export default function EventAttendance() {
   const [attendees, setAttendees] = useState([]); // [{id,name,avatar,slug}]
   const [isGoing, setIsGoing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const resumeTick = useRealtimeResume();
 
-  const eventDateISO = event?.date || event?.starts_at || null;
+  const eventDateISO = event?.date || null;
 
   // Permission check (pres/VP/admin/mod/partner)
   useEffect(() => {
     let on = true;
-    (async () => {
+    let retryTimer;
+    const loadPerms = async () => {
       try {
-        if (!user?.id || !clubId) { on && setCanCreate(false); return; }
+        const { data: auth } = await supabase.auth.getSession();
+        const sessionUserId = auth?.session?.user?.id || null;
+        const resolvedUserId = user?.id || sessionUserId;
+        if (!resolvedUserId || !clubId) {
+          on && setCanCreate(false);
+          if (!resolvedUserId) retryTimer = setTimeout(loadPerms, 500);
+          return;
+        }
         const allow = (r) =>
           ["president", "vice_president", "vice", "admin", "moderator", "partner"].includes(
             String(r || "").toLowerCase()
@@ -54,10 +64,10 @@ export default function EventAttendance() {
         let ok = false;
 
         const { data: staffRow } = await supabase
-          .from("club_staff")
-          .select("role")
+          .from("club_members")
+          .select("club_id, user_id, role, joined_at, accepted")
           .eq("club_id", clubId)
-          .eq("user_id", user.id)
+          .eq("user_id", resolvedUserId)
           .maybeSingle();
         if (allow(staffRow?.role)) ok = true;
 
@@ -66,7 +76,7 @@ export default function EventAttendance() {
             .from("profile_roles")
             .select("roles")
             .eq("club_id", clubId)
-            .eq("user_id", user.id)
+            .eq("user_id", resolvedUserId)
             .maybeSingle();
 
           let roles = [];
@@ -82,8 +92,12 @@ export default function EventAttendance() {
       } catch {
         on && setCanCreate(false);
       }
-    })();
-    return () => { on = false; };
+    };
+    loadPerms();
+    return () => {
+      on = false;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
   }, [user?.id, clubId]);
 
   // Resolve screening_id (from time or next upcoming)
@@ -110,26 +124,7 @@ export default function EventAttendance() {
           } catch { /* ignore */ }
         }
 
-        // Fallback to next upcoming screening
-        if (!resolved) {
-          const { data: next } = await supabase
-            .from("screenings")
-            .select("id, title, starts_at, location")
-            .eq("club_id", clubId)
-            .gte("starts_at", new Date().toISOString())
-            .order("starts_at", { ascending: true })
-            .limit(1);
-          if (next?.[0]) {
-            resolved = next[0].id;
-            if (!event) {
-              setEvent({
-                title: next[0].title || "Screening",
-                date: next[0].starts_at,
-                location: next[0].location || ""
-              });
-            }
-          }
-        }
+        // No fallback query to screenings (deprecated)
 
         on && setScreeningId(resolved);
       } finally {
@@ -144,35 +139,7 @@ export default function EventAttendance() {
     if (screeningId) return screeningId;
     if (!canCreate) return null;
 
-    const { data: c } = await supabase
-      .from("clubs")
-      .select("next_screening_title, next_screening_at, next_screening_location")
-      .eq("id", clubId)
-      .maybeSingle();
-
-    if (!c?.next_screening_title || !c?.next_screening_at) return null;
-
-    const payload = {
-      club_id: clubId,
-      title: c.next_screening_title,
-      starts_at: c.next_screening_at,
-      location: c.next_screening_location || null
-    };
-
-    const { data: ins, error } = await supabase
-      .from("screenings")
-      .insert(payload)
-      .select("id, title, starts_at, location")
-      .single();
-    if (error) throw error;
-
-    setEvent((prev) => prev || {
-      title: ins.title,
-      date: ins.starts_at,
-      location: ins.location || ""
-    });
-    setScreeningId(ins.id);
-    return ins.id;
+    return null;
   }
 
   // Load attendees (2-step: attendance → profiles)
@@ -232,7 +199,7 @@ export default function EventAttendance() {
       on = false;
       if (ch) supabase.removeChannel(ch);
     };
-  }, [clubId, screeningId, user?.id]);
+  }, [clubId, screeningId, user?.id, resumeTick]);
 
   // Toggle RSVP using screening_id and show real avatar for current user
   async function toggleAttendance() {

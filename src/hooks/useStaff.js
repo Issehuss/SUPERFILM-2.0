@@ -10,10 +10,18 @@ export default function useStaff(clubId) {
 
   useEffect(() => {
     let cancelled = false;
+    let retryTimer;
 
     async function run() {
-      if (!user?.id || !clubId || !/^[0-9a-f-]{16,}$/i.test(String(clubId))) {
-        if (!cancelled) { setIsStaff(false); setLoading(false); }
+      const { data: auth } = await supabase.auth.getSession();
+      const sessionUserId = auth?.session?.user?.id || null;
+      const resolvedUserId = user?.id || sessionUserId;
+      if (!resolvedUserId || !clubId || !/^[0-9a-f-]{16,}$/i.test(String(clubId))) {
+        if (!cancelled) {
+          setIsStaff(false);
+          setLoading(false);
+          if (!resolvedUserId) retryTimer = setTimeout(run, 500);
+        }
         return;
       }
       setLoading(true);
@@ -23,16 +31,16 @@ export default function useStaff(clubId) {
         const { data: prof } = await supabase
           .from("profiles")
           .select("is_partner")
-          .eq("id", user.id)
+          .eq("id", resolvedUserId)
           .maybeSingle();
         const partner = !!prof?.is_partner;
 
         // leader (president / vp)
         const { data: memRow } = await supabase
           .from("club_members")
-          .select("role")
+          .select("club_id, user_id, role, joined_at, accepted")
           .eq("club_id", clubId)
-          .eq("user_id", user.id)
+          .eq("user_id", resolvedUserId)
           .maybeSingle();
         const leader = ["president","vice_president"].includes(memRow?.role);
 
@@ -63,7 +71,10 @@ export default function useStaff(clubId) {
     }
 
     run();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
   }, [user?.id, clubId]);
 
   return { isStaff, loading };

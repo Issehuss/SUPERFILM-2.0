@@ -634,14 +634,21 @@ function applyBanner(url) {
   }
 
   useEffect(() => {
-    if (!user?.id) return;
     let isCancelled = false;
+    let retryTimer;
   
-    (async () => {
+    const loadTasteCards = async () => {
+      const { data: auth } = await supabase.auth.getSession();
+      const sessionUserId = auth?.session?.user?.id || null;
+      const resolvedUserId = user?.id || sessionUserId;
+      if (!resolvedUserId) {
+        retryTimer = setTimeout(loadTasteCards, 500);
+        return;
+      }
       const { data, error } = await supabase
         .from("profiles")
         .select("taste_cards")
-        .eq("id", user.id)
+        .eq("id", resolvedUserId)
         .maybeSingle();
   
       if (error) {
@@ -651,10 +658,12 @@ function applyBanner(url) {
       if (!isCancelled) {
         setTasteCards(Array.isArray(data?.taste_cards) ? data.taste_cards : []);
       }
-    })();
+    };
   
+    loadTasteCards();
     return () => {
       isCancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
     };
   }, [user?.id]);
   

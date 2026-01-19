@@ -1,39 +1,108 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState } from "react";
 import supabase from "../supabaseClient";
 import { useUser } from "../context/UserContext";
 import { Link } from "react-router-dom";
 import { Crown, Plus } from "lucide-react";
+import useSafeSupabaseFetch from "../hooks/useSafeSupabaseFetch";
+import useAppResume from "../hooks/useAppResume";
+
+const CACHE_KEY = "cache:myClubsPage:v1";
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
+function readCache(userId) {
+  if (!userId) return null;
+  try {
+    const raw = sessionStorage.getItem(`${CACHE_KEY}:${userId}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.at) return null;
+    if (Date.now() - parsed.at > CACHE_TTL_MS) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(userId, payload) {
+  if (!userId) return;
+  try {
+    sessionStorage.setItem(
+      `${CACHE_KEY}:${userId}`,
+      JSON.stringify({ ...payload, at: Date.now() })
+    );
+  } catch {
+    /* ignore cache errors */
+  }
+}
 
 export default function MyClubs() {
   const { user } = useUser();
-  const [owned, setOwned] = useState([]);
-  const [member, setMember] = useState([]);
+  const cached = readCache(user?.id);
+  const [owned, setOwned] = useState(cached?.owned || []);
+  const [member, setMember] = useState(cached?.member || []);
+  const resumeTick = useAppResume();
+
+  const { data: clubsResult, error: clubsError } = useSafeSupabaseFetch(
+      async (session) => {
+        const resolvedUserId = user?.id || session?.user?.id;
+        if (!resolvedUserId) throw new Error("no-user");
+
+        const { data: o } = await supabase
+          .from("club_members")
+          .select("club_id, user_id, role, joined_at, accepted")
+          .eq("user_id", resolvedUserId)
+          .eq("role", "president");
+
+        const { data: m } = await supabase
+          .from("club_members")
+          .select("club_id, user_id, role, joined_at, accepted")
+          .eq("user_id", resolvedUserId)
+          .in("role", ["admin", "member"]);
+
+        const ownedIds = (o ?? []).map((r) => r.club_id).filter(Boolean);
+        const memberIds = (m ?? []).map((r) => r.club_id).filter(Boolean);
+        const allIds = Array.from(new Set([...ownedIds, ...memberIds]));
+        let clubsMap = {};
+        if (allIds.length) {
+          const { data: clubsData } = await supabase
+            .from("clubs_public")
+            .select("id, name, slug, profile_image_url")
+            .in("id", allIds);
+          clubsMap = (clubsData || []).reduce((acc, c) => {
+            acc[c.id] = c;
+            return acc;
+          }, {});
+        }
+
+        const ownedList = ownedIds
+          .map((id) => clubsMap[id] || { id, name: "Club", slug: null })
+          .filter((c) => c.id);
+        const memberList = memberIds
+          .map((id) => clubsMap[id] || { id, name: "Club", slug: null })
+          .filter((c) => c.id);
+
+        return { owned: ownedList, member: memberList, userId: resolvedUserId };
+      },
+      [user?.id, resumeTick],
+      { enabled: true, timeoutMs: 8000, initialData: null }
+    );
 
   useEffect(() => {
-    if (!user?.id) return;
-    let ignore = false;
+    if (!clubsResult) return;
+    setOwned(clubsResult.owned || []);
+    setMember(clubsResult.member || []);
+    writeCache(clubsResult.userId, {
+      owned: clubsResult.owned || [],
+      member: clubsResult.member || [],
+    });
+  }, [clubsResult]);
 
-    async function load() {
-      const { data: o } = await supabase
-        .from("club_members")
-        .select("role, clubs:club_id(id, name, slug, banner_url)")
-        .eq("user_id", user.id)
-        .eq("role", "president");
-
-      const { data: m } = await supabase
-        .from("club_members")
-        .select("role, clubs:club_id(id, name, slug, banner_url)")
-        .eq("user_id", user.id)
-        .in("role", ["admin", "member"]);
-
-      if (!ignore) {
-        setOwned((o ?? []).map(r => r.clubs).filter(Boolean));
-        setMember((m ?? []).map(r => r.clubs).filter(Boolean));
-      }
+  useEffect(() => {
+    if (clubsError && clubsError.message !== "no-user") {
+      setOwned([]);
+      setMember([]);
     }
-    load();
-    return () => { ignore = true; };
-  }, [user?.id]);
+  }, [clubsError]);
 
   if (!user) {
     return <div className="p-6 text-zinc-400">Sign in to view your clubs.</div>;
@@ -100,8 +169,8 @@ function ClubCard({ club, owned }) {
       className="group overflow-hidden rounded-2xl border border-white/10 bg-zinc-950 hover:border-white/20"
     >
       <div className="h-28 w-full bg-zinc-900">
-        {club.banner_url ? (
-          <img src={club.banner_url} alt="" className="h-full w-full object-cover" />
+        {club.profile_image_url ? (
+          <img src={club.profile_image_url} alt="" className="h-full w-full object-cover" />
         ) : null}
       </div>
       <div className="flex items-center gap-2 p-3">

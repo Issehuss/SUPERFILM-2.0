@@ -4,10 +4,12 @@ import { useNavigate } from "react-router-dom";
 import supabase from "../supabaseClient";
 import { useUser } from "../context/UserContext";
 import { Info } from "lucide-react";
+import useRealtimeResume from "../hooks/useRealtimeResume";
 
 export default function LeaderboardAndPlayoffs() {
   const navigate = useNavigate();
   const { user, profile } = useUser();
+  const resumeTick = useRealtimeResume();
 
   const [tab, setTab] = useState("leaderboard"); // 'leaderboard' | 'playoffs'
   const [showInfo, setShowInfo] = useState(false);
@@ -41,7 +43,7 @@ export default function LeaderboardAndPlayoffs() {
       setSeasonLoading(false);
     })();
     return () => { alive = false; };
-  }, [tab]);
+  }, [tab, resumeTick]);
 
   useEffect(() => {
     if (tab !== "playoffs") return;
@@ -50,7 +52,7 @@ export default function LeaderboardAndPlayoffs() {
     async function load() {
       if (!primaryClubId) { setLoading(false); return; }
       const { data: clubRow } = await supabase
-        .from("clubs")
+        .from("clubs_public")
         .select("name")
         .eq("id", primaryClubId)
         .maybeSingle();
@@ -103,8 +105,8 @@ export default function LeaderboardAndPlayoffs() {
 
       // 1) clubs
       const { data: clubRows, error: cErr } = await supabase
-        .from("clubs")
-        .select("id, slug, name, profile_image_url, created_at")
+        .from("clubs_public")
+        .select("id, slug, name, banner_url, created_at")
         .order("created_at", { ascending: false })
         .limit(100);
       if (cancelled) return;
@@ -320,8 +322,8 @@ function LeaderboardBlankTable({ loading, clubs, weekMap, totalMap }) {
                         title="Open club profile"
                       >
                         <div className="h-7 w-7 rounded-full overflow-hidden bg-zinc-800 ring-1 ring-white/10 group-hover:ring-yellow-500/60 transition">
-                          {c.profile_image_url ? (
-                            <img src={c.profile_image_url} alt="" className="h-full w-full object-cover" />
+                          {c.banner_url ? (
+                            <img src={c.banner_url} alt="" className="h-full w-full object-cover" />
                           ) : null}
                         </div>
                         <div className="truncate text-white group-hover:underline">{c.name}</div>
@@ -507,4 +509,3 @@ function Row({ r }) {
     </div>
   );
 }
-

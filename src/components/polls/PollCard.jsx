@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import supabase from "../../supabaseClient";
 import { useUser } from "../../context/UserContext";
+import useRealtimeResume from "../../hooks/useRealtimeResume";
 
 export default function PollCard({ pollId }) {
   const { user } = useUser();
@@ -13,6 +14,7 @@ export default function PollCard({ pollId }) {
   const [myVotes, setMyVotes] = useState(new Set());     // Set<option_id>
   const [counts, setCounts] = useState({});              // { [option_id]: number }
   const [isVisible, setIsVisible] = useState(true);
+  const resumeTick = useRealtimeResume();
 
   const totalVotes = useMemo(
     () => Object.values(counts).reduce((a, b) => a + b, 0),
@@ -29,8 +31,16 @@ export default function PollCard({ pollId }) {
   const load = useCallback(async () => {
     if (!pollId) return;
     const [{ data: p }, { data: opts }, { data: my }, { data: all }] = await Promise.all([
-      supabase.from("chat_polls").select("*").eq("id", pollId).single(),
-      supabase.from("chat_poll_options").select("*").eq("poll_id", pollId).order("idx", { ascending: true }),
+      supabase
+        .from("chat_polls")
+        .select("id, question, allow_multiple, is_closed, creator_id")
+        .eq("id", pollId)
+        .single(),
+      supabase
+        .from("chat_poll_options")
+        .select("id, poll_id, text, idx")
+        .eq("poll_id", pollId)
+        .order("idx", { ascending: true }),
       supabase.from("chat_poll_votes").select("option_id").eq("poll_id", pollId).eq("voter_id", uid || ""),
       supabase.from("chat_poll_votes").select("option_id").eq("poll_id", pollId),
     ]);
@@ -72,7 +82,7 @@ export default function PollCard({ pollId }) {
       .on("postgres_changes", { event: "update", schema: "public", table: "chat_polls", filter: `id=eq.${pollId}` }, load)
       .subscribe();
     return () => { supabase.removeChannel(ch); };
-  }, [pollId, load]);
+  }, [pollId, load, resumeTick]);
 
   // Lightweight polling fallback (only when visible)
   useEffect(() => {

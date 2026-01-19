@@ -3,6 +3,9 @@ import { useEffect, useState, useMemo } from "react";
 import { useUser } from "../context/UserContext";
 import supabase from "../supabaseClient";
 import { Pin, Plus, History as HistoryIcon, ChevronDown } from "lucide-react";
+import useRealtimeResume from "../hooks/useRealtimeResume";
+import useSafeSupabaseFetch from "../hooks/useSafeSupabaseFetch";
+import useAppResume from "../hooks/useAppResume";
 
 const LEADER_ROLES = ["president", "vice_president"];
 
@@ -18,62 +21,82 @@ export default function ClubNoticeBoard({ clubId }) {
 
   // history
   const [historyOpen, setHistoryOpen] = useState(false);
+  const resumeTick = useRealtimeResume();
+  const appResumeTick = useAppResume();
 
   // role gating
   const [isLeader, setIsLeader] = useState(false);
   const canCompose = useMemo(() => Boolean(user?.id && isLeader), [user?.id, isLeader]);
 
   // ---- fetch leader role for this club (client UX; RLS still enforces on server) ----
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (!clubId || !user?.id) {
-        if (!cancelled) setIsLeader(false);
-        return;
-      }
+  const { data: leaderRow } = useSafeSupabaseFetch(
+    async (session) => {
+      if (!clubId) throw new Error("no-club");
+      const resolvedUserId = user?.id || session?.user?.id;
       const { data, error } = await supabase
         .from("club_members")
-        .select("role")
+        .select("club_id, user_id, role, joined_at, accepted")
         .eq("club_id", clubId)
-        .eq("user_id", user.id)
+        .eq("user_id", resolvedUserId)
         .maybeSingle();
-      if (cancelled) return;
-      if (error) {
-        setIsLeader(false);
-        return;
-      }
-      const role = (data?.role || "").toLowerCase();
-      setIsLeader(LEADER_ROLES.includes(role));
-    })();
-    return () => { cancelled = true; };
-  }, [clubId, user?.id]);
-
-  // ---- load current + history ----
-  async function load() {
-    if (!clubId) return;
-    setLoading(true);
-    const [{ data: cur }, { data: hist }] = await Promise.all([
-      supabase.from("club_notice_current").select("*").eq("club_id", clubId).maybeSingle(),
-      supabase.from("club_notice_history").select("*").eq("club_id", clubId),
-    ]);
-    setCurrent(cur || null);
-    setHistory(hist || []);
-    setLoading(false);
-  }
+      if (error) throw error;
+      return data || null;
+    },
+    [clubId, user?.id, appResumeTick],
+    { enabled: Boolean(clubId), timeoutMs: 8000 }
+  );
 
   useEffect(() => {
-    load();
+    const role = (leaderRow?.role || "").toLowerCase();
+    setIsLeader(LEADER_ROLES.includes(role));
+  }, [leaderRow]);
+
+  // ---- load current + history ----
+  const { data: noticesResult, loading: noticesLoading, retry: retryNotices } =
+    useSafeSupabaseFetch(
+      async () => {
+        if (!clubId) throw new Error("no-club");
+        const [{ data: cur }, { data: hist }] = await Promise.all([
+          supabase
+            .from("club_notice_current")
+            .select("id, title, body, created_at")
+            .eq("club_id", clubId)
+            .maybeSingle(),
+          supabase
+            .from("club_notice_history")
+            .select("id, title, body, created_at, archived_at")
+            .eq("club_id", clubId)
+            .order("archived_at", { ascending: false })
+            .limit(20),
+        ]);
+        return { current: cur || null, history: hist || [] };
+      },
+      [clubId, resumeTick, appResumeTick],
+      { enabled: Boolean(clubId), timeoutMs: 8000 }
+    );
+
+  useEffect(() => {
+    setLoading(noticesLoading);
+  }, [noticesLoading]);
+
+  useEffect(() => {
+    if (!noticesResult) return;
+    setCurrent(noticesResult.current || null);
+    setHistory(noticesResult.history || []);
+  }, [noticesResult]);
+
+  useEffect(() => {
     const ch = supabase
       .channel(`notices:${clubId}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "club_notices", filter: `club_id=eq.${clubId}` },
-        () => load()
+        () => retryNotices()
       )
       .subscribe();
     return () => { supabase.removeChannel(ch); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clubId]);
+  }, [clubId, resumeTick]);
 
   // ---- publish/replace (leaders only; server double-checks via RLS/RPC) ----
   async function submit() {
@@ -93,7 +116,7 @@ export default function ClubNoticeBoard({ clubId }) {
       return;
     }
   // Force UI refresh even if realtime doesn’t arrive
-  await load();
+  await retryNotices();
     setForm({ title: "", body: "" });
     setComposeOpen(false);
   }

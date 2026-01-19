@@ -29,15 +29,15 @@ export default function SupabasePing() {
       // 2) DB PING — can we reach a table?
       try {
         const { error } = await supabase
-          .from("clubs")
+          .from("clubs_public")
           .select("*", { count: "exact", head: true })
           .limit(1);
 
         if (error) {
           setDbStatus("❌ DB error");
-          setDetails((d) => d + `\nDB error (clubs): ${error.message}`);
+          setDetails((d) => d + `\nDB error (clubs_public): ${error.message}`);
         } else {
-          setDbStatus("✅ DB reachable (clubs)");
+          setDbStatus("✅ DB reachable (clubs_public)");
         }
       } catch (e) {
         setDbStatus("❌ DB exception");
@@ -69,7 +69,7 @@ export default function SupabasePing() {
           )}
 
           <p className="text-xs text-zinc-400 mt-3">
-            Tip: If you see a “permission denied” or RLS error for <code>clubs</code>, either sign
+            Tip: If you see a “permission denied” or RLS error for <code>clubs_public</code>, either sign
             in and make sure your policies allow <em>select</em> for authenticated users, or try a
             different table that allows reads.
           </p>

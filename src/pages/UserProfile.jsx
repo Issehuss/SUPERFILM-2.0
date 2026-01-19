@@ -1,5 +1,5 @@
 // src/pages/UserProfile.jsx
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef, lazy, Suspense } from "react";
 import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { toast } from "react-hot-toast";
@@ -11,12 +11,13 @@ import { useUser } from "../context/UserContext";
 import StatsAndWatchlist from "../components/StatsAndWatchlist";
 import FollowButton from "../components/FollowButton.jsx";
 import AvatarCropper from "../components/AvatarCropper";
-import Moodboard from "../components/Moodboard.jsx";
 import EditProfilePanel from "../components/EditProfilePanel";
 import { getThemeVars } from "../theme/profileThemes";
 import ProfileTasteCards from "../components/ProfileTasteCards";
 import FilmTakeCard from "../components/FilmTakeCard.jsx";
 import uploadAvatar from "../lib/uploadAvatar";
+import { PROFILE_SELECT } from "../lib/profileSelect";
+import ProfileSkeleton from "../components/ProfileSkeleton";
 
 
 
@@ -24,6 +25,21 @@ const PROFILE_CACHE_TTL = 1000 * 60 * 5; // 5 minutes
 const SECTION_CACHE_TTL = 1000 * 60 * 10; // 10 minutes
 const profileCacheKey = (id) => `sf.profile.cache.v1:${id}`;
 const sectionCacheKey = (id, section) => `sf.profile.section.v1:${id}:${section}`;
+const FILM_TAKES_SELECT = [
+  "id",
+  "user_id",
+  "club_id",
+  "film_id",
+  "film_title",
+  "take",
+  "rating_5",
+  "rating",
+  "aspect_key",
+  "poster_path",
+  "created_at",
+  "updated_at",
+  "screening_id",
+].join(", ");
 
 const readProfileCache = (id) => {
   if (!id) return null;
@@ -78,6 +94,8 @@ const writeSectionCache = (key, data) => {
 const UUID_RX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+const Moodboard = lazy(() => import("../components/Moodboard.jsx"));
+
 async function loadAnyProfileLocal(identifier) {
   if (!identifier) return null;
 
@@ -85,7 +103,7 @@ async function loadAnyProfileLocal(identifier) {
     if (UUID_RX.test(String(identifier))) {
       const { data, error } = await supabase
         .from("profiles")
-        .select("*")
+        .select(PROFILE_SELECT)
         .eq("id", identifier)
         .maybeSingle();
       if (error) throw error;
@@ -95,7 +113,7 @@ async function loadAnyProfileLocal(identifier) {
     // Try slug first (legacy), then username as a fallback
     const { data: bySlug, error: slugErr } = await supabase
       .from("profiles")
-      .select("*")
+      .select(PROFILE_SELECT)
       .eq("slug", String(identifier))
       .maybeSingle();
 
@@ -104,7 +122,7 @@ async function loadAnyProfileLocal(identifier) {
 
     const { data: byUsername, error: usernameErr } = await supabase
       .from("profiles")
-      .select("*")
+      .select(PROFILE_SELECT)
       .eq("username", String(identifier))
       .maybeSingle();
     if (usernameErr) throw usernameErr;
@@ -279,6 +297,7 @@ const UserProfile = () => {
 
   // this is the profile we actually render (could be me, could be someone else)
   const [viewProfile, setViewProfile] = useState(null);
+  const [displayProfile, setDisplayProfile] = useState(null);
   const [viewLoading, setViewLoading] = useState(true);
   const [refreshTick, setRefreshTick] = useState(0);
   const lastProfileRefreshRef = useRef(0);
@@ -413,6 +432,24 @@ const UserProfile = () => {
       mounted = false;
     };
   }, [routeSlug, routeId, profile?.id, profile?.slug, refreshTick, refreshProfile]);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      if (!viewProfile?.id) {
+        if (active) setDisplayProfile(null);
+        return;
+      }
+      const { data, error } = await supabase.rpc("get_profile_display", {
+        p_user_id: viewProfile.id,
+      });
+      if (!active) return;
+      if (!error) setDisplayProfile(data || null);
+    })();
+    return () => {
+      active = false;
+    };
+  }, [viewProfile?.id]);
 
 
   /* =========================================================
@@ -613,10 +650,11 @@ const UserProfile = () => {
         // Load unified Film Takes (from club_film_takes)
 const { data, error } = await supabase
 .from("club_film_takes")
-.select("*")
+.select(FILM_TAKES_SELECT)
 .eq("user_id", viewProfile.id)
 .eq("is_archived", false)
-.order("created_at", { ascending: false });
+.order("created_at", { ascending: false })
+.limit(20);
 
 
 
@@ -900,7 +938,7 @@ title: t.film_title,      // <-- THIS fixes missing names in FilmTakeCard
         })
         .eq("id", editingTake.id)
         .eq("user_id", viewProfile.id)
-        .select("*")
+        .select(FILM_TAKES_SELECT)
         .maybeSingle();
 
       if (error) throw error;
@@ -923,13 +961,13 @@ title: t.film_title,      // <-- THIS fixes missing names in FilmTakeCard
 
 
   /* ---------------- derived display from viewed profile ---------------- */
-  const displayName = viewProfile?.display_name || "Your Name";
+  const displayName = displayProfile?.display_name || "Member";
   const isPremiumProfile =
     viewProfile?.plan === "directors_cut" || viewProfile?.is_premium === true;
 
   const username = viewProfile?.slug || viewProfile?.username || "username";
   const bio = viewProfile?.bio || "";
-  const avatarUrl = viewProfile?.avatar_url || "/default-avatar.svg";
+  const avatarUrl = displayProfile?.avatar_url || "/default-avatar.svg";
 
   const bannerUrl =
     bannerOverride ?? viewProfile?.banner_url ?? viewProfile?.banner_image ?? "";
@@ -1077,11 +1115,7 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
 
   /* ---------------- loading ---------------- */
   if (loading || viewLoading) {
-    return (
-      <div className="w-full text-white py-16 px-4 bg-black grid place-items-center">
-        <div className="text-sm text-zinc-400">Loading profile…</div>
-      </div>
-    );
+    return <ProfileSkeleton />;
   }
 
   /* ---------------- render ---------------- */
@@ -1119,16 +1153,22 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
 
         {/* Avatar cropper removed; direct file upload handles images now */}
 
-        <div className="px-0 sm:px-6 pt-6">
+        <div className="px-3 sm:px-6 pt-6">
           <div ref={moodboardAnchorRef} id="moodboard">
-            <Moodboard
-              profileId={viewProfile?.id}
-              isOwner={viewingOwn}
-              className="w-full"
-              usePremiumTheme={isPremiumProfile}
-              disableAutoRefresh
-              refreshKey={refreshTick}
-            />
+            <Suspense
+              fallback={
+                <div className="h-40 rounded-2xl border border-zinc-800 bg-zinc-900/60 animate-pulse" />
+              }
+            >
+              <Moodboard
+                profileId={viewProfile?.id}
+                isOwner={viewingOwn}
+                className="w-full"
+                usePremiumTheme={isPremiumProfile}
+                disableAutoRefresh
+                refreshKey={refreshTick}
+              />
+            </Suspense>
           </div>
         </div>
 

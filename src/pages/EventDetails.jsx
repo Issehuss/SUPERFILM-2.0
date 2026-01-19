@@ -61,7 +61,7 @@ export default function EventDetails() {
       try {
         const { data, error } = await supabase
           .from("events")
-          .select("*")
+          .select("id, slug, title, date, poster_url, image_url, club_id, club_name, venue, summary, tags, details, created_by")
           .eq("slug", slug)
           .maybeSingle();
 
@@ -103,17 +103,22 @@ export default function EventDetails() {
   /* ===================== Membership check ===================== */
   useEffect(() => {
     let on = true;
-    (async () => {
-      if (!user?.id || !clubId) {
+    let retryTimer;
+    const run = async () => {
+      const { data: auth } = await supabase.auth.getSession();
+      const sessionUserId = auth?.session?.user?.id || null;
+      const resolvedUserId = user?.id || sessionUserId;
+      if (!resolvedUserId || !clubId) {
         on && setIsClubMember(null);
+        if (!resolvedUserId) retryTimer = setTimeout(run, 500);
         return;
       }
       try {
         const { count, error } = await supabase
           .from("club_members")
-          .select("*", { count: "exact", head: true })
+          .select("club_id, user_id, role, joined_at, accepted", { count: "exact", head: true })
           .eq("club_id", clubId)
-          .eq("user_id", user.id);
+          .eq("user_id", resolvedUserId);
         if (error) throw error;
         on && setIsClubMember((count || 0) > 0);
         on && setRsvpError("");
@@ -121,33 +126,40 @@ export default function EventDetails() {
         logSupabaseError("[EventDetails] membership check error", { error: e });
         on && setIsClubMember(null); // don't block if check fails
       }
-    })();
+    };
+    run();
     return () => {
       on = false;
+      if (retryTimer) clearTimeout(retryTimer);
     };
   }, [user?.id, clubId]);
 
   /* ===================== Load RSVPs ===================== */
   useEffect(() => {
     if (userLoading) return;
-    if (!user) {
-      setRsvps([]);
-      setRsvpLoading(false);
-      setRsvpError("Sign in to see RSVPs.");
-      return;
-    }
-    if (!eventId) {
-      setRsvps([]);
-      setRsvpLoading(false);
-      setRsvpError("Event is missing an ID.");
-      return;
-    }
-    setRsvpError("");
 
     let cancelled = false;
+    let retryTimer;
 
     async function loadRsvps() {
       setRsvpLoading(true);
+      const { data: auth } = await supabase.auth.getSession();
+      const sessionUserId = auth?.session?.user?.id || null;
+      const resolvedUserId = user?.id || sessionUserId;
+      if (!eventId) {
+        setRsvps([]);
+        setRsvpLoading(false);
+        setRsvpError("Event is missing an ID.");
+        return;
+      }
+      if (!resolvedUserId) {
+        setRsvps([]);
+        setRsvpLoading(true);
+        setRsvpError("Sign in to see RSVPs.");
+        retryTimer = setTimeout(loadRsvps, 500);
+        return;
+      }
+      setRsvpError("");
       try {
         const loadWithClub = async (withClub) => {
           let q = supabase
@@ -205,7 +217,7 @@ export default function EventDetails() {
         if (event.club_id) {
           const { data: rolesData, error: rErr } = await supabase
             .from("club_members")
-            .select("user_id, role, club_id")
+            .select("club_id, user_id, role, joined_at, accepted")
             .eq("club_id", event.club_id)
             .in("user_id", ids);
 
@@ -247,8 +259,9 @@ export default function EventDetails() {
     loadRsvps();
     return () => {
       cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [event, eventId, clubId, isCreator, user, userLoading, isClubMember]);
+  }, [event, eventId, clubId, isCreator, user?.id, userLoading, isClubMember]);
 
   const myRsvp = useMemo(
     () => rsvps.find((r) => r.user_id === user?.id),

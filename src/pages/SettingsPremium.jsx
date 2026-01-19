@@ -58,12 +58,20 @@ useEffect(() => {
   // Load the user's latest subscription (if any)
   useEffect(() => {
     let mounted = true;
-    (async () => {
+    let retryTimer;
+
+    const loadSub = async () => {
       try {
         setLoading(true);
         setError(null);
-        if (!user?.id) {
-          setSub(null);
+        const { data: auth } = await supabase.auth.getSession();
+        const sessionUserId = auth?.session?.user?.id || null;
+        const resolvedUserId = user?.id || sessionUserId;
+        if (!resolvedUserId) {
+          if (mounted) {
+            setSub(null);
+            retryTimer = setTimeout(loadSub, 500);
+          }
           return;
         }
         const { data, error } = await supabase
@@ -77,7 +85,7 @@ useEffect(() => {
             cancel_at_period_end,
             updated_at
           `)
-          .eq("user_id", user.id)
+          .eq("user_id", resolvedUserId)
           .order("current_period_end", { ascending: false })
           .limit(1)
           .maybeSingle();
@@ -91,8 +99,13 @@ useEffect(() => {
       } finally {
         if (mounted) setLoading(false);
       }
-    })();
-    return () => { mounted = false; };
+    };
+
+    loadSub();
+    return () => {
+      mounted = false;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
   }, [user?.id]);
 
   const periodEndLabel = useMemo(() => {

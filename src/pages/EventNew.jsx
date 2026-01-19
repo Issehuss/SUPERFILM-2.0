@@ -112,27 +112,34 @@ export default function EventNew() {
         // Load clubs where user is PRESIDENT
         const { data: clubs, error: clubErr } = await supabase
           .from("club_members")
-          .select(
-            `
-              role,
-              club_id,
-              clubs:club_id (
-                id,
-                name
-              )
-            `
-          )
+          .select("club_id, user_id, role, joined_at, accepted")
           .eq("user_id", u.id)
           .eq("role", "president");
 
         if (clubErr) throw clubErr;
 
-        const list = clubs
-          ?.filter((row) => row.clubs?.id)
-          .map((row) => ({
-            id: String(row.clubs.id),   // ⭐ force UUID as plain string
-            name: row.clubs.name || "Untitled Club",
-          }));
+        const clubIds = (clubs || []).map((row) => row.club_id).filter(Boolean);
+        let clubsMap = {};
+        if (clubIds.length) {
+          const { data: clubRows } = await supabase
+            .from("clubs_public")
+            .select("id, name")
+            .in("id", clubIds);
+          clubsMap = (clubRows || []).reduce((acc, c) => {
+            acc[c.id] = c;
+            return acc;
+          }, {});
+        }
+
+        const list = (clubs || [])
+          .map((row) => {
+            const c = clubsMap[row.club_id] || {};
+            return {
+              id: String(row.club_id),
+              name: c.name || "Untitled Club",
+            };
+          })
+          .filter((c) => c.id);
           
 
         if (!list || list.length === 0) {
@@ -215,13 +222,13 @@ export default function EventNew() {
       // ⭐ FIXED — Save local timestamp correctly (no toISOString)
       const isoDate = new Date(`${date}T${time}:00`);
       const isoString = isoDate.toISOString();
-      const dateOnly = date; // yyyy-mm-dd from input
   
       const tags = splitCsv(tagsInput);
   
       const basePayload = {
         slug,
         title: baseTitle,
+        date: isoString,
         club_id: selectedClubId,
         club_name: clubName || null, // for schemas that still store it
         poster_url: posterUrl,
@@ -231,13 +238,7 @@ export default function EventNew() {
         created_by: u.id,
       };
 
-      // Try several schema variants to avoid 400s on missing/mismatched columns
-      const variants = [
-        { ...basePayload, datetime: isoString, date: dateOnly },
-        { ...basePayload, starts_at: isoString, date: dateOnly },
-        { ...basePayload, date_time: isoString, date: dateOnly },
-        { ...basePayload, date: dateOnly },
-      ];
+      const variants = [basePayload];
 
       let inserted = null;
       let lastError = null;

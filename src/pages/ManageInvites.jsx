@@ -37,8 +37,16 @@ export default function ManageInvites() {
 
   useEffect(() => {
     let alive = true;
+    let retryTimer;
     async function load() {
-      if (!clubParam || !user?.id) return;
+      if (!clubParam) return;
+      const { data: auth } = await supabase.auth.getSession();
+      const sessionUserId = auth?.session?.user?.id || null;
+      const resolvedUserId = user?.id || sessionUserId;
+      if (!resolvedUserId) {
+        if (alive) retryTimer = setTimeout(load, 500);
+        return;
+      }
       setLoading(true);
       setErr("");
 
@@ -62,9 +70,9 @@ export default function ManageInvites() {
         // Role
         const { data: mem, error: eMem } = await supabase
           .from("club_members")
-          .select("role")
+          .select("club_id, user_id, role, joined_at, accepted")
           .eq("club_id", resolvedId)
-          .eq("user_id", user.id)
+          .eq("user_id", resolvedUserId)
           .maybeSingle();
         if (eMem) throw eMem;
 
@@ -88,7 +96,10 @@ export default function ManageInvites() {
       }
     }
     load();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
   }, [clubParam, user?.id]);
 
   async function createInvite() {

@@ -64,12 +64,12 @@ export default function LeaderboardWideCard({
 
     try {
       // 1) Resolve club by id OR slug first (avoid .or(...))
-      const selectCols = "id, slug, name, profile_image_url";
+      const selectCols = "id, slug, name, banner_url";
       let cRow = null;
 
       if (UUID_RX.test(String(clubKey))) {
         const { data, error } = await supabase
-          .from("clubs")
+          .from("clubs_public")
           .select(selectCols)
           .eq("id", clubKey)
           .maybeSingle();
@@ -77,7 +77,7 @@ export default function LeaderboardWideCard({
         cRow = data;
       } else {
         const { data, error } = await supabase
-          .from("clubs")
+          .from("clubs_public")
           .select(selectCols)
           .eq("slug", clubKey)
           .maybeSingle();
@@ -101,7 +101,7 @@ export default function LeaderboardWideCard({
         id: realClubId,
         slug: cRow.slug,
         name: cRow.name,
-        avatar: cRow.profile_image_url || "",
+        avatar: cRow.banner_url || "",
       });
 
       const cacheKey = `leaderboard:${realClubId}`;

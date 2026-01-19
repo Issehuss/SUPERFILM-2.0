@@ -8,7 +8,7 @@ import { MapPin, CalendarClock } from "lucide-react";
  * - Circular notches
  * - Faux barcode
  */
-const TicketCard = ({ title, tagline, location, datetime }) => {
+const TicketCard = ({ title, tagline, location, dateLabel }) => {
   return (
     <div className="relative rounded-2xl bg-zinc-900/80 border border-zinc-800 text-white p-4 sm:p-5 shadow-lg overflow-hidden">
       {/* Notches */}
@@ -33,10 +33,10 @@ const TicketCard = ({ title, tagline, location, datetime }) => {
                 <span className="text-zinc-200">{location}</span>
               </div>
             )}
-            {datetime && (
+            {dateLabel && (
               <div className="flex items-center gap-2 text-zinc-300">
                 <CalendarClock className="w-4 h-4" />
-                <span>{datetime}</span>
+                <span>{dateLabel}</span>
               </div>
             )}
           </div>

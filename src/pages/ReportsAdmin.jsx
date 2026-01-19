@@ -28,15 +28,22 @@ export default function ReportsAdmin({ clubId = null }) {
   // --- figure out permissions ---
   useEffect(() => {
     let ignore = false;
-    (async () => {
-      if (!user?.id) return;
+    let retryTimer;
+    const loadPerms = async () => {
+      const { data: auth } = await supabase.auth.getSession();
+      const sessionUserId = auth?.session?.user?.id || null;
+      const resolvedUserId = user?.id || sessionUserId;
+      if (!resolvedUserId) {
+        if (!ignore) retryTimer = setTimeout(loadPerms, 500);
+        return;
+      }
 
       // 1) site-level role from profiles.roles
       try {
         const { data: prof } = await supabase
           .from("profiles")
           .select("roles, display_name")
-          .eq("id", user.id)
+          .eq("id", resolvedUserId)
           .maybeSingle();
         const roles = Array.isArray(prof?.roles) ? prof.roles : [];
         if (!ignore) {
@@ -51,9 +58,9 @@ export default function ReportsAdmin({ clubId = null }) {
         try {
           const { data: mem } = await supabase
             .from("club_members")
-            .select("role")
+            .select("club_id, user_id, role, joined_at, accepted")
             .eq("club_id", clubId)
-            .eq("user_id", user.id)
+            .eq("user_id", resolvedUserId)
             .maybeSingle();
           const role = String(mem?.role || "").toLowerCase();
           if (!ignore) setIsClubMod(CLUB_MOD_ROLES.includes(role));
@@ -63,10 +70,12 @@ export default function ReportsAdmin({ clubId = null }) {
       } else {
         if (!ignore) setIsClubMod(false);
       }
-    })();
+    };
+    loadPerms();
 
     return () => {
       ignore = true;
+      if (retryTimer) clearTimeout(retryTimer);
     };
   }, [user?.id, clubId]);
 

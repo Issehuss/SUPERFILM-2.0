@@ -17,6 +17,8 @@ import { useUser } from "../context/UserContext";
 import supabase from "../supabaseClient.js";
 import useWatchlist from "../hooks/useWatchlist";
 import usePageVisibility from "../hooks/usePageVisibility";
+import useSafeSupabaseFetch from "../hooks/useSafeSupabaseFetch";
+import useAppResume from "../hooks/useAppResume";
 import LeaderboardWideCard from "../components/LeaderboardWideCard.jsx";
 import { env as ENV } from "../lib/env";
 import TmdbImage from "../components/TmdbImage";
@@ -143,51 +145,36 @@ async function tmdbProxy(path, query = {}) {
   return {};
 }
 
-/* ------------ activity helper ------------ */
-const ACTIVITY_LIMIT = 3;
-
-async function fetchClubActivity(clubId, limit = ACTIVITY_LIMIT) {
-  const { data, error } = await supabase
-    .from("recent_activity_v")
-    .select("id, club_id, created_at, summary, actor_name, actor_avatar")
-    .eq("club_id", clubId)
-    .order("created_at", { ascending: false })
-    .limit(limit);
-  if (error) throw error;
-  return data || [];
-}
-
-const ACTIVITY_CACHE_KEY = "cache:clubActivity:v1";
-const ACTIVITY_TTL_MS = 3 * 60 * 1000; // 3 minutes
+/* ------------ home feed helper ------------ */
+const HOME_FEED_LIMIT = 20;
+const HOME_FEED_TTL_MS = 2 * 60 * 1000; // 2 minutes
+const HOME_FEED_EVENT = "sf:home-feed:new";
+const homeFeedMemoryCache = {
+  items: null,
+  cursor: null,
+  ts: 0,
+  userId: null,
+};
 const NEXT_SCREENING_CACHE_KEY = "cache:clubNextScreening:v1";
 const NEXT_SCREENING_TTL_MS = 10 * 60 * 1000; // 10 minutes
 const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isUuid = (v) => UUID_RX.test(String(v || ""));
 
-function readActivityCache(clubId) {
-  if (!clubId) return null;
-  try {
-    const raw = sessionStorage.getItem(`${ACTIVITY_CACHE_KEY}:${clubId}`);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed?.at || !Array.isArray(parsed?.data)) return null;
-    if (Date.now() - parsed.at > ACTIVITY_TTL_MS) return null;
-    return parsed.data;
-  } catch {
-    return null;
-  }
+function readHomeFeedCache(userId) {
+  if (!userId || homeFeedMemoryCache.userId !== userId) return null;
+  if (!Array.isArray(homeFeedMemoryCache.items)) return null;
+  if (Date.now() - homeFeedMemoryCache.ts > HOME_FEED_TTL_MS) return null;
+  return {
+    items: homeFeedMemoryCache.items,
+    cursor: homeFeedMemoryCache.cursor ?? null,
+  };
 }
 
-function writeActivityCache(clubId, data) {
-  if (!clubId) return;
-  try {
-    sessionStorage.setItem(
-      `${ACTIVITY_CACHE_KEY}:${clubId}`,
-      JSON.stringify({ at: Date.now(), data })
-    );
-  } catch {
-    /* ignore cache errors */
-  }
+function writeHomeFeedCache(userId, items, cursor) {
+  homeFeedMemoryCache.items = items;
+  homeFeedMemoryCache.cursor = cursor ?? null;
+  homeFeedMemoryCache.ts = Date.now();
+  homeFeedMemoryCache.userId = userId || null;
 }
 
 function readNextScreeningCache(clubId) {
@@ -243,6 +230,33 @@ function writeCache(key, data) {
   } catch {}
 }
 
+function getFeedHref(item) {
+  const slug = item?.club_slug || item?.club?.slug || null;
+  const id = item?.club_id || item?.club?.id || null;
+  if (slug) return `/clubs/${slug}`;
+  if (id) return `/clubs/${id}`;
+  return "/clubs";
+}
+
+function getFeedAvatar(item, fallback) {
+  return (
+    item?.actor_avatar ||
+    item?.actor_avatar_url ||
+    item?.actor?.avatar_url ||
+    item?.club_avatar ||
+    fallback ||
+    "/avatar_placeholder.png"
+  );
+}
+
+function getFeedSummary(item) {
+  return item?.summary || item?.text || item?.message || "";
+}
+
+function getFeedCreatedAt(item) {
+  return item?.created_at || item?.createdAt || item?.ts || null;
+}
+
 export default function HomeSignedIn() {
   const { user, profile, isReady } = useUser();
   const navigate = useNavigate();
@@ -262,6 +276,11 @@ export default function HomeSignedIn() {
 
   const [activity, setActivity] = useState([]);
   const [activityLoading, setActivityLoading] = useState(true);
+  const [activityLoadingMore, setActivityLoadingMore] = useState(false);
+  const [activityHasMore, setActivityHasMore] = useState(true);
+  const activityCursorRef = useRef(null);
+  const activitySentinelRef = useRef(null);
+  const [feedRequest, setFeedRequest] = useState({ key: 0, cursor: null, append: false });
   const [nextFromClub, setNextFromClub] = useState(null);
 
   const [curated, setCurated] = useState([]);
@@ -271,14 +290,13 @@ export default function HomeSignedIn() {
 
   const [leaderboard, setLeaderboard] = useState([]);
   const [loadingLeaderboard, setLoadingLeaderboard] = useState(true);
+  const [selfDisplay, setSelfDisplay] = useState(null);
+  const recentActivity = useMemo(() => (activity || []).slice(0, 3), [activity]);
   const clubImage = useMemo(() => {
     if (!club) return CLUB_PLACEHOLDER;
     const src =
       club?.profile_image_url ||
       club?.image ||
-      club?.banner_url ||
-      club?.avatar_url ||
-      club?.profile_image ||
       null;
     return sanitizeClubImage(src);
   }, [club]);
@@ -294,46 +312,85 @@ export default function HomeSignedIn() {
   const [wlMeta, setWlMeta] = useState({});
   const [leaderboardReady, setLeaderboardReady] = useState(false);
   const isPageVisible = usePageVisibility();
+  const resumeTick = useAppResume();
 
-  /* ============ memberships -> primary club ============ */
+  const {
+    data: selfDisplayData,
+    error: selfDisplayError,
+  } = useSafeSupabaseFetch(
+    async (session) => {
+      const resolvedUserId = user?.id || session?.user?.id;
+      const { data, error } = await supabase.rpc("get_profile_display", {
+        p_user_id: resolvedUserId,
+      });
+      if (error) throw error;
+      return data || null;
+    },
+    [user?.id, resumeTick],
+    { enabled: true, timeoutMs: 8000, initialData: null }
+  );
+
   useEffect(() => {
-    if (!isReady) return;
-    if (!user?.id || !isUuid(user.id)) {
-      setMemberships([]);
-      setMembershipsLoading(false);
-      setClub(null);
+    if (selfDisplayData) {
+      setSelfDisplay(selfDisplayData);
       return;
     }
+    if (selfDisplayError) {
+      setSelfDisplay(null);
+    }
+  }, [selfDisplayData, selfDisplayError]);
 
-    let cancelled = false;
-    setMembershipsLoading(true);
-    (async () => {
-      try {
-        const { data, error } = await supabase
-          .from("club_members")
-          .select("club_id, clubs(*)")
-          .eq("user_id", user.id);
+  /* ============ memberships -> primary club ============ */
+  const {
+    data: membershipsResult,
+    loading: membershipsFetchLoading,
+    error: membershipsFetchError,
+  } = useSafeSupabaseFetch(
+    async (session) => {
+      const resolvedUserId = user?.id || session?.user?.id;
+      if (!resolvedUserId || !isUuid(resolvedUserId)) throw new Error("no-user");
+      const { data, error } = await supabase
+        .from("club_members")
+        .select("club_id, user_id, role, joined_at, accepted")
+        .eq("user_id", resolvedUserId);
+      if (error) throw error;
 
-        if (cancelled) return;
-        if (error) {
-          console.error("[HomeSignedIn] club_members fetch error:", error.message);
-          setMemberships([]);
-          return;
-        }
-
-        setMemberships(data || []);
-      } catch (e) {
-        if (!cancelled) console.error("[HomeSignedIn] club_members fetch threw:", e?.message || e);
-        setMemberships([]);
-      } finally {
-        if (!cancelled) setMembershipsLoading(false);
+      const clubIds = (data || []).map((row) => row.club_id).filter(Boolean);
+      let clubsMap = {};
+      if (clubIds.length) {
+        const { data: clubsData } = await supabase
+          .from("clubs_public")
+          .select("id, slug, name, profile_image_url")
+          .in("id", clubIds);
+        clubsMap = (clubsData || []).reduce((acc, c) => {
+          acc[c.id] = c;
+          return acc;
+        }, {});
       }
-    })();
 
-    return () => {
-      cancelled = true;
-    };
-  }, [isReady, user?.id]);
+      return (data || []).map((row) => ({
+        ...row,
+        clubs: clubsMap[row.club_id] || null,
+      }));
+    },
+    [user?.id, isReady, resumeTick],
+    { enabled: true, timeoutMs: 8000 }
+  );
+
+  useEffect(() => {
+    setMembershipsLoading(membershipsFetchLoading);
+  }, [membershipsFetchLoading]);
+
+  useEffect(() => {
+    if (membershipsResult) {
+      setMemberships(membershipsResult);
+      return;
+    }
+    if (membershipsFetchError && membershipsFetchError.message !== "no-user") {
+      console.error("[HomeSignedIn] club_members fetch error:", membershipsFetchError.message);
+      setMemberships([]);
+    }
+  }, [membershipsResult, membershipsFetchError]);
 
   const myClubs = useMemo(
     () => (memberships || []).map((m) => m?.clubs).filter(Boolean),
@@ -347,108 +404,170 @@ export default function HomeSignedIn() {
     });
   }, [myClubs]);
 
-  /* ============ 2) activity + realtime (unchanged) ============ */
+  const {
+    data: feedResult,
+    loading: feedLoading,
+    error: feedError,
+    timedOut: feedTimedOut,
+    retry: retryFeed,
+  } = useSafeSupabaseFetch(
+    async (session) => {
+      if (!feedRequest.key) return null;
+      const resolvedUserId = user?.id || session?.user?.id;
+      if (!resolvedUserId) throw new Error("no-user");
+      const { data, error } = await supabase.rpc("get_home_feed", {
+        p_limit: HOME_FEED_LIMIT,
+        p_cursor: feedRequest.cursor ?? null,
+      });
+      if (error) throw error;
+      const rows = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.items)
+        ? data.items
+        : [];
+      const lastCreatedAt = rows.length
+        ? getFeedCreatedAt(rows[rows.length - 1])
+        : feedRequest.cursor;
+      return {
+        rows,
+        cursor: lastCreatedAt,
+        append: feedRequest.append,
+        userId: resolvedUserId,
+      };
+    },
+    [feedRequest.key, feedRequest.cursor, feedRequest.append, user?.id, resumeTick],
+    { enabled: feedRequest.key > 0, timeoutMs: 8000 }
+  );
+
+  /* ============ 2) home feed via RPC ============ */
   useEffect(() => {
-    if (!club?.id) {
-      setActivity([]);
-      setActivityLoading(false);
+    let cancelled = false;
+    const loadCache = async () => {
+      const { data: auth } = await supabase.auth.getSession();
+      const sessionUserId = auth?.session?.user?.id || null;
+      const resolvedUserId = user?.id || sessionUserId;
+      if (!resolvedUserId) return;
+      const cached = readHomeFeedCache(resolvedUserId);
+      if (cached?.items?.length && !cancelled) {
+        setActivity(cached.items);
+        activityCursorRef.current = cached.cursor ?? null;
+        setActivityLoading(false);
+      }
+      if (!cancelled) {
+        setFeedRequest((prev) =>
+          prev.key
+            ? prev
+            : { key: Date.now(), cursor: null, append: false }
+        );
+      }
+    };
+    loadCache();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, resumeTick]);
+
+  useEffect(() => {
+    if (!feedResult) return;
+    const rows = feedResult.rows || [];
+    setActivity((prev) => {
+      const next = feedResult.append ? [...prev, ...rows] : rows;
+      writeHomeFeedCache(feedResult.userId, next, feedResult.cursor);
+      return next;
+    });
+    activityCursorRef.current = feedResult.cursor;
+    setActivityHasMore(rows.length === HOME_FEED_LIMIT);
+  }, [feedResult]);
+
+  useEffect(() => {
+    if (feedError && feedError.message !== "no-user") {
+      console.warn("home feed (rpc) failed:", feedError);
+      setActivityHasMore(false);
+    }
+  }, [feedError]);
+
+  useEffect(() => {
+    if (feedTimedOut) {
+      setActivityHasMore(false);
+    }
+  }, [feedTimedOut]);
+
+  useEffect(() => {
+    if (feedRequest.append) {
+      setActivityLoadingMore(feedLoading);
       return;
     }
-    let cancelled = false;
-    let channel;
-    const cached = readActivityCache(club.id);
-    if (cached?.length) {
-      setActivity(cached.slice(0, ACTIVITY_LIMIT));
-      setActivityLoading(false);
-    }
+    setActivityLoading(feedLoading);
+  }, [feedLoading, feedRequest.append]);
 
-    (async () => {
-      setActivityLoading((prev) => prev && !cached);
-      try {
-      const rows = await fetchClubActivity(club.id, ACTIVITY_LIMIT);
-      if (!cancelled) {
-        const limited = rows.slice(0, ACTIVITY_LIMIT);
-        setActivity(limited);
-        writeActivityCache(club.id, limited);
-      }
-      } catch (e) {
-        if (!cancelled) setActivity([]);
-        console.warn("club activity (home) failed:", e);
-      } finally {
-        if (!cancelled) setActivityLoading(false);
-      }
+  useEffect(() => {
+    const el = activitySentinelRef.current;
+    if (!el || activityLoading || activityLoadingMore || !activityHasMore) return;
 
-      channel = supabase
-        .channel(`realtime:activity:club_${club.id}`)
-        .on(
-          "postgres_changes",
-          { event: "INSERT", schema: "public", table: "activity", filter: `club_id=eq.${club.id}` },
-          (payload) => {
-            const row = payload.new;
-            if (!row) return;
-            setActivity((prev) => {
-              const next = [
-                {
-                  id: row.id,
-                  summary: row.summary,
-                  created_at: row.created_at,
-                  actor_name: row.actor_name,
-                  actor_avatar: row.actor_avatar,
-                  club_id: row.club_id,
-                },
-                ...prev.slice(0, ACTIVITY_LIMIT - 1),
-              ];
-              writeActivityCache(club.id, next);
-              return next;
-            });
-          }
-        )
-        .subscribe();
-    })();
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (!entry?.isIntersecting) return;
+        const cursor = activityCursorRef.current || null;
+        if (!cursor || activityLoadingMore) return;
+        setFeedRequest({ key: Date.now(), cursor, append: true });
+      },
+      { rootMargin: "300px 0px", threshold: 0.1 }
+    );
 
-    return () => {
-      if (channel) supabase.removeChannel(channel);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [activityLoading, activityLoadingMore, activityHasMore]);
+
+  useEffect(() => {
+    const onNew = (evt) => {
+      (async () => {
+        const payload = evt?.detail;
+        if (!payload) return;
+        const { data: auth } = await supabase.auth.getSession();
+        const sessionUserId = auth?.session?.user?.id || null;
+        const resolvedUserId = user?.id || sessionUserId;
+        if (!resolvedUserId) return;
+        setActivity((prev) => {
+          const next = [payload, ...(prev || [])];
+          writeHomeFeedCache(resolvedUserId, next, activityCursorRef.current);
+          return next;
+        });
+        setFeedRequest({ key: Date.now(), cursor: null, append: false });
+      })();
     };
-  }, [club?.id]);
+    window.addEventListener(HOME_FEED_EVENT, onNew);
+    return () => window.removeEventListener(HOME_FEED_EVENT, onNew);
+  }, [user?.id]);
 
   /* ============ 3) small club fetch ============ */
   useEffect(() => {
-    let cancelled = false;
-
-    // Fast path from cache
     const cachedNext = readNextScreeningCache(club?.id);
     if (cachedNext) {
       setNextFromClub(cachedNext);
     }
+  }, [club?.id]);
 
-    (async () => {
-      try {
-        if (!club?.id) {
-          if (!cancelled) setNextFromClub(null);
-          return;
-        }
+  const { data: nextScreeningRow } = useSafeSupabaseFetch(
+    async () => {
+      if (!club?.id) throw new Error("no-club");
+      const { data, error } = await supabase
+        .from("club_next_screening_v")
+        .select("club_id, title, poster_path, screening_at, location")
+        .eq("club_id", club.id)
+        .maybeSingle();
+      if (error) throw error;
+      return data || null;
+    },
+    [club?.id, resumeTick],
+    { enabled: Boolean(club?.id), timeoutMs: 8000 }
+  );
 
-        const { data: cRow, error } = await supabase
-          .from("club_next_screening_v")
-          .select("film_title")
-          .eq("club_id", club.id)
-          .maybeSingle();
-
-        if (!cancelled) {
-          const title = cRow?.film_title || null;
-          setNextFromClub(title);
-          if (title) writeNextScreeningCache(club.id, title);
-        }
-        if (error) console.warn("club next screening fetch failed:", error);
-      } catch (e) {
-        if (!cancelled) setNextFromClub(null);
-        console.warn("club next screening fetch failed:", e);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [club?.id, club?.next_screening?.film_title]);
+  useEffect(() => {
+    const title = nextScreeningRow?.title || null;
+    setNextFromClub(title);
+    if (title && club?.id) writeNextScreeningCache(club.id, title);
+  }, [nextScreeningRow, club?.id]);
 
   /* ============ 4) TMDB deck (fetch once + cache) ============ */
   useEffect(() => {
@@ -477,7 +596,7 @@ export default function HomeSignedIn() {
           const today = new Date().toISOString().split("T")[0];
           const { data } = await supabase
             .from("cinema_curations")
-            .select("*")
+            .select("id, tmdb_id, title_override, backdrop_override, description, order_index")
             .eq("is_active", true)
             .eq("region", "GB")
             .lte("start_date", today)
@@ -641,94 +760,81 @@ export default function HomeSignedIn() {
     };
   }, [deckItems.length, nextDeck]);
 
-  /* ============ 6) Leaderboard idle load (kept) ============ */
-  useEffect(() => {
-    let cancelled = false;
+  /* ============ 6) Leaderboard (safe fetch) ============ */
+  const {
+    data: leaderboardResult,
+    loading: leaderboardLoading,
+    error: leaderboardError,
+  } = useSafeSupabaseFetch(
+    async () => {
+      const { data: clubs } = await supabase
+        .from("clubs_public")
+        .select("id, name, banner_url")
+        .limit(20);
 
-    const fetchLeaderboard = async () => {
-      setLoadingLeaderboard(true);
-      try {
-        const { data: clubs } = await supabase
-          .from("clubs")
-          .select("id, name, banner_url")
-          .limit(20);
+      if (!clubs?.length) return [];
 
-        if (!clubs?.length) {
-          if (!cancelled) {
-            setLeaderboard([]);
-            setLoadingLeaderboard(false);
+      const now = new Date();
+      const rows = await Promise.all(
+        clubs.map(async (c) => {
+          if (!isUuid(c?.id)) {
+            return null;
           }
-          return;
-        }
+          const mem = await supabase
+            .from("club_members")
+            .select("club_id, user_id, role, joined_at, accepted", { count: "exact", head: true })
+            .eq("club_id", c.id);
+          const members = mem?.count || 0;
 
-        const rows = await Promise.all(
-          clubs.map(async (c) => {
-            if (!isUuid(c?.id)) {
-              return null;
-            }
-            const mem = await supabase
-              .from("club_members")
-              .select("*", { count: "exact", head: true })
-              .eq("club_id", c.id);
-            const members = mem?.count || 0;
+          const events30 = 0;
 
-            const now = new Date();
-            const d30 = new Date(now); d30.setDate(now.getDate() - 30);
-            const ev = await supabase
-              .from("screenings")
-              .select("*", { count: "exact", head: true })
-              .eq("club_id", c.id)
-              .gte("starts_at", d30.toISOString());
-            const events30 = ev?.count || 0;
+          const d7 = new Date(now);
+          d7.setDate(now.getDate() - 7);
+          const act = await supabase
+            .from("activity")
+            .select("id", { count: "exact", head: true })
+            .eq("club_id", c.id)
+            .gte("created_at", d7.toISOString());
+          const activity7 = act?.count || 0;
 
-            const d7 = new Date(now); d7.setDate(now.getDate() - 7);
-            const act = await supabase
-              .from("activity")
-              .select("*", { count: "exact", head: true })
-              .eq("club_id", c.id)
-              .gte("created_at", d7.toISOString());
-            const activity7 = act?.count || 0;
+          const score = members * 3 + events30 * 4 + activity7 * 1;
 
-            const score = members * 3 + events30 * 4 + activity7 * 1;
+          return {
+            id: c.id,
+            name: c.name,
+            banner_url: c.banner_url,
+            members,
+            events30,
+            activity7,
+            score,
+          };
+        })
+      );
 
-            return {
-              id: c.id,
-              name: c.name,
-              banner_url: c.banner_url,
-              members,
-              events30,
-              activity7,
-              score,
-            };
-          })
-        );
+      const filtered = rows.filter(Boolean);
+      filtered.sort((a, b) => b.score - a.score);
+      return filtered.slice(0, 10);
+    },
+    [leaderboardReady, resumeTick],
+    { enabled: leaderboardReady, timeoutMs: 8000, initialData: [] }
+  );
 
-        if (cancelled) return;
-        const filtered = rows.filter(Boolean);
-        filtered.sort((a, b) => b.score - a.score);
-        setLeaderboard(filtered.slice(0, 10));
-      } catch (e) {
-        console.warn("leaderboard fetch failed", e);
-        if (!cancelled) setLeaderboard([]);
-      } finally {
-        if (!cancelled) setLoadingLeaderboard(false);
-      }
-    };
+  useEffect(() => {
+    setLoadingLeaderboard(leaderboardLoading);
+  }, [leaderboardLoading]);
 
-    if (typeof window !== "undefined" && "requestIdleCallback" in window) {
-      const id = window.requestIdleCallback(fetchLeaderboard, { timeout: 3000 });
-      return () => {
-        cancelled = true;
-        window.cancelIdleCallback?.(id);
-      };
-    } else {
-      const t = setTimeout(fetchLeaderboard, 800);
-      return () => {
-        cancelled = true;
-        clearTimeout(t);
-      };
+  useEffect(() => {
+    if (leaderboardResult) {
+      setLeaderboard(leaderboardResult);
     }
-  }, []);
+  }, [leaderboardResult]);
+
+  useEffect(() => {
+    if (leaderboardError) {
+      console.warn("leaderboard fetch failed", leaderboardError);
+      setLeaderboard([]);
+    }
+  }, [leaderboardError]);
 
   /* ============ 7) Watchlist bits (slower rotation) ============ */
   useEffect(() => {
@@ -840,11 +946,7 @@ export default function HomeSignedIn() {
   );
   const currentIsSaved = currentMovie ? watchlistIds.has(currentMovie.id) : false;
 
-  const displayName =
-    (profile?.display_name && profile.display_name.trim()) ||
-    (user?.user_metadata?.full_name && user.user_metadata.full_name.trim()) ||
-    (user?.user_metadata?.name && user.user_metadata.name.trim()) ||
-    "Cinephile";
+  const displayName = selfDisplay?.display_name || "Member";
 
   if (!isReady || !profile) {
     return <HomeSkeleton />;
@@ -1225,21 +1327,21 @@ export default function HomeSignedIn() {
 
           {!activityLoading && activity.length > 0 && (
             <ul className="divide-y divide-white/10">
-              {activity.map((a) => (
+              {recentActivity.map((a) => (
                 <li key={a.id}>
                   <Link
-                    to={club ? `/clubs/${club.slug || club.id}` : "/clubs"}
+                    to={getFeedHref(a)}
                     className="p-5 flex items-center gap-3 hover:bg-white/5 transition-colors"
                   >
                     <img
-                      src={club?.profile_image_url || a.actor_avatar || "/avatar_placeholder.png"}
+                      src={getFeedAvatar(a, club?.banner_url)}
                       alt=""
                       className="h-8 w-8 rounded-full object-cover"
                     />
                     <div className="flex-1 text-left">
-                      <div className="text-sm">{a.summary}</div>
+                      <div className="text-sm">{getFeedSummary(a)}</div>
                       <div className="text-xs text-zinc-500">
-                        {formatDateTime(a.created_at)}
+                        {getFeedCreatedAt(a) ? formatDateTime(getFeedCreatedAt(a)) : ""}
                       </div>
                     </div>
                   </Link>
@@ -1247,6 +1349,8 @@ export default function HomeSignedIn() {
               ))}
             </ul>
           )}
+
+          {/* No infinite scroll here; show only the 3 most recent items. */}
         </section>
       </div>
 
