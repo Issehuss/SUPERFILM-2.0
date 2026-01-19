@@ -627,7 +627,7 @@ function ClubAddTake({ movie, club }) {
 
   const { user } = useUser();
   const { addTake } = useFilmTakes();
-  const resumeTick = useAppResume();
+  const appResumeTick = useAppResume();
 
   // ✅ Hooks must come before any early return
   useEffect(() => {
@@ -655,7 +655,7 @@ function ClubAddTake({ movie, club }) {
       if (error) throw error;
       return count || 0;
     },
-    [user?.id, club?.id, movie?.id, resumeTick],
+    [user?.id, club?.id, movie?.id, appResumeTick],
     { enabled: Boolean(user?.id && club?.id && movie?.id), timeoutMs: 8000, initialData: 0 }
   );
 
@@ -835,7 +835,7 @@ const [aspect, setAspect] = useState(null);  // standout craft key
         // blurb
   
         const { user, profile, saveProfilePatch, isPartner, hasRole } = useUser();
-        const resumeTick = useAppResume();
+        const appResumeTick = useAppResume();
 
   const [isMember, setIsMember] = useState(false);
   const [showLazy, setShowLazy] = useState(false);
@@ -977,7 +977,7 @@ const [rawAvatarImage, setRawAvatarImage] = useState(null);
 
   // NEW: avatar + rename UI state
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
-  const resumeTick = useRealtimeResume();
+  const realtimeTick = useRealtimeResume();
 const [renameError, setRenameError] = useState('');
 const [renameOk, setRenameOk] = useState('');
 const [newName, setNewName] = useState('');
@@ -1129,7 +1129,7 @@ const {
 
     return sorted;
   },
-  [club?.id, resumeTick],
+  [club?.id, appResumeTick],
   { enabled: Boolean(club?.id), timeoutMs: 8000, initialData: [] }
 );
 
@@ -1234,7 +1234,7 @@ const { data: openReviewRow, error: openReviewError } = useSafeSupabaseFetch(
     if (error) throw error;
     return data || null;
   },
-  [club?.id, nextFilmId, resumeTick],
+  [club?.id, nextFilmId, appResumeTick],
   { enabled: Boolean(club?.id && nextFilmId), timeoutMs: 8000, initialData: null }
 );
 
@@ -1268,7 +1268,7 @@ useEffect(() => {
   return () => {
     supabase.removeChannel(ch);
   };
-}, [club?.id, retryMembers, resumeTick]);
+}, [club?.id, retryMembers, realtimeTick]);
 
 
 
@@ -1338,7 +1338,7 @@ useEffect(() => {
 
       return { data: mapped, lastTried, error: lastError };
     },
-    [idParam, resumeTick],
+    [idParam, appResumeTick],
     { enabled: Boolean(idParam), timeoutMs: 8000, initialData: null }
   );
 
@@ -1391,7 +1391,7 @@ const { data: featuredRows, error: featuredError } = useSafeSupabaseFetch(
     if (error) throw error;
     return rows || [];
   },
-  [club?.id, resumeTick],
+  [club?.id, appResumeTick],
   { enabled: Boolean(club?.id), timeoutMs: 8000, initialData: null }
 );
 
@@ -1444,7 +1444,7 @@ const { data: nextScreeningRow, error: nextScreeningError } = useSafeSupabaseFet
     if (error) throw error;
     return Array.isArray(data) ? data[0] : data || null;
   },
-  [club?.id, resumeTick],
+  [club?.id, appResumeTick],
   { enabled: Boolean(club?.id), timeoutMs: 8000, initialData: null }
 );
 
@@ -1542,7 +1542,7 @@ useEffect(() => {
       if (error) throw error;
       return rows || [];
     },
-    [club?.id, user?.id, resumeTick],
+    [club?.id, user?.id, appResumeTick],
     { enabled: Boolean(club?.id), timeoutMs: 8000, initialData: null }
   );
 
@@ -1607,7 +1607,7 @@ const { data: memberRow } = useSafeSupabaseFetch(
     if (error) throw error;
     return data || null;
   },
-  [club?.id, user?.id, resumeTick],
+  [club?.id, user?.id, appResumeTick],
   { enabled: Boolean(club?.id && user?.id), timeoutMs: 8000, initialData: null }
 );
 
@@ -1667,7 +1667,7 @@ const { data: recentActivityRows, error: recentActivityError } = useSafeSupabase
     if (error) throw error;
     return data || [];
   },
-  [club?.id, resumeTick],
+  [club?.id, appResumeTick],
   { enabled: Boolean(club?.id), timeoutMs: 8000, initialData: [] }
 );
 
@@ -1714,7 +1714,7 @@ const {
     if (error) throw error;
     return data || [];
   },
-  [club?.id, nextFilmId, resumeTick],
+  [club?.id, nextFilmId, appResumeTick],
   { enabled: Boolean(club?.id && nextFilmId), timeoutMs: 8000, initialData: [] }
 );
 
@@ -1806,7 +1806,7 @@ const { data: clubAdminOk, error: clubAdminError } = useSafeSupabaseFetch(
 
     return rolesArr.some((r) => allowed.includes(String(r).toLowerCase()));
   },
-  [club?.id, user?.id, resumeTick],
+  [club?.id, user?.id, appResumeTick],
   { enabled: Boolean(club?.id && user?.id), timeoutMs: 8000, initialData: false }
 );
 
