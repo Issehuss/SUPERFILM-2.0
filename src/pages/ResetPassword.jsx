@@ -1,7 +1,7 @@
 // src/pages/ResetPassword.jsx
 
 import React, { useState } from "react";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 
 export default function ResetPassword() {
   const [pw, setPw] = useState("");

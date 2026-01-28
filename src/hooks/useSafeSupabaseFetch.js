@@ -1,35 +1,32 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import supabase from "../supabaseClient";
+import isAbortError from "lib/isAbortError";
 
 /**
  * useSafeSupabaseFetch
- * - resolves session inside fetch
- * - retries when session is transiently null
- * - adds timeout failsafe + optional auto retry
+ * - runs the provided fetcher when `enabled` is true (auth/session should be resolved upstream)
+ * - keeps the previous cache visible during background refreshes
+ * - exposes a timeout/timedOut signal without kicking off automatic retries
+ * - deduplicates inflight requests
  */
 export default function useSafeSupabaseFetch(fetcher, deps = [], options = {}) {
   const {
     enabled = true,
-    retryDelayMs = 400,
     timeoutMs = 8000,
-    autoRetryOnTimeout = true,
     initialData = null,
   } = options;
 
   const [data, setData] = useState(initialData);
-  const [loading, setLoading] = useState(Boolean(enabled));
+  const [loading, setLoading] = useState(
+    enabled && initialData == null
+  );
   const [error, setError] = useState(null);
   const [timedOut, setTimedOut] = useState(false);
 
-  const retryTimerRef = useRef(null);
   const timeoutRef = useRef(null);
   const cancelledRef = useRef(false);
+  const inFlightRef = useRef(null);
 
   const clearTimers = useCallback(() => {
-    if (retryTimerRef.current) {
-      clearTimeout(retryTimerRef.current);
-      retryTimerRef.current = null;
-    }
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
@@ -38,61 +35,63 @@ export default function useSafeSupabaseFetch(fetcher, deps = [], options = {}) {
 
   const run = useCallback(async () => {
     if (!enabled) return;
+    if (inFlightRef.current) {
+      return inFlightRef.current;
+    }
     clearTimers();
-    setLoading(true);
     setTimedOut(false);
     setError(null);
+
+    const hadNoData = data == null;
+    if (hadNoData) {
+      setLoading(true);
+    }
 
     timeoutRef.current = setTimeout(() => {
       if (cancelledRef.current) return;
       setTimedOut(true);
-      setLoading(false);
-      if (autoRetryOnTimeout) {
-        retryTimerRef.current = setTimeout(run, retryDelayMs);
+      if (hadNoData) {
+        setLoading(false);
       }
     }, timeoutMs);
 
-    const { data: auth } = await supabase.auth.getSession();
-    const session = auth?.session || null;
-    if (!session) {
-      clearTimers();
-      if (!cancelledRef.current) {
-        retryTimerRef.current = setTimeout(run, retryDelayMs);
+    const promise = (async () => {
+      try {
+        const result = await fetcher();
+        if (!cancelledRef.current) {
+          setData(result);
+        }
+        return result;
+      } catch (err) {
+        if (!cancelledRef.current && !isAbortError(err)) {
+          setError(err);
+        }
+        return undefined;
+      } finally {
+        clearTimers();
+        inFlightRef.current = null;
+        if (hadNoData && !cancelledRef.current) {
+          setLoading(false);
+        }
       }
-      return;
-    }
+    })();
 
-    try {
-      const result = await fetcher(session);
-      if (!cancelledRef.current) {
-        setData(result);
-      }
-    } catch (err) {
-      if (!cancelledRef.current) {
-        setError(err);
-      }
-    } finally {
-      clearTimers();
-      if (!cancelledRef.current) setLoading(false);
-    }
-  }, [
-    enabled,
-    fetcher,
-    retryDelayMs,
-    timeoutMs,
-    autoRetryOnTimeout,
-    clearTimers,
-  ]);
+    inFlightRef.current = promise;
+    return promise;
+  }, [enabled, fetcher, timeoutMs, clearTimers, data]);
 
   useEffect(() => {
     cancelledRef.current = false;
-    run();
+    if (enabled) {
+      run();
+    }
     return () => {
       cancelledRef.current = true;
       clearTimers();
+      inFlightRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
+  }, [...deps, enabled]);
 
   return { data, loading, error, timedOut, retry: run };
 }

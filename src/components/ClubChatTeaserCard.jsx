@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { MessageSquare, Users, ChevronRight } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import { useUser } from "../context/UserContext";
 import useRealtimeResume from "../hooks/useRealtimeResume";
 
@@ -9,7 +9,7 @@ import useRealtimeResume from "../hooks/useRealtimeResume";
  * Small, self-contained teaser. No styled-components, no macros.
  * The animated edge is pure CSS (see step 2).
  */
-export default function ClubChatTeaserCard({ clubId, slug }) {
+export default function ClubChatTeaserCard({ clubId, slug, canViewChat = false }) {
   const navigate = useNavigate();
   const { user } = useUser();
   const [last, setLast] = useState(null);
@@ -21,7 +21,7 @@ export default function ClubChatTeaserCard({ clubId, slug }) {
 
   // Non-breaking: if supabase isn’t ready, it’ll just render static UI
   useEffect(() => {
-    if (!clubId || !user?.id) return;
+    if (!clubId || !user?.id || !canViewChat) return;
 
     const fetchData = async () => {
       // last message
@@ -53,8 +53,9 @@ export default function ClubChatTeaserCard({ clubId, slug }) {
 
     fetchData();
 
+    let msgCh;
     // realtime bump + presence
-    const msgCh = supabase
+    msgCh = supabase
       .channel(`club-chat-${clubId}`)
       .on("postgres_changes",
         { event: "INSERT", schema: "public", table: "club_messages", filter: `club_id=eq.${clubId}` },
@@ -83,7 +84,7 @@ export default function ClubChatTeaserCard({ clubId, slug }) {
       if (msgCh) supabase.removeChannel(msgCh);
       if (pres.current) supabase.removeChannel(pres.current);
     };
-  }, [clubId, user?.id, ENABLE_PRESENCE, resumeTick]);
+  }, [clubId, user?.id, ENABLE_PRESENCE, resumeTick, canViewChat]);
 
 // inside the component
 const go = () => {

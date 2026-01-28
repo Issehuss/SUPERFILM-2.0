@@ -1,4 +1,4 @@
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 
 /**
  * Creates a notification row for a recipient.

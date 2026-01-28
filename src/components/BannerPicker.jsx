@@ -3,7 +3,7 @@ import { useState } from "react";
 import BannerCropper from "./BannerCropper";
 import { FastAverageColor } from "fast-average-color";
 import { useUser } from "../context/UserContext";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import { searchMovies } from "../lib/tmdbClient";
 
 const BUCKET = "banners"; // make sure this bucket exists in Supabase Storage

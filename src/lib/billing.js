@@ -1,4 +1,4 @@
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 // optional: withRetry wrapper
 
 export async function startCheckout() {

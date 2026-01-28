@@ -1,5 +1,5 @@
 // src/lib/uploadAvatar.js
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import heic2any from "heic2any";
 
 const AVATAR_BUCKET = "user-avatars";

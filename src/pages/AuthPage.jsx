@@ -1,19 +1,18 @@
 // src/pages/AuthPage.jsx
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import supabase from "../supabaseClient.js";
-import { useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import supabase from "lib/supabaseClient";
 
 export default function AuthPage() {
   const navigate = useNavigate();
 
-  const [mode, setMode] = useState("signin"); // 'signin' | 'signup'
+  const [search] = useSearchParams();
+  const initialMode = search.get("mode") === "signup" ? "signup" : "signin";
+  const [mode, setMode] = useState(initialMode); // 'signin' | 'signup'
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState(null); // { type: 'success' | 'error', text: string } | null
-  const [search] = useSearchParams();
-const initialMode = search.get("mode") === "signup" ? "signup" : "signin";
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [marketingOptIn, setMarketingOptIn] = useState(false);
 

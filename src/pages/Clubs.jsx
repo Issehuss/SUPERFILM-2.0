@@ -2,13 +2,13 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { Link, useNavigate } from "react-router-dom";
-import supabase from "../supabaseClient.js";
+import supabase from "lib/supabaseClient";
 import "../App.css";
 import "./Clubs.css";
-import { useUser } from "../context/UserContext";
 import usePageVisibility from "../hooks/usePageVisibility";
-import useRealtimeResume from "../hooks/useRealtimeResume";
+import useHydratedSupabaseFetch from "../hooks/useHydratedSupabaseFetch";
 import useAppResume from "../hooks/useAppResume";
+import { useUser } from "../context/UserContext";
 import { Users, CalendarDays, Trophy, PlusCircle } from "lucide-react";
 import { Swiper, SwiperSlide } from "swiper/react";
 import "swiper/css";
@@ -132,6 +132,28 @@ const safeClubImage = (url, fallback = CLUB_PLACEHOLDER) => {
   if (!url || typeof url !== "string") return fallback;
   if (/^https?:\/\//i.test(url)) return url;
   return fallback;
+};
+const CLUB_ABOUT_UPDATED_EVENT = "sf:club:about-updated";
+
+const readDiscoverCache = () => {
+  if (typeof localStorage === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.ts || !parsed?.data) return null;
+    if (Date.now() - parsed.ts > CACHE_MAX_AGE) return null;
+    return parsed.data;
+  } catch {
+    return null;
+  }
+};
+
+const writeDiscoverCache = (data) => {
+  if (typeof localStorage === "undefined" || !data) return;
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), data }));
+  } catch {}
 };
 
 function enrichClubs(list) {
@@ -280,7 +302,6 @@ function ClubCardSkeleton() {
 
 export default function Clubs() {
   const navigate = useNavigate();
-  const { profile } = useUser();
   const userClubId = null;
   const userHasClub = !!userClubId;
 
@@ -289,9 +310,8 @@ export default function Clubs() {
   const [tipData, setTipData] = useState(null);
   const timerRef = useRef(null);
   const swiperRefs = useRef([]);
+  const hoverRef = useRef(null);
   const isPageVisible = usePageVisibility();
-  const resumeTick = useRealtimeResume();
-  const appResumeTick = useAppResume();
 
   const clearTipTimer = () => {
     if (timerRef.current) {
@@ -303,6 +323,7 @@ export default function Clubs() {
     clearTipTimer();
     setShowTip(false);
     setHover(null);
+    hoverRef.current = null;
   }, []);
 
   useEffect(() => {
@@ -342,39 +363,34 @@ export default function Clubs() {
   const [locationInput, setLocationInput] = useState("");
   const panelRef = useRef(null);
 
-  const [liveClubs, setLiveClubs] = useState(() => {
-    try {
-      const raw = localStorage.getItem(CACHE_KEY);
-      if (!raw) return [];
-      const parsed = JSON.parse(raw);
-      if (parsed?.ts && Date.now() - parsed.ts < CACHE_MAX_AGE) {
-        return Array.isArray(parsed.data) ? parsed.data : [];
-      }
-    } catch (_) {}
-    return [];
+  const cachedDiscover = useMemo(() => readDiscoverCache(), []);
+  const [discoverState, setDiscoverState] = useState({
+    clubs: cachedDiscover?.clubs ?? [],
   });
-  const [loadingClubs, setLoadingClubs] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [page, setPage] = useState(0);
-  const [hasMore, setHasMore] = useState(true);
-  const [initialFetchDone, setInitialFetchDone] = useState(false);
+  const [discoverError, setDiscoverError] = useState(null);
   const [realtimeAttached, setRealtimeAttached] = useState(false);
+  const [initialFetchDone, setInitialFetchDone] = useState(Boolean(cachedDiscover?.clubs?.length));
+  const [fetchEpoch, setFetchEpoch] = useState(0);
+  const lastSuccessfulFetchRef = useRef(0);
+  const requestedFetchEpochRef = useRef(fetchEpoch);
 
-  const saveCache = useCallback((list) => {
-    try {
-      localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), data: list }));
-    } catch (_) {}
-  }, []);
-
-  const mergeUnique = (prev, next) => {
-    const seen = new Set();
-    const combined = [...prev, ...next];
-    return combined.filter((c) => {
-      if (seen.has(c.id)) return false;
-      seen.add(c.id);
-      return true;
+  const refreshDiscover = useCallback(() => {
+    setFetchEpoch((prev) => {
+      const next = prev + 1;
+      requestedFetchEpochRef.current = next;
+      return next;
     });
-  };
+  }, []);
+  const { appResumeTick } = useAppResume();
+  const resumeRef = useRef(false);
+
+  useEffect(() => {
+    if (!resumeRef.current) {
+      resumeRef.current = true;
+      return;
+    }
+    refreshDiscover();
+  }, [appResumeTick, refreshDiscover]);
 
   const CLUB_SELECT = [
     "id",
@@ -387,46 +403,65 @@ export default function Clubs() {
     "type",
   ].join(", ");
 
-  const fetchClubsPage = useCallback(
-    async (pageIndex = 0, append = false) => {
-      if (append) setLoadingMore(true);
-      else setLoadingClubs(true);
+  const { sessionLoaded } = useUser();
 
-      try {
-        const { data, error } = await supabase
-          .from("clubs_public")
-          .select(CLUB_SELECT)
-          .order("created_at", { ascending: false })
-          .limit(PAGE_SIZE);
+  useEffect(() => {
+    if (!sessionLoaded || !isPageVisible) return;
+    refreshDiscover();
+  }, [isPageVisible, sessionLoaded, refreshDiscover]);
 
-        if (error) throw error;
-
-        const mapped = (data || []).map(mapRowToClub);
-        setHasMore((data || []).length === PAGE_SIZE);
-
-        setLiveClubs((prev) => {
-          const merged = append ? mergeUnique(prev, mapped) : mapped;
-          saveCache(merged);
-          return merged;
-        });
-
-        setPage(pageIndex);
-      } catch (err) {
-        console.error("⚠️ Clubs load failed:", err);
-      } finally {
-        setLoadingClubs(false);
-        setLoadingMore(false);
-        setInitialFetchDone(true);
-      }
+  const saveCache = useCallback(
+    (clubs) => {
+      writeDiscoverCache({ clubs });
     },
-    [saveCache]
+    []
+  );
+
+  const fetchClubs = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("clubs_public")
+      .select(CLUB_SELECT)
+      .order("created_at", { ascending: false })
+      .limit(PAGE_SIZE);
+
+    if (error) {
+      throw error;
+    }
+
+    const mapped = (data || []).map(mapRowToClub);
+    return { clubs: mapped };
+  }, [CLUB_SELECT]);
+
+  const {
+    data: discoverResult,
+    error: hydrateError,
+    showSkeleton,
+    timedOut,
+  } = useHydratedSupabaseFetch(
+    fetchClubs,
+    [fetchEpoch],
+    {
+      sessionLoaded,
+      userId: null,
+      timeoutMs: 8000,
+      initialData: cachedDiscover ? { clubs: cachedDiscover.clubs } : null,
+      enabled: Boolean(sessionLoaded),
+    }
   );
 
   useEffect(() => {
-    if (liveClubs.length > 0) setLoadingClubs(false);
-    fetchClubsPage(0, false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fetchClubsPage, appResumeTick]);
+    if (!discoverResult?.clubs) return;
+    lastSuccessfulFetchRef.current = requestedFetchEpochRef.current;
+    setDiscoverState({ clubs: discoverResult.clubs });
+    saveCache(discoverResult.clubs);
+    setDiscoverError(null);
+    setInitialFetchDone(true);
+  }, [discoverResult, saveCache]);
+
+  useEffect(() => {
+    if (!hydrateError) return;
+    setDiscoverError(hydrateError.message || "Failed to load clubs. Tap to retry.");
+  }, [hydrateError]);
 
   useEffect(() => {
     if (!ENABLE_REALTIME) return;
@@ -435,50 +470,107 @@ export default function Clubs() {
     const channel = supabase
       .channel("clubs2-realtime")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "clubs" }, (payload) => {
-        setLiveClubs((prev) => {
+        setDiscoverState((prev) => {
           const c = mapRowToClub(payload.new);
-          if (prev.some((x) => x.id === c.id)) return prev;
-          const merged = [c, ...prev].slice(0, 200);
+          if (prev.clubs.some((x) => x.id === c.id)) return prev;
+          const merged = [c, ...prev.clubs].slice(0, 200);
           saveCache(merged);
-          return merged;
+          return { ...prev, clubs: merged };
         });
       })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "clubs" }, (payload) => {
-        setLiveClubs((prev) => {
+        setDiscoverState((prev) => {
           const c = mapRowToClub(payload.new);
-          const merged = prev.map((x) => (x.id === c.id ? c : x));
+          const merged = prev.clubs.map((x) => (x.id === c.id ? c : x));
           saveCache(merged);
-          return merged;
+          return { ...prev, clubs: merged };
         });
       })
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "clubs" }, (payload) => {
-        setLiveClubs((prev) => {
+        setDiscoverState((prev) => {
           const id = `db-${String(payload.old.id)}`;
-          const merged = prev.filter((x) => x.id !== id);
+          const merged = prev.clubs.filter((x) => x.id !== id);
           saveCache(merged);
-          return merged;
+          return { ...prev, clubs: merged };
         });
       })
       .subscribe();
 
     setRealtimeAttached(true);
     return () => supabase.removeChannel(channel);
-  }, [initialFetchDone, realtimeAttached, saveCache, resumeTick]);
+  }, [initialFetchDone, realtimeAttached, saveCache]);
 
   const getTooltipData = useCallback(
     (club) => {
       const m = club.meta || {};
+      const genreLabel =
+        Array.isArray(m.genres) && m.genres.length ? m.genres.join(", ") : "Any & all genres";
       return {
         members: m.members ?? null,
         summary: m.summary || m.tagline || null,
-        fav: Array.isArray(m.genres) && m.genres.length ? m.genres.join(", ") : null,
+        fav: genreLabel,
       };
     },
     []
   );
 
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const handler = (event) => {
+      const detail = event?.detail;
+      if (!detail?.clubId || !detail?.metaPatch) return;
+      const clubId = String(detail.clubId);
+      const metaPatch = detail.metaPatch || {};
+
+      setDiscoverState((prev) => {
+        let updated = false;
+        const nextClubs = prev.clubs.map((entry) => {
+          const matches =
+            String(entry.rawId) === clubId || String(entry.id) === `db-${clubId}`;
+          if (!matches) return entry;
+          updated = true;
+          return {
+            ...entry,
+            meta: {
+              ...(entry.meta || {}),
+              ...metaPatch,
+            },
+          };
+        });
+        if (!updated) return prev;
+        saveCache(nextClubs);
+        return { ...prev, clubs: nextClubs };
+      });
+
+      const currentHover = hoverRef.current;
+      if (currentHover) {
+        const matches =
+          String(currentHover.rawId) === clubId ||
+          String(currentHover.id) === `db-${clubId}`;
+        if (matches) {
+          const updatedClub = {
+            ...currentHover,
+            meta: {
+              ...(currentHover.meta || {}),
+              ...metaPatch,
+            },
+          };
+          hoverRef.current = updatedClub;
+          setTipData(getTooltipData(updatedClub));
+          setHover((prev) => (prev ? { ...prev, club: updatedClub } : prev));
+        }
+      }
+    };
+
+    window.addEventListener(CLUB_ABOUT_UPDATED_EVENT, handler);
+    return () => {
+      window.removeEventListener(CLUB_ABOUT_UPDATED_EVENT, handler);
+    };
+  }, [getTooltipData, saveCache]);
+
   const handleEnter = useCallback(
     (e, club, idx) => {
+      hoverRef.current = club;
       setHover({ el: e.currentTarget, club, idx });
       setShowTip(false);
       clearTipTimer();
@@ -492,7 +584,7 @@ export default function Clubs() {
 
   const handleLeave = useCallback(() => cancelHover(), [cancelHover]);
 
-  const combined = useMemo(() => enrichClubs(liveClubs), [liveClubs]);
+  const combined = useMemo(() => enrichClubs(discoverState.clubs), [discoverState.clubs]);
   const isOfficialClub = useCallback((club) => {
     const m = club?.meta || {};
     return m.type === "superfilm_curated";
@@ -544,7 +636,8 @@ export default function Clubs() {
   const baseForCarousel = hasCurated
     ? (filteredCommunity.length > 0 ? filteredCommunity : communityClubs)
     : (filtered.length > 0 ? filtered : combined);
-  const noMatches = !loadingClubs && combined.length > 0 && filtered.length === 0;
+  const showInitialLoading = showSkeleton && discoverState.clubs.length === 0;
+  const noMatches = !showSkeleton && combined.length > 0 && filtered.length === 0;
 
   useEffect(() => {
     if (!openFilter) return;
@@ -619,7 +712,7 @@ export default function Clubs() {
             </h1>
           </div>
           <p className="max-w-3xl text-[13px] sm:text-sm text-zinc-400">
-            {loadingClubs
+            {showInitialLoading
               ? "Loading clubs…"
               : "Join clubs that match your taste in films, genres and watch habits."}
           </p>
@@ -880,8 +973,24 @@ export default function Clubs() {
           </div>
         </section>
 
+        {discoverError && (
+          <div className="flex items-center justify-between gap-2 px-3 sm:px-6 pt-2 text-xs text-zinc-200 bg-zinc-900/60 rounded-2xl border border-red-400/40">
+            <span>{discoverError}</span>
+            <button
+              type="button"
+              className="text-xs uppercase tracking-[0.3em] text-yellow-400 hover:text-yellow-200"
+              onClick={() => refreshDiscover()}
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
         <section className="mb-10">
-          {!loadingClubs && combined.length === 0 && (
+          {fetchEpoch !== lastSuccessfulFetchRef.current && (
+            <div className="mb-4 px-3 sm:px-6 text-xs text-zinc-500">Refreshing…</div>
+          )}
+          {!showSkeleton && combined.length === 0 && (
             <div className="mb-4 text-sm text-zinc-400">No clubs yet. Create the first one!</div>
           )}
           {noMatches && (
@@ -890,7 +999,7 @@ export default function Clubs() {
             </div>
           )}
 
-          {loadingClubs && (
+          {showInitialLoading && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
               {Array.from({ length: 8 }).map((_, idx) => (
                 <ClubCardSkeleton key={`club-skel-${idx}`} />
@@ -940,11 +1049,11 @@ export default function Clubs() {
                           </div>
                           <div className="p-3">
                             <div className="text-sm font-semibold text-white truncate">{club.name}</div>
-                            {Array.isArray(m.genres) && m.genres.length > 0 && (
-                              <div className="mt-1 text-[0.7rem] uppercase tracking-wide text-zinc-400 truncate">
-                                {m.genres.join(" • ")}
-                              </div>
-                            )}
+                            <div className="mt-1 text-[0.7rem] uppercase tracking-wide text-zinc-400 truncate">
+                              {Array.isArray(m.genres) && m.genres.length > 0
+                                ? m.genres.join(" • ")
+                                : "Any & all genres"}
+                            </div>
                           </div>
                         </Link>
                       </SwiperSlide>
@@ -973,6 +1082,10 @@ export default function Clubs() {
                   : baseForCarousel
                 ).map((club, index) => {
                   const m = club.meta || {};
+                  const genreLabel =
+                    Array.isArray(m.genres) && m.genres.length
+                      ? m.genres.join(" • ")
+                      : "Any & all genres";
                   return (
                     <SwiperSlide key={`popular-${club.id}-${index}`} className="!w-[210px]">
                       <Link
@@ -1014,11 +1127,9 @@ export default function Clubs() {
                         </div>
                         <div className="p-3">
                           <div className="text-sm font-semibold text-white truncate">{club.name}</div>
-                          {Array.isArray(m.genres) && m.genres.length > 0 && (
-                            <div className="mt-1 text-[0.7rem] uppercase tracking-wide text-zinc-400 truncate">
-                              {m.genres.join(" • ")}
-                            </div>
-                          )}
+                          <div className="mt-1 text-[0.7rem] uppercase tracking-wide text-zinc-400 truncate">
+                            {genreLabel}
+                          </div>
                         </div>
                       </Link>
                     </SwiperSlide>

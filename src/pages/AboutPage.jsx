@@ -74,6 +74,9 @@ export function SuperFilmFooter() {
           <Link to="/terms" className="hover:text-superfilm-yellow">
             Terms &amp; Conditions
           </Link>
+          <Link to="/help" className="hover:text-superfilm-yellow">
+            Help
+          </Link>
         </div>
 
         {/* Right side: copyright */}

@@ -1,10 +1,12 @@
 // src/pages/Movies.js
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import { useUser } from "../context/UserContext";
 import TmdbImage from "../components/TmdbImage";
 import { toast } from "react-hot-toast";
+import ClubPickerModal from "../components/ClubPickerModal";
+import useMyClubs from "../hooks/useMyClubs";
 
 // ─── 1) env + in-memory cache (module-level so it survives re-renders) ───
 const TMDB_KEY =
@@ -38,6 +40,8 @@ function Movies({ searchQuery = "" }) {
   const [nominating, setNominating] = useState({});
   const [nominatedIds, setNominatedIds] = useState(new Set());
   const { user } = useUser();
+  const { clubs: myClubs = [], loading: clubsLoading } = useMyClubs();
+  const [pendingNominationMovie, setPendingNominationMovie] = useState(null);
 
   // ─── 2) debounced + cached TMDB fetch ───
   useEffect(() => {
@@ -115,35 +119,34 @@ function Movies({ searchQuery = "" }) {
     };
   }, [searchQuery]);
 
-  // ✅ Updated nominate helper with upsert (one vote per user)
-  const handleNominate = async (movie, e) => {
-    if (e) {
-      e.preventDefault();
-      e.stopPropagation();
+  const persistActiveClub = (club) => {
+    if (typeof window === "undefined" || !club?.id) return;
+    localStorage.setItem("activeClubId", String(club.id));
+    if (club.slug) {
+      localStorage.setItem("activeClubSlug", club.slug);
     }
+  };
 
-    const activeClubId = localStorage.getItem("activeClubId");
-    if (!activeClubId) {
-      alert("Open your club page first so I know which club to nominate for.");
-      return;
-    }
-    if (!user?.id) {
-      alert("Please sign in to nominate.");
-      return;
-    }
+  const getStoredActiveClubId = () => {
+    if (typeof window === "undefined") return null;
+    return localStorage.getItem("activeClubId");
+  };
 
+  const nominateMovieForClub = async (movie, clubId) => {
+    if (!clubId) return;
     setNominating((prev) => ({ ...prev, [movie.id]: true }));
     setNominatedIds((prev) => {
       const next = new Set(prev);
       next.add(movie.id);
       return next;
     });
+
     try {
       const { error } = await supabase
         .from("nominations")
         .upsert(
           {
-            club_id: activeClubId,
+            club_id: clubId,
             movie_id: movie.id,
             movie_title: movie.title || movie.name || "Untitled",
             poster_path: movie.poster_path || null,
@@ -182,6 +185,56 @@ function Movies({ searchQuery = "" }) {
         return next;
       });
     }
+  };
+
+  const handleNominate = (movie, e) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    if (!user?.id) {
+      alert("Please sign in to nominate.");
+      return;
+    }
+    if (pendingNominationMovie) {
+      return;
+    }
+    if (clubsLoading) {
+      toast("Loading your clubs… try again in a moment.");
+      return;
+    }
+
+    const clubs = Array.isArray(myClubs) ? myClubs : [];
+    if (clubs.length > 1) {
+      setPendingNominationMovie(movie);
+      return;
+    }
+
+    if (clubs.length === 1) {
+      persistActiveClub(clubs[0]);
+      nominateMovieForClub(movie, clubs[0].id);
+      return;
+    }
+
+    const activeClubId = getStoredActiveClubId();
+    if (!activeClubId) {
+      alert("Open your club page first so I know which club to nominate for.");
+      return;
+    }
+
+    nominateMovieForClub(movie, activeClubId);
+  };
+
+  const closeClubPicker = () => {
+    setPendingNominationMovie(null);
+  };
+
+  const handleClubSelection = async (club) => {
+    const movieToNominate = pendingNominationMovie;
+    if (!club?.id || !movieToNominate) return;
+    closeClubPicker();
+    persistActiveClub(club);
+    nominateMovieForClub(movieToNominate, club.id);
   };
 
   const handleUnnominate = async (movie, e) => {
@@ -318,6 +371,17 @@ function Movies({ searchQuery = "" }) {
           })}
         </div>
       )}
+
+      <ClubPickerModal
+        open={Boolean(pendingNominationMovie)}
+        clubs={myClubs}
+        movieTitle={
+          pendingNominationMovie?.title || pendingNominationMovie?.name || ""
+        }
+        loading={clubsLoading}
+        onClose={closeClubPicker}
+        onSelect={handleClubSelection}
+      />
     </div>
   );
 }

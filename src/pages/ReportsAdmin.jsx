@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ShieldCheck, CheckCircle2, XCircle, Filter, BadgeCheck } from "lucide-react";
 import { useUser } from "../context/UserContext";
 import useReports from "../hooks/useReports";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 
 const CLUB_MOD_ROLES = ["president", "admin", "moderator"]; // ⬅️ includes presidents
 const SITE_ROLES = ["admin", "moderator"];

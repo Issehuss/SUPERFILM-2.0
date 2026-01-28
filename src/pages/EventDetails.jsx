@@ -1,7 +1,7 @@
 // src/pages/EventDetails.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams, Link, useNavigate, useLocation } from "react-router-dom";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import { useUser } from "../context/UserContext";
 
 const FALLBACK_EVENT_IMAGE = "https://placehold.co/600x800?text=Event";

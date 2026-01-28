@@ -1,5 +1,5 @@
 // src/components/NotificationsBell.jsx
-import { useRef, useState, useEffect } from "react";
+import { useContext, useRef, useState, useEffect, useMemo } from "react";
 import {
   Bell,
   CheckCheck,
@@ -14,10 +14,10 @@ import {
 import { Link, useNavigate } from "react-router-dom";
 import useNotifications from "../hooks/useNotifications";
 import { useUser } from "../context/UserContext";
-import supabase from "../supabaseClient";
-import useRealtimeResume from "../hooks/useRealtimeResume";
-import useSafeSupabaseFetch from "../hooks/useSafeSupabaseFetch";
-import useAppResume from "../hooks/useAppResume";
+import supabase from "lib/supabaseClient";
+import { markPwaInstalled } from "../constants/pwaInstall";
+import usePageVisibility from "../hooks/usePageVisibility";
+import { HomeRefreshContext } from "../pages/HomeSignedIn";
 
 function timeAgo(date) {
   try {
@@ -59,23 +59,41 @@ function resolveNotificationHref(notification) {
   return "/notifications";
 }
 
-const REQUEST_ROLES = ["president"]; // who can see & act on membership requests
-
 export default function NotificationsBell() {
-  const { user } = useUser();
-  const { items, unread, markAllAsRead, markItemRead } = useNotifications();
+  const { user, sessionLoaded } = useUser();
+  const homeRefreshEpoch = useContext(HomeRefreshContext);
   const [open, setOpen] = useState(false);
+  const {
+    items,
+    unread,
+    adminPending,
+    adminPendingLoading,
+    adminPendingError,
+    markAllAsRead,
+    markItemRead,
+  } = useNotifications({ refreshEpoch: homeRefreshEpoch, adminPendingOpen: open });
   const ref = useRef(null);
   const navigate = useNavigate();
+  const isVisible = usePageVisibility();
   const [syntheticItems, setSyntheticItems] = useState([]);
   const [syntheticUnread, setSyntheticUnread] = useState(0);
   const [hiddenIds, setHiddenIds] = useState(() => new Set());
 
-  // Admin/Staff clubs with pending join requests
-  const [adminClubs, setAdminClubs] = useState([]); // [{club_id, name, slug, pending}]
-  const [loadingAdminPending, setLoadingAdminPending] = useState(true);
-  const resumeTick = useRealtimeResume();
-  const appResumeTick = useAppResume();
+  const [adminClubs, setAdminClubs] = useState([]);
+  const adminClubIds = useMemo(
+    () => adminClubs.map((c) => c.club_id).filter(Boolean),
+    [adminClubs]
+  );
+  const adminClubIdsKey = adminClubIds.join(",");
+  const loadingAdminPendingVisible = open ? adminPendingLoading : false;
+
+  useEffect(() => {
+    if (!open) {
+      setAdminClubs([]);
+      return;
+    }
+    setAdminClubs(adminPending);
+  }, [open, adminPending]);
 
   // Close on outside click
   useEffect(() => {
@@ -87,137 +105,17 @@ export default function NotificationsBell() {
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
 
-  const {
-    data: adminPendingResult,
-    loading: adminPendingLoading,
-    error: adminPendingError,
-  } = useSafeSupabaseFetch(
-    async (session) => {
-      if (!open) return [];
-      const resolvedUserId = user?.id || session?.user?.id;
-      if (!resolvedUserId) throw new Error("no-user");
-
-      // 1) clubs where user is staff (roles on club_members)
-      const { data: staffRows } = await supabase
-        .from("club_members")
-        .select("club_id, user_id, role, joined_at, accepted")
-        .eq("user_id", resolvedUserId)
-        .in("role", REQUEST_ROLES);
-
-      let allowedClubs = [];
-      const staffClubIds = (staffRows || []).map((r) => r.club_id).filter(Boolean);
-      if (staffClubIds.length) {
-        const { data: staffClubs } = await supabase
-          .from("clubs_public")
-          .select("id, name, slug")
-          .in("id", staffClubIds);
-        allowedClubs = (staffClubs || []).filter(Boolean);
-      }
-
-      // 1b) clubs where user is member with president role
-      const { data: memberPres } = await supabase
-        .from("club_members")
-        .select("club_id, user_id, role, joined_at, accepted")
-        .eq("user_id", resolvedUserId)
-        .eq("role", "president");
-
-      if (memberPres?.length) {
-        const memberClubIds = memberPres.map((r) => r.club_id).filter(Boolean);
-        if (memberClubIds.length) {
-          const { data: memberClubs } = await supabase
-            .from("clubs_public")
-            .select("id, name, slug")
-            .in("id", memberClubIds);
-          if (memberClubs?.length) {
-            allowedClubs = [...allowedClubs, ...memberClubs];
-          }
-        }
-      }
-
-      // Fallback: profile_roles with an array "roles"
-      if (!allowedClubs.length) {
-        const { data: prClubs } = await supabase
-          .from("profile_roles")
-          .select("club_id, roles, clubs:clubs!inner(id, name, slug)")
-          .eq("user_id", resolvedUserId);
-
-        allowedClubs =
-          (prClubs || [])
-            .filter((r) => {
-              const rs = Array.isArray(r.roles)
-                ? r.roles.map((x) => String(x).toLowerCase())
-                : [];
-              return rs.some((x) => REQUEST_ROLES.includes(x));
-            })
-            .map((r) => r.clubs)
-            .filter(Boolean);
-      }
-
-      if (!allowedClubs.length) {
-        return [];
-      }
-
-      // 2) pending counts per club
-      const clubIds = allowedClubs.map((c) => c.id);
-      const { data: pendingRows } = await supabase
-        .from("membership_requests")
-        .select("club_id, status")
-        .in("club_id", clubIds)
-        .eq("status", "pending");
-
-      const counts = {};
-      (pendingRows || []).forEach((r) => {
-        counts[r.club_id] = (counts[r.club_id] || 0) + 1;
-      });
-
-      // De-dupe by club_id and attach counts
-      const byId = new Map();
-      allowedClubs.forEach((c) => {
-        if (!byId.has(c.id)) {
-          byId.set(c.id, {
-            club_id: c.id,
-            name: c.name,
-            slug: c.slug,
-            pending: counts[c.id] || 0,
-          });
-        }
-      });
-
-      return Array.from(byId.values()).sort((a, b) => b.pending - a.pending);
-    },
-    [open, user?.id, appResumeTick],
-    { enabled: open, timeoutMs: 8000, initialData: [] }
-  );
-
-  useEffect(() => {
-    if (!open) {
-      setAdminClubs([]);
-      setLoadingAdminPending(false);
-      return;
-    }
-    setLoadingAdminPending(adminPendingLoading);
-  }, [open, adminPendingLoading]);
-
-  useEffect(() => {
-    if (!open) return;
-    if (adminPendingResult) {
-      setAdminClubs(adminPendingResult);
-      setLoadingAdminPending(false);
-    }
-  }, [open, adminPendingResult]);
-
   useEffect(() => {
     if (!open) return;
     if (adminPendingError && adminPendingError.message !== "no-user") {
       console.warn("[NotificationsBell] admin pending error:", adminPendingError);
       setAdminClubs([]);
-      setLoadingAdminPending(false);
     }
   }, [open, adminPendingError]);
 
   // Live updates to pending counts while panel open
   useEffect(() => {
-    if (!open || adminClubs.length === 0) return;
+    if (!open || !isVisible || adminClubs.length === 0 || !sessionLoaded) return;
     let cancelled = false;
     let retryTimer;
     let channel;
@@ -231,7 +129,7 @@ export default function NotificationsBell() {
         return;
       }
 
-      const clubIds = adminClubs.map((c) => c.club_id);
+      const clubIds = adminClubIds;
       channel = supabase
         .channel(`pending-requests:${resolvedUserId}`)
       .on(
@@ -296,7 +194,7 @@ export default function NotificationsBell() {
         } catch {}
       }
     };
-  }, [open, user?.id, adminClubs.map((c) => c.club_id).join(","), resumeTick]);
+  }, [open, user?.id, sessionLoaded, adminClubs, adminClubIds, adminClubIdsKey, homeRefreshEpoch, isVisible]);
 
   // 🔒 If not signed in, hide bell entirely (no markup rendered)
   if (!user) return null;
@@ -324,9 +222,7 @@ export default function NotificationsBell() {
     } catch {}
     await markItemRead(n.id);
     setHiddenIds((prev) => new Set(prev).add(n.id));
-    try {
-      localStorage.setItem("sf:pwa-installed", "1");
-    } catch {}
+    markPwaInstalled();
   };
 
   return (
@@ -370,7 +266,7 @@ export default function NotificationsBell() {
           </div>
 
           {/* ADMIN: Membership Requests shortcut (inside panel) */}
-          {!loadingAdminPending && adminClubs.some((c) => c.pending > 0) && (
+          {!loadingAdminPendingVisible && adminClubs.some((c) => c.pending > 0) && (
             <div className="px-4 py-3 border-b border-white/10">
               <div className="text-xs uppercase tracking-wide text-zinc-400 mb-2">Requests</div>
               <ul className="space-y-2">
@@ -407,7 +303,7 @@ export default function NotificationsBell() {
             <div className="px-4 py-10 text-sm text-zinc-400">You’re all caught up.</div>
           ) : (
             <ul className="divide-y divide-white/10">
-              {mergedItems.slice(0, 12).map((n) => {
+          {mergedItems.slice(0, 7).map((n) => {
                 const isUnread = !n.read_at && !n.id?.startsWith("synthetic-");
                 const d = n.data || {};
                 const isPwa = n.type?.startsWith("pwa.install");

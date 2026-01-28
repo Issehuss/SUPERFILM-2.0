@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import supabase from "../supabaseClient";
-import { useUser } from "../context/UserContext";
+import supabase from "lib/supabaseClient";
+import { useUser, useMembershipRefresh } from "../context/UserContext";
 import { Check, X, Users } from "lucide-react";
 import { toast } from "react-hot-toast";
 import DirectorsCutBadge from "../components/DirectorsCutBadge";
@@ -12,6 +12,7 @@ export default function ClubRequests() {
   const { clubParam } = useParams();
   const navigate = useNavigate();
   const { user, sessionLoaded } = useUser();
+  const { bumpMembership } = useMembershipRefresh();
 
 
   const [club, setClub] = useState(null);          // { id, name, slug }
@@ -147,6 +148,7 @@ await supabase.from("notifications").insert({
 
       // remove from list
       setRows((prev) => prev.filter((x) => x.id !== r.id));
+      bumpMembership();
       toast.success("You accepted this user’s request.");
     } catch (e) {
       setErr(e.message || "Approve failed");
@@ -179,6 +181,7 @@ await supabase.from("notifications").insert({
       });
 
       setRows((prev) => prev.filter((x) => x.id !== r.id));
+      bumpMembership();
     } catch (e) {
       setErr(e.message || "Reject failed");
     } finally {
@@ -220,7 +223,7 @@ await supabase.from("notifications").insert({
           {rows.map((r) => {
             const p = r.profiles || {};
             const name = p.display_name || "Member";
-            const avatar = p.avatar_url || "/avatar_placeholder.png";
+            const avatar = p.avatar_url || "/default-avatar.svg";
             const profileHref = p.slug ? `/u/${p.slug}` : `/profile/${p.id}`;
 
             return (
@@ -235,7 +238,7 @@ await supabase.from("notifications").insert({
                     className="h-10 w-10 rounded-full object-cover ring-1 ring-white/10"
                     onError={(e) => {
                       e.currentTarget.onerror = null;
-                      e.currentTarget.src = "/avatar_placeholder.png";
+                    e.currentTarget.src = "/default-avatar.svg";
                     }}
                   />
                 </Link>

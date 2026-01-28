@@ -1,6 +1,6 @@
 // src/hooks/useClubAnalytics.js
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import {
   fetchKpis,
   fetchSeries,

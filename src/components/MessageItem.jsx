@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { MoreHorizontal, Trash2, Flag } from "lucide-react";
 import PollCard from "./polls/PollCard";
 import RoleBadge from "./RoleBadge.jsx";
+import { getUserAvatar, DEFAULT_USER_AVATAR } from "../lib/avatars";
 
 // ID helpers
 const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -107,7 +108,7 @@ export default function MessageItem({
   const canDelete = (isMe || isAdmin) && typeof onDelete === "function";
   const canHardDelete = isAdmin && typeof onHardDelete === "function" && !!msg?.is_deleted;
 
-  const avatarSrc = p?.avatar_url || "/avatar-fallback.png";
+  const avatarSrc = getUserAvatar(p);
   const displayName = p?.display_name || "Member";
 
   // bubble styles (reserve space for kebab)
@@ -132,7 +133,7 @@ export default function MessageItem({
           <img
             src={avatarSrc}
             alt={displayName || "User avatar"}
-            onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = "/avatar-fallback.png"; }}
+            onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = DEFAULT_USER_AVATAR; }}
             className="h-8 w-8 rounded-full object-cover hover:opacity-90 border border-zinc-700"
           />
         </button>
@@ -278,7 +279,7 @@ export default function MessageItem({
           <img
             src={avatarSrc}
             alt="My avatar"
-            onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = "/avatar-fallback.png"; }}
+            onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = DEFAULT_USER_AVATAR; }}
             className="h-8 w-8 rounded-full object-cover hover:opacity-90 border border-zinc-700"
           />
         </button>

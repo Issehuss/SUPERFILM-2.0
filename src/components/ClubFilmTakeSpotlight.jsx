@@ -43,12 +43,12 @@ export default function ClubFilmTakeSpotlight({ takes = [], intervalMs = 8000 })
     <div className="group relative overflow-hidden rounded-2xl border border-white/10 bg-black/30 p-5 transition-colors">
       <div className="flex items-start gap-3">
         <img
-          src={cur?.profiles?.avatar_url || "/avatar_placeholder.png"}
+          src={cur?.profiles?.avatar_url || "/default-avatar.svg"}
           alt={cur?.profiles?.display_name || "Member"}
           className="h-10 w-10 rounded-full object-cover"
           onError={(e) => {
             e.currentTarget.onerror = null;
-            e.currentTarget.src = "/avatar_placeholder.png";
+            e.currentTarget.src = "/default-avatar.svg";
           }}
         />
         <div className="min-w-0 flex-1">

@@ -2,10 +2,9 @@
 import { useEffect, useState, useRef } from "react";
 import { ChevronDown, Crown } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import { useUser } from "../context/UserContext";
 import useSafeSupabaseFetch from "../hooks/useSafeSupabaseFetch";
-import useAppResume from "../hooks/useAppResume";
 
 const CACHE_KEY = "cache:clubSwitcher:v1";
 const CACHE_TTL_MS = 5 * 60 * 1000;
@@ -36,14 +35,15 @@ function writeCache(userId, payload) {
   }
 }
 
-export default function ClubSwitcher({ className = "" }) {
-  const { user } = useUser();
+export default function ClubSwitcher({ className = "", refreshEpoch = 0 }) {
+  const { user, isReady, profile, membershipEpoch } = useUser();
   const [open, setOpen] = useState(false);
   const cached = readCache(user?.id);
   const [owned, setOwned] = useState(cached?.owned || []);
   const [member, setMember] = useState(cached?.member || []);
-  const resumeTick = useAppResume();
-
+  const inFlightRef = useRef(false);
+  const fetchKeyRef = useRef(0);
+  const [fetchKey, setFetchKey] = useState(0);
   const panelRef = useRef(null);
   const btnRef = useRef(null);
 
@@ -54,22 +54,20 @@ export default function ClubSwitcher({ className = "" }) {
      LOAD CLUBS
   ============================================================ */
   const { data: clubsResult, error: clubsError } = useSafeSupabaseFetch(
-      async (session) => {
-        const resolvedUserId = user?.id || session?.user?.id;
+      async () => {
+        const resolvedUserId = user?.id;
         if (!resolvedUserId) throw new Error("no-user");
 
         // Owned (president)
         const { data: ownedRows } = await supabase
           .from("club_members")
           .select("club_id, user_id, role, joined_at, accepted")
-          .eq("user_id", resolvedUserId)
           .eq("role", "president");
 
         // Member (admin + member)
         const { data: memberRows } = await supabase
           .from("club_members")
           .select("club_id, user_id, role, joined_at, accepted")
-          .eq("user_id", resolvedUserId)
           .in("role", ["admin", "member"]);
 
         const ownedIds = (ownedRows || []).map((r) => r.club_id).filter(Boolean);
@@ -96,9 +94,9 @@ export default function ClubSwitcher({ className = "" }) {
 
         return { owned: ownedClubs, member: memberClubs, userId: resolvedUserId };
       },
-      [user?.id, resumeTick],
-      { enabled: true, timeoutMs: 8000, initialData: null }
-    );
+    [user?.id, fetchKey, membershipEpoch],
+    { enabled: Boolean(user?.id && isReady), timeoutMs: 8000, initialData: null }
+  );
 
   useEffect(() => {
     if (!clubsResult) return;
@@ -108,14 +106,31 @@ export default function ClubSwitcher({ className = "" }) {
       owned: clubsResult.owned || [],
       member: clubsResult.member || [],
     });
+    inFlightRef.current = false;
   }, [clubsResult]);
 
   useEffect(() => {
     if (clubsError && clubsError.message !== "no-user") {
       setOwned([]);
       setMember([]);
+      inFlightRef.current = false;
     }
   }, [clubsError]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+    fetchKeyRef.current += 1;
+    setFetchKey(fetchKeyRef.current);
+  }, [user?.id, refreshEpoch, membershipEpoch]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    try {
+      sessionStorage.removeItem(`${CACHE_KEY}:${user.id}`);
+    } catch {}
+  }, [membershipEpoch, user?.id]);
 
 
   // CLOSE ON OUTSIDE CLICK (native)
@@ -170,43 +185,45 @@ export default function ClubSwitcher({ className = "" }) {
           className="absolute right-0 mt-2 w-80 rounded-2xl border border-white/10 bg-zinc-950 shadow-2xl"
         >
           {/* ----------- Owned ----------- */}
-          <Section title="Owned">
-            {owned.length === 0 ? (
-              <EmptyRow text="You don’t own a club yet." />
-            ) : (
-              owned.map((c) => (
-                <Row
-                  key={c.id}
-                  title={c.name}
-                  img={c.profile_image_url}
-                  slug={c.slug}
-                  id={c.id}
-                  navigate={navigate}
-                  setOpen={setOpen}
-                  badge={<Crown className="h-3.5 w-3.5 text-yellow-400" />}
-                />
-              ))
-            )}
-          </Section>
+            <Section title="Owned">
+              {owned.length === 0 ? (
+                <EmptyRow text="You don’t own a club yet." />
+              ) : (
+                owned.map((c) => (
+                  <Row
+                    key={c.id}
+                    title={c.name}
+                    img={c.profile_image_url}
+                    slug={c.slug}
+                    id={c.id}
+                    navigate={navigate}
+                    setOpen={setOpen}
+                    primary={c.id === profile?.primary_club_id}
+                    badge={<Crown className="h-3.5 w-3.5 text-yellow-400" />}
+                  />
+                ))
+              )}
+            </Section>
 
           {/* ----------- Member ----------- */}
-          <Section title="Member">
-            {member.length === 0 ? (
-              <EmptyRow text="You haven’t joined any clubs yet." />
-            ) : (
-              member.map((c) => (
-                <Row
-                  key={c.id}
-                  title={c.name}
-                  img={c.profile_image_url}
-                  slug={c.slug}
-                  id={c.id}
-                  navigate={navigate}
-                  setOpen={setOpen}
-                />
-              ))
-            )}
-          </Section>
+            <Section title="Member">
+              {member.length === 0 ? (
+                <EmptyRow text="You haven’t joined any clubs yet." />
+              ) : (
+                member.map((c) => (
+                  <Row
+                    key={c.id}
+                    title={c.name}
+                    img={c.profile_image_url}
+                    slug={c.slug}
+                    id={c.id}
+                    navigate={navigate}
+                    setOpen={setOpen}
+                    primary={c.id === profile?.primary_club_id}
+                  />
+                ))
+              )}
+            </Section>
 
           {/* ----------- Footer ----------- */}
           <div className="flex items-center justify-between border-t border-white/10 p-2">
@@ -252,7 +269,7 @@ function Section({ title, children }) {
 /* ============================================================
    ROW
 ============================================================ */
-function Row({ title, img, badge, slug, id, navigate, setOpen }) {
+function Row({ title, img, badge, slug, id, navigate, setOpen, primary = false }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const ref = useRef(null);
   const imageSrc = img || "/default-avatar.svg";
@@ -279,7 +296,7 @@ function Row({ title, img, badge, slug, id, navigate, setOpen }) {
         tabIndex={0}
         className="flex w-full items-center gap-3 rounded-xl p-2 hover:bg-white/5 cursor-pointer"
       >
-        <div className="h-8 w-8 overflow-hidden rounded-lg border border-white/10 bg-zinc-800">
+        <div className="relative h-8 w-8 overflow-hidden rounded-lg border border-white/10 bg-zinc-800">
           <img
             src={imageSrc}
             alt=""
@@ -289,11 +306,25 @@ function Row({ title, img, badge, slug, id, navigate, setOpen }) {
               e.currentTarget.src = "/default-avatar.svg";
             }}
           />
+
+          {primary && (
+            <span
+              className="
+                absolute -bottom-0.5 -right-0.5
+                h-2.5 w-2.5 rounded-full
+                bg-emerald-400
+                ring-2 ring-zinc-950
+                shadow-[0_0_6px_rgba(16,185,129,0.6)]
+              "
+            />
+          )}
         </div>
         <div className="flex-1 text-left text-sm text-white truncate">
           {title}
         </div>
-        {badge ? <div className="text-yellow-400">{badge}</div> : null}
+        <div className="flex items-center gap-2">
+          {badge ? <div className="text-yellow-400">{badge}</div> : null}
+        </div>
 
         <button
           type="button"

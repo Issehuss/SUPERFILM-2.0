@@ -1,6 +1,6 @@
 // src/components/polls/PollComposer.jsx
 import { useState } from "react";
-import supabase from "../../supabaseClient";
+import supabase from "lib/supabaseClient";
 
 export default function PollComposer({ clubId, onClose, onCreated }) {
   const [question, setQuestion] = useState("");

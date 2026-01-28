@@ -21,10 +21,14 @@ export default function NavActions({ className = "" }) {
         {!isPremium && (
           <Link
             to="/premium"
-            className="no-underline px-3 h-9 inline-flex items-center rounded-full border border-amber-300/40 bg-amber-400/15 hover:bg-amber-400/25 text-sm text-amber-100 transition"
-            style={{ textDecoration: "none" }}
+            className={[
+              "no-underline inline-flex items-center justify-center rounded-full",
+              "px-4 h-9 text-[10px] font-semibold uppercase tracking-[0.28em]",
+              "border border-[#f5c451]/60 bg-[radial-gradient(circle_at_20%_20%,rgba(245,196,81,0.25),rgba(0,0,0,0.65)),linear-gradient(135deg,#0a0a0a,#111015,#0a0a0a)]",
+              "text-[#f7dba0] shadow-[0_10px_24px_rgba(0,0,0,0.45),0_0_0_1px_rgba(245,196,81,0.18)] transition hover:brightness-105",
+            ].join(" ")}
           >
-            Director’s Cut
+            Directors Cut
           </Link>
         )}
         <AccountMenu />

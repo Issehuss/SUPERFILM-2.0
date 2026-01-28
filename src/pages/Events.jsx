@@ -2,7 +2,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import "./Events.css";
-import supabase from "../supabaseClient.js";
+import supabase from "lib/supabaseClient";
 import useRealtimeResume from "../hooks/useRealtimeResume";
 
 const EVENTS_CACHE_KEY = "cache:events:v1";

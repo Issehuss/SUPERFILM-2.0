@@ -1,6 +1,6 @@
 // Fetch a user's club memberships and expose the first (primary) club.
 import { useEffect, useState } from "react";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import useSafeSupabaseFetch from "./useSafeSupabaseFetch";
 import useAppResume from "./useAppResume";
 

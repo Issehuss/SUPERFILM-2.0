@@ -2,11 +2,11 @@
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { Users, ArrowLeft } from "lucide-react";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import { useUser } from "../context/UserContext";
 import useRealtimeResume from "../hooks/useRealtimeResume";
 
-const AVATAR_FALLBACK = "/avatar_placeholder.png";
+const AVATAR_FALLBACK = "/default-avatar.svg";
 
 function fmt(dt) {
   try {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import TmdbImage from "./TmdbImage";
 import { toast } from "react-hot-toast";
@@ -138,17 +138,19 @@ export default function NominationsCarousel({
               display: i === idx ? "grid" : "none",
             }}
           >
-            {page.map((r) => (
-              <div
-                key={r.id}
-                className="relative group rounded-2xl overflow-hidden bg-zinc-900/60 ring-1 ring-white/10 hover:ring-yellow-400/70 transition"
-              >
+          {page.map((r) => (
+            <div
+              key={r.id}
+              className="relative group overflow-hidden rounded-2xl bg-zinc-900/60 border-2 border-transparent transition shadow-lg hover:border-yellow-400/70 hover:shadow-[0_15px_30px_rgba(250,204,21,0.45)]"
+            >
+              <div className="aspect-[2/3] w-full overflow-hidden bg-black">
                 <TmdbImage
                   src={r.poster}
                   alt={r.title}
-                  className="block w-full h-full"
-                  imgClassName="group-hover:scale-[1.03] transition"
+                  className="block h-full w-full"
+                  imgClassName="h-full w-full object-contain transition group-hover:scale-[1.03]"
                 />
+              </div>
 
                 {/* Overlay */}
                 <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-2 flex items-center justify-between">

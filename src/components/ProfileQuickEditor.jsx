@@ -1,7 +1,7 @@
 // src/components/ProfileQuickEditor.jsx
 import { useState, useEffect } from "react";
 import { useUser } from "../context/UserContext";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import uploadAvatar from "../lib/uploadAvatar";
 
 /**

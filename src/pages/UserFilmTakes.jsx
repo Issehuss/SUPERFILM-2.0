@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
 import { ChevronDown, Search } from "lucide-react";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import FilmTakeCard from "../components/FilmTakeCard.jsx";
 import { PROFILE_SELECT } from "../lib/profileSelect";
 

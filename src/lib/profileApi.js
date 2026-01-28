@@ -1,5 +1,5 @@
 // src/lib/profileApi.js
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 
 export async function ensureProfileRow(userId) {
   if (!userId) return;

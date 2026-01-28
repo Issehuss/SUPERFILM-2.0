@@ -19,12 +19,14 @@ import PwaUpdateToast from "./components/PwaUpdateToast";
 import PwaInstallPrompt from "./components/PwaInstallPrompt";
 import usePerfLogger from "./hooks/usePerfLogger";
 import useMyClubs from "./hooks/useMyClubs";
+import { AppResumeProvider } from "./hooks/useAppResume";
+import { PWA_INSTALLED_KEY } from "./constants/pwaInstall";
 
 import "./styles/glows.css";
 import NavActions from "./components/NavActions";
 
 import { UserProvider, useUser } from "./context/UserContext";
-import supabase from "./supabaseClient";
+import supabase from "lib/supabaseClient";
 import ErrorBoundary from "./components/ErrorBoundary";
 
 
@@ -74,6 +76,7 @@ const ForgotPassword = lazy(() => import("./pages/ForgotPassword"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
 const UserSearchPage = lazy(() => import("./pages/UserSearchPage.jsx"));
 const TermsPage = lazy(() => import("./pages/Terms.jsx"));
+const HelpPage = lazy(() => import("./pages/HelpPage.jsx"));
 const ProfileFollows = lazy(() => import("./pages/ProfileFollows.jsx"));
 const Watchlist = lazy(() => import("./pages/Watchlist.jsx"));
 const SettingsProfile = lazy(() => import("./pages/SettingsProfile.jsx"));
@@ -200,46 +203,38 @@ function RequirePresidentPremium({ children }) {
 
 /* ==================== APP WRAPPER ==================== */
 export default function AppWrapper() {
-  // STEP 3: Force Supabase session hydration on boot
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      void data.session;
-    });
-  }, []);
-
   return (
-    <UserProvider>
-      <Router>
-      <PageViewTracker />
-      <BetaBanner />
-      <Routes>
-  {/* Onboarding route — renders BEFORE MainShell */}
-  <Route
-    path="/onboarding"
-    element={
-      <Suspense fallback={<Splash />}>
-        <OnboardingTutorial />
-      </Suspense>
-    }
-  />
+    <AppResumeProvider>
+      <UserProvider>
+        <Router>
+          <PageViewTracker />
+          <BetaBanner />
+          <Routes>
+            {/* Onboarding route — renders BEFORE MainShell */}
+            <Route
+              path="/onboarding"
+              element={
+                <Suspense fallback={<Splash />}>
+                  <OnboardingTutorial />
+                </Suspense>
+              }
+            />
 
-  {/* Everything else */}
-  <Route
-    path="/*"
-    element={
-      <ErrorBoundary fallback={<Splash message="Something went wrong loading the app." />}>
-        <Suspense fallback={<Splash />}>
-          <MainShell />
-        </Suspense>
-      </ErrorBoundary>
-    }
-  />
+            {/* Everything else */}
+            <Route
+              path="/*"
+              element={
+                <ErrorBoundary fallback={<Splash message="Something went wrong loading the app." />}>
+                  <MainShell />
+                </ErrorBoundary>
+              }
+            />
 
-  <Route path="*" element={<Navigate to="/" replace />} />
-</Routes>
-
-      </Router>
-    </UserProvider>
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Router>
+      </UserProvider>
+    </AppResumeProvider>
   );
 }
 
@@ -333,7 +328,14 @@ function NavClubSwitch() {
 
 /* ==================== MAIN SHELL ==================== */
 function MainShell() {
-  const { user, isPremium, profile, loading: userLoading, isReady } = useUser();
+  const {
+    user,
+    isPremium,
+    profile,
+    loading: userLoading,
+    isReady,
+    sessionLoaded,
+  } = useUser();
   const location = useLocation();
   const navigate = useNavigate();
   const pwaPromptedRef = useRef(false);
@@ -349,8 +351,9 @@ function MainShell() {
     const seenLocal =
       typeof window !== "undefined" &&
       localStorage.getItem("sf:onboarding_seen") === "1";
+    const seenServer = Boolean(user?.user_metadata?.onboarding_seen);
 
-    if (!seenLocal) {
+    if (!seenLocal && !seenServer) {
       navigate("/onboarding", { replace: true });
     }
   }, [
@@ -361,13 +364,19 @@ function MainShell() {
   ]);
 
   useEffect(() => {
+    if (!sessionLoaded) return;
+    if (!user) return;
+    void import("./pages/HomeSignedIn.jsx");
+  }, [sessionLoaded, user]);
+
+  useEffect(() => {
     if (!user?.id || !isReady) return;
     if (pwaPromptedRef.current) return;
     pwaPromptedRef.current = true;
 
     if (isPwaInstalled()) return;
     try {
-      if (localStorage.getItem("sf:pwa-installed") === "1") return;
+      if (localStorage.getItem(PWA_INSTALLED_KEY) === "1") return;
     } catch {}
 
     const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -457,12 +466,13 @@ function MainShell() {
       isActive ? "text-white" : "",
     ].join(" ");
 
-  if (!isReady) {
-    return <Splash message="Loading your session…" />;
-  }
-
   return (
     <div className="flex flex-col min-h-screen bg-gradient-to-b from-black via-zinc-900 to-black text-white font-sans">
+      {!isReady && (
+        <div className="fixed top-2 right-3 text-xs text-zinc-400">
+          Syncing…
+        </div>
+      )}
       {/* ===== Header ===== */}
       <header className="sticky top-0 z-40 bg-zinc-950/80 backdrop-blur border-b border-white/10 relative">
   <div className="w-full flex items-center h-14 sm:h-16">
@@ -624,11 +634,19 @@ function MainShell() {
           <Routes>
             <Route
               path="/"
-              element={user ? <HomeSignedIn /> : <LandingPage />}
+              element={
+                !sessionLoaded ? (
+                  <LandingPage />
+                ) : user ? (
+                  <HomeSignedIn />
+                ) : (
+                  <LandingPage />
+                )
+              }
             />
 
             {/* Clubs */}
-            <Route path="/clubs/:clubParam" element={<ClubProfile />} />
+            <Route path="/clubs/:slug" element={<ClubProfile />} />
             <Route path="/clubs/:clubParam/takes/archive" element={<ClubTakesArchive />} />
 
             {/* Premium president-only */}
@@ -770,6 +788,7 @@ function MainShell() {
             <Route path="/clubs" element={<Clubs />} />
             <Route path="/about" element={<AboutPage />} />
             <Route path="/terms" element={<TermsPage />} />
+            <Route path="/help" element={<HelpPage />} />
             <Route path="/auth/forgot" element={<ForgotPassword />} />
 <Route path="/auth/reset" element={<ResetPassword />} />
 <Route path="/search/users" element={<UserSearchPage />} />

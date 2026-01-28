@@ -1,36 +1,31 @@
 // src/components/StatsAndWatchlist.jsx
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import useWatchlist from "../hooks/useWatchlist";
 import TmdbImage from "./TmdbImage";
 
 export default function StatsAndWatchlist({
   statsData,
-  userId,
+  profileWatchlist = null,
+  watchlistSkeleton = false,
   movieRoute = "/movies",
   onFollowersClick,
   onFollowingClick,
-  watchlistRefreshKey = 0,
-  disableWatchlistAutoRefresh = false,
+  skipWatchlist = false,
 }) {
-    // premium check (passed implicitly via theme)
-    const isPremium = Boolean(statsData?.isPremium);
+  // premium check (passed implicitly via theme)
+  const isPremium = Boolean(statsData?.isPremium);
 
   const navigate = useNavigate();
 
   // ---- Stats inputs ----
   const followers = statsData?.followers ?? 0;
   const following = statsData?.following ?? 0;
-  const role = null;
-  const roleClub = null;
-
   // ---- Watchlist ----
-  const { items: watchlist = [] } = useWatchlist?.(undefined, {
-    auto: !disableWatchlistAutoRefresh,
-    realtime: !disableWatchlistAutoRefresh,
-    useCache: true,
-    refreshKey: watchlistRefreshKey,
-  }) ?? { items: [] };
+  const providedWatchlist = Array.isArray(profileWatchlist)
+    ? profileWatchlist
+    : null;
+  const watchlist = providedWatchlist ?? [];
+  const watchlistCount = skipWatchlist ? 0 : watchlist.length;
 
   const posterUrl = (m) => {
     // accepts { poster_path } or direct url; supports { tmdb_id } if needed
@@ -105,7 +100,7 @@ export default function StatsAndWatchlist({
           <div className="flex items-center justify-between mb-2 sm:mb-3">
             <h3 className="text-sm font-semibold text-white/90">Watchlist</h3>
             <div className="flex items-center gap-3">
-              <span className="text-xs text-zinc-400">{watchlist.length}</span>
+              <span className="text-xs text-zinc-400">{watchlistCount}</span>
               <button
                 type="button"
                 onClick={goWatchlist}
@@ -116,7 +111,11 @@ export default function StatsAndWatchlist({
             </div>
           </div>
 
-          {watchlist.length > 0 ? (
+          {skipWatchlist ? (
+            <div className="h-[96px] sm:h-[108px] grid place-items-center text-xs sm:text-sm text-zinc-400">
+              Watchlists are private on other profiles.
+            </div>
+          ) : watchlist.length > 0 ? (
             <div className="flex gap-2 sm:gap-3 overflow-x-auto no-scrollbar py-1">
               {watchlist.map((m) => {
                 const poster = posterUrl(m);
@@ -151,6 +150,15 @@ export default function StatsAndWatchlist({
                   </button>
                 );
               })}
+            </div>
+          ) : watchlistSkeleton ? (
+            <div className="grid grid-cols-4 gap-2">
+              {Array.from({ length: 4 }).map((_, idx) => (
+                <div
+                  key={idx}
+                  className="h-[96px] sm:h-[108px] rounded-lg border border-zinc-800 bg-zinc-900/40 animate-pulse"
+                />
+              ))}
             </div>
           ) : (
             <div className="h-[96px] sm:h-[108px] grid place-items-center text-sm text-zinc-400">

@@ -1,7 +1,7 @@
 // src/dev/SupabasePing.jsx
 import { useEffect, useState } from "react";
 // ✅ Correct path & default import
-import supabase from "../supabaseClient.js";
+import supabase from "lib/supabaseClient";
 
 export default function SupabasePing() {
   const [authStatus, setAuthStatus] = useState("Checking…");

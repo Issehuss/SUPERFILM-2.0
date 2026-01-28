@@ -1,6 +1,6 @@
 // src/components/ClubFilmTakesSection.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import { useUser } from "../context/UserContext";
 import { createNotification } from "../utils/notify";
 import DirectorsCutBadge from "./DirectorsCutBadge";
@@ -265,7 +265,7 @@ export default function ClubFilmTakesSection({
 
 function SpotlightCard({ take, count, index, onToggleClap }) {
   const name = take?.profiles?.display_name || "Member";
-  const avatar = take?.profiles?.avatar_url || "/avatar_placeholder.png";
+  const avatar = take?.profiles?.avatar_url || "/default-avatar.svg";
   const isPremium =
     take?.profiles?.is_premium === true ||
     String(take?.profiles?.plan || "").toLowerCase() === "directors_cut";
@@ -290,7 +290,7 @@ function SpotlightCard({ take, count, index, onToggleClap }) {
           className="h-10 w-10 rounded-full object-cover"
           onError={(e) => {
             e.currentTarget.onerror = null;
-            e.currentTarget.src = "/avatar_placeholder.png";
+            e.currentTarget.src = "/default-avatar.svg";
           }}
         />
         <div className="min-w-0 flex-1">

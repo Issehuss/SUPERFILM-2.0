@@ -1,6 +1,6 @@
 // src/components/AssignRoleMenu.jsx
 import { useState, useMemo } from "react";
-import supabase from "../supabaseClient.js";
+import supabase from "lib/supabaseClient";
 
 const ALL_ROLES = [
   { value: "member", label: "Member" },

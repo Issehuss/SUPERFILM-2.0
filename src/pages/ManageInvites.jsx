@@ -1,7 +1,7 @@
 // src/pages/ManageInvites.jsx
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import { useUser } from "../context/UserContext";
 
 function randCode(len = 10) {

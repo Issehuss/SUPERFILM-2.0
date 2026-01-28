@@ -318,17 +318,17 @@ export default function AccountMenu({ className = "" }) {
           </button>
 
 {/* View Tutorial Again */}
-<button
-  type="button"
-  onClick={() => {
-    setOpen(false);
-    navigate("/onboarding");
-  }}
-  role="menuitem"
-  className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-white/10 rounded-2xl"
->
-  <span>View tutorial again</span>
-</button>
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              navigate("/onboarding?replay=1");
+            }}
+            role="menuitem"
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-white/10 rounded-2xl"
+          >
+            <span>View tutorial again</span>
+          </button>
 
 {/* Feedback */}
 <FeedbackButton variant="menu" />

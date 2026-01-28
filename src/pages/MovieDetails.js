@@ -5,7 +5,7 @@ import { Check } from "lucide-react";
 import { toast } from "react-hot-toast";
 import { useUser } from "../context/UserContext";
 import useWatchlist from "../hooks/useWatchlist";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import { env } from "../lib/env";
 import TmdbImage from "../components/TmdbImage";
 

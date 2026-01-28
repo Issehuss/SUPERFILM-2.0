@@ -1,5 +1,6 @@
 // src/lib/ratingSchemes.js
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
+import isAbortError from "./isAbortError";
 
 const RATING_SCHEME_SELECT = [
   "id",
@@ -71,18 +72,26 @@ function normalizeScheme(profileId, scheme) {
  */
 export async function fetchActiveScheme(profileId) {
   if (!profileId) return null;
-  const { data, error } = await supabase
-    .from("profile_rating_schemes")
-    .select(RATING_SCHEME_SELECT)
-    .eq("profile_id", profileId)
-    .eq("is_active", true)
-    .maybeSingle();
 
-  if (error && error.code !== "PGRST116") {
-    console.warn("[ratingSchemes] fetchActiveScheme:", error);
-    throw error;
+  try {
+    const { data, error } = await supabase
+      .from("profile_rating_schemes")
+      .select(RATING_SCHEME_SELECT)
+      .eq("profile_id", profileId)
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (error && error.code !== "PGRST116") {
+      console.warn("[ratingSchemes] fetchActiveScheme:", error);
+      throw error;
+    }
+    return data || null;
+  } catch (err) {
+    if (isAbortError(err)) {
+      return null;
+    }
+    throw err;
   }
-  return data || null;
 }
 
 /**

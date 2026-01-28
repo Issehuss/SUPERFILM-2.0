@@ -1,6 +1,6 @@
 // src/components/polls/PollCard.jsx
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import supabase from "../../supabaseClient";
+import supabase from "lib/supabaseClient";
 import { useUser } from "../../context/UserContext";
 import useRealtimeResume from "../../hooks/useRealtimeResume";
 

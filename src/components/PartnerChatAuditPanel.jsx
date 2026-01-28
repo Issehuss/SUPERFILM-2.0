@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useUser } from "../context/UserContext";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import useRealtimeResume from "../hooks/useRealtimeResume";
 
 // Safe lowercasing that tolerates null/undefined/non-strings

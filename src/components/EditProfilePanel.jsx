@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import {
   X, Plus, ArrowUpRight, Search, Upload, Trash2,
   Type, Palette, Crop as CropIcon, Image as ImageIcon, User as UserIcon,
@@ -16,7 +16,16 @@ import useSaveFeedback from "../hooks/useSaveFeedback"
 import { searchStills } from "../lib/stills";
 import { toast } from "react-hot-toast";
 import AvatarCropper from "./AvatarCropper";
+import BannerCropper from "./BannerCropper";
 import useEntitlements from "../hooks/useEntitlements";
+import {
+  computeGridHeight,
+  estimateGridRows,
+  getPresetByKey,
+  GRID_COLUMNS,
+  GRID_GAP,
+  ROW_HEIGHTS,
+} from "./moodboardLayout";
 import { PROFILE_THEMES } from "../theme/profileThemes";
 import uploadAvatar from "../lib/uploadAvatar";
 // --- PREMIUM FLAGS (define early!) ---
@@ -58,21 +67,6 @@ function getTmdbCreds() {
   return { v4, v3, fnBase };
 }
 
-/* ───────────────────────── Moodboard sizing helpers (unchanged) ───────────────────────── */
-const FIXED = { width: 720, height: 240, cols: 6, row: 64 };
-const EXPANDED = { width: 1200, height: 480, cols: 6, row: 96 };
-const SIZE_DEF = {
-  s: { cols: 2, rows: 2, cls: "col-span-2 row-span-2" },
-  m: { cols: 3, rows: 2, cls: "col-span-3 row-span-2" },
-  w: { cols: 4, rows: 2, cls: "col-span-4 row-span-2" },
-  t: { cols: 2, rows: 3, cls: "col-span-2 row-span-3" },
-};
-const SIZE_ORDER = ["m", "s", "w", "t"];
-function tiltForIndex(i) {
-  const angles = [-1.2, 0.8, -0.6, 1.0, -0.4, 0.7, 0, -0.9, 0.5, -0.3];
-  return angles[i % angles.length];
-}
-
 /* ───────────────────────────────────── Component ───────────────────────────────────── */
 export default function EditProfilePanel({
   open,
@@ -81,6 +75,8 @@ export default function EditProfilePanel({
   profile,
   profileId = null,
   isOwner = false,
+  initialCropRequest = null,
+  onCropHandled,
 }) {
 
   
@@ -474,20 +470,61 @@ function applyBanner(url) {
   
 
 
+  const moodboardCacheKey = moodProfileId ? `sf.moodboard.cache.v1:${moodProfileId}` : null;
+  const readMoodboardCache = () => {
+    if (!moodboardCacheKey || typeof sessionStorage === "undefined") return null;
+    try {
+      const raw = sessionStorage.getItem(moodboardCacheKey);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed?.data)) return parsed.data;
+    } catch {}
+    return null;
+  };
+  const writeMoodboardCache = (arr) => {
+    if (!moodboardCacheKey || typeof sessionStorage === "undefined") return;
+    try {
+      sessionStorage.setItem(moodboardCacheKey, JSON.stringify({ ts: Date.now(), data: arr }));
+    } catch {}
+  };
+
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
+
+    const cached = readMoodboardCache();
+    if (cached) {
+      setItems(cached);
+      originalRef.current = cached;
+      setDirty(false);
+      setMbLoading(false);
+    }
+
     (async () => {
       setMbLoading(true);
       try {
         const arr = await loadMoodboardFromSupabase(moodProfileId);
-        if (!cancelled) { setItems(arr); originalRef.current = arr; setDirty(false); }
+        if (!cancelled) {
+          setItems(arr);
+          originalRef.current = arr;
+          setDirty(false);
+        }
       } finally {
         if (!cancelled) setMbLoading(false);
       }
     })();
-    return () => { cancelled = true; };
+
+    return () => {
+      cancelled = true;
+    };
   }, [open, moodProfileId]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (!initialCropRequest || initialCropRequest.index == null) return;
+    openCropFor(initialCropRequest.index, initialCropRequest.slot);
+    onCropHandled?.();
+  }, [initialCropRequest, open, onCropHandled]);
 
   async function loadMoodboardFromSupabase(pid) {
     if (!pid) {
@@ -496,17 +533,15 @@ function applyBanner(url) {
     }
     const { data, error } = await supabase.from("profiles").select("moodboard").eq("id", pid).maybeSingle();
     if (error) return [];
-    return Array.isArray(data?.moodboard) ? data.moodboard : [];
-  }
-  function cycleSize(item) {
-    const curr = item?.size && SIZE_DEF[item.size] ? item.size : "m";
-    const next = SIZE_ORDER[(SIZE_ORDER.indexOf(curr) + 1) % SIZE_ORDER.length];
-    return { ...item, size: next };
+    const arr = Array.isArray(data?.moodboard) ? data.moodboard : [];
+    writeMoodboardCache(arr);
+    return arr;
   }
   function cleanHex(hex) { const s = String(hex).trim(); return s.startsWith("#") ? s : `#${s}`; }
   function normalizeItem(it) {
     if (!it) return null;
-    const size = it.size && SIZE_DEF[it.size] ? it.size : "m";
+    const validSizes = ["s", "m", "w", "t"];
+    const size = validSizes.includes(it.size) ? it.size : "m";
     if (it.type === "image") return { type: "image", url: it.url, source: it.source || "tmdb", title: it.title || "", size };
     if (it.type === "quote") return { type: "quote", text: it.text || "", attribution: it.attribution || "", size };
     if (it.type === "color") return { type: "color", hex: cleanHex(it.hex || "#888888"), size };
@@ -553,18 +588,11 @@ function applyBanner(url) {
   }
   
   function removeAt(i) { markDirty(items.filter((_, idx) => idx !== i)); }
-  function resizeAt(i) { markDirty(items.map((it, idx) => (idx === i ? cycleSize(it) : it))); }
-  function openCropFor(idx, sizeKey, isExpanded = false) {
+  function openCropFor(idx, slot) {
     const it = items[idx];
     if (!it || it.type !== "image" || !it.url) return;
-    const def = SIZE_DEF[sizeKey] || SIZE_DEF.m;
-    theCfg: {
-      const cfg = isExpanded ? EXPANDED : FIXED;
-      const colW = cfg.width / cfg.cols;
-      const rowH = cfg.row;
-      const aspect = (def.cols * colW) / (def.rows * rowH);
-      setCropAspect(aspect);
-    }
+    const aspect = slot?.aspect || 1.35;
+    setCropAspect(aspect);
     setCropIdx(idx);
     setCropSrc(it.url);
   }
@@ -675,7 +703,11 @@ function applyBanner(url) {
 
 
    
-  const preview = useMemo(() => items.slice(0, 8), [items]);
+  const PREVIEW_LIMIT = 6;
+  const preview = useMemo(() => items.slice(0, PREVIEW_LIMIT), [items]);
+  const previewRows = estimateGridRows(preview);
+  const previewHeight = computeGridHeight(previewRows, ROW_HEIGHTS.compact);
+
   function dataURLtoBlob(dataUrl) {
     const arr = dataUrl.split(",");
     const mime = arr[0].match(/:(.*?);/)[1];
@@ -713,7 +745,7 @@ function applyBanner(url) {
   }, [wlItems, wlQuery]);
 
   async function fetchWatchlist() {
-    if (!profileId) return;
+    if (!profileId || !user?.id) return;
     setWlLoading(true);
     setWlError("");
     try {
@@ -745,6 +777,9 @@ function applyBanner(url) {
     });
   }
   async function wlRemoveOne(item) {
+
+    if (!profileId || !user?.id) return;
+
     if (!item?.id) return;
     try {
       const { error } = await supabase
@@ -761,6 +796,8 @@ function applyBanner(url) {
     }
   }
   async function wlRemoveSelected() {
+    if (!profileId || !user?.id) return;
+
     const ids = Array.from(wlSelected);
     if (ids.length === 0) return;
     try {
@@ -1395,17 +1432,12 @@ async function handleSaveAll() {
 
     <div
       className="relative overflow-hidden rounded-xl border border-zinc-800 bg-black/30"
-      style={{ width: "100%", maxWidth: FIXED.width, height: FIXED.height }}
+      style={{ width: "100%", maxWidth: 720, height: previewHeight }}
     >
       {mbLoading ? (
         <div className="h-full w-full animate-pulse bg-zinc-900" />
       ) : items.length > 0 ? (
-        <CollageGrid
-          items={preview}
-          cols={FIXED.cols}
-          rowPx={FIXED.row}
-          canEdit={false}   // 🔒 disables all editing buttons inside grid
-        />
+        <CollageGrid items={preview} rowHeight={ROW_HEIGHTS.compact} />
       ) : (
         <div className="absolute inset-0 flex items-center justify-center text-sm text-zinc-500">
           No moodboard items yet. Add some from your profile page.
@@ -1627,115 +1659,66 @@ async function handleSaveAll() {
 }
 
 /* ================== Moodboard helpers ================== */
-function CollageGrid({ items, cols, rowPx, canEdit = false, onReplace, onRemove, onResize, onCrop }) {
-  const OVERLAP = 2;
+function CollageGrid({ items = [], rowHeight = ROW_HEIGHTS.compact }) {
+  if (!items.length) return null;
   return (
     <div
-      className="grid gap-0"
+      className="grid h-full"
       style={{
-        gridTemplateColumns: `repeat(${cols}, 1fr)`,
-        gridAutoRows: `${rowPx}px`,
-        overflow: "visible",
+        gridTemplateColumns: `repeat(${GRID_COLUMNS}, minmax(0, 1fr))`,
+        gridAutoRows: `${rowHeight}px`,
+        gap: `${GRID_GAP}px`,
+        width: "100%",
+        height: "100%",
+        gridAutoFlow: "dense",
       }}
     >
-      {items.map((it, i) => {
-        const sizeKey = it.size && SIZE_DEF[it.size] ? it.size : "m";
-        const def = SIZE_DEF[sizeKey];
-        const rotate = tiltForIndex(i);
-        const style = { margin: `-${OVERLAP}px`, transform: `rotate(${rotate}deg)` };
-        const commonCls =
-          "group relative overflow-visible select-none will-change-transform hover:z-20 hover:scale-[1.01] transition-transform";
-
-        if (it.type === "image") {
-          return (
-            <div key={i} className={`${commonCls} ${def.cls}`} style={style}>
-              <img src={it.url} alt={it.title || "Moodboard image"} className="h-full w-full object-cover block" loading="lazy" />
-              {canEdit && (
-                <div className="absolute inset-x-2 top-2 flex justify-end gap-2 opacity-0 transition group-hover:opacity-100">
-                  <button type="button" onClick={() => onResize(i)} className="rounded-md bg-black/70 px-2 py-1 text-xs text-white hover:bg-black/90" title="Resize">
-                    Resize
-                  </button>
-                  <button type="button" onClick={() => onCrop(i, sizeKey)} className="rounded-md bg-black/70 px-2 py-1 text-xs text-white hover:bg-black/90" title="Crop">
-                    <CropIcon className="h-3 w-3" />
-                  </button>
-                  <button type="button" onClick={() => onReplace(i)} className="rounded-md bg-black/70 px-2 py-1 text-xs text-white hover:bg-black/90">
-                    Replace
-                  </button>
-                  <button type="button" onClick={() => onRemove(i)} className="rounded-md bg-black/70 px-2 py-1 text-xs text-red-300 hover:bg-black/90" title="Remove">
-                    <Trash2 className="h-3 w-3" />
-                  </button>
-                </div>
-              )}
-            </div>
-          );
-        }
-
-        if (it.type === "quote") {
-          return (
-            <div key={i} className={`${commonCls} ${def.cls}`} style={style}>
-              <div className="flex h-full w-full items-center justify-center text-center bg-black/35 backdrop-blur-[1px] px-3 py-2">
-                <blockquote className="text-sm sm:text-base italic text-zinc-100 drop-shadow-[0_1px_1px_rgba(0,0,0,0.6)]">
-                  “{it.text}”
-                  {it.attribution ? <span className="mt-1 block text-xs not-italic text-zinc-200">— {it.attribution}</span> : null}
-                </blockquote>
-              </div>
-              {canEdit && (
-                <div className="absolute inset-x-2 top-2 flex justify-end gap-2 opacity-0 transition group-hover:opacity-100">
-                  <button type="button" onClick={() => onResize(i)} className="rounded-md bg-black/70 px-2 py-1 text-xs text-white hover:bg-black/90" title="Resize">
-                    Resize
-                  </button>
-                  <button type="button" onClick={() => onReplace(i)} className="rounded-md bg-black/70 px-2 py-1 text-xs text-white hover:bg-black/90">
-                    Edit
-                  </button>
-                  <button type="button" onClick={() => onRemove(i)} className="rounded-md bg-black/70 px-2 py-1 text-xs text-red-300 hover:bg-black/90" title="Remove">
-                    <Trash2 className="h-3 w-3" />
-                  </button>
-                </div>
-              )}
-            </div>
-          );
-        }
-
-        if (it.type === "color") {
-          return (
-            <div key={i} className={`${commonCls} ${def.cls}`} style={{ ...style, backgroundColor: it.hex || "#888888" }}>
-              <div className="absolute bottom-1 right-1 rounded bg-black/50 px-2 py-0.5 text-[10px] leading-none text-white">{it.hex}</div>
-              {canEdit && (
-                <div className="absolute inset-x-2 top-2 flex justify-end gap-2 opacity-0 transition group-hover:opacity-100">
-                  <button type="button" onClick={() => onResize(i)} className="rounded-md bg-black/70 px-2 py-1 text-xs text-white hover:bg-black/90" title="Resize">
-                    Resize
-                  </button>
-                  <button type="button" onClick={() => onReplace(i)} className="rounded-md bg-black/70 px-2 py-1 text-xs text-white hover:bg-black/90">
-                    Replace
-                  </button>
-                  <button type="button" onClick={() => onRemove(i)} className="rounded-md bg-black/70 px-2 py-1 text-xs text-red-300 hover:bg-black/90" title="Remove">
-                    <Trash2 className="h-3 w-3" />
-                  </button>
-                </div>
-              )}
-            </div>
-          );
-        }
-
-        // keyword
+      {items.map((item, index) => {
+        const sizeInfo = getPresetByKey(item.size);
+        const radius = sizeInfo.rows > 1 ? "26px" : "20px";
         return (
-          <div key={i} className={`${commonCls} ${def.cls}`} style={style}>
-            <div className="flex h-full w-full items-center justify-center">
-              <span className="bg-black/60 px-3 py-1 text-sm font-semibold uppercase tracking-wide text-white">
-                {it.text}
-              </span>
-            </div>
-            {canEdit && (
-              <div className="absolute inset-x-2 top-2 flex justify-end gap-2 opacity-0 transition group-hover:opacity-100">
-                <button type="button" onClick={() => onResize(i)} className="rounded-md bg-black/70 px-2 py-1 text-xs text-white hover:bg-black/90" title="Resize">
-                  Resize
-                </button>
-                <button type="button" onClick={() => onReplace(i)} className="rounded-md bg-black/70 px-2 py-1 text-xs text-white hover:bg-black/90">
-                  Edit
-                </button>
-                <button type="button" onClick={() => onRemove(i)} className="rounded-md bg-black/70 px-2 py-1 text-xs text-red-300 hover:bg-black/90" title="Remove">
-                  <Trash2 className="h-3 w-3" />
-                </button>
+          <div
+            key={`collage-${index}`}
+            style={{
+              gridColumn: `span ${sizeInfo.cols}`,
+              gridRow: `span ${sizeInfo.rows}`,
+              borderRadius: radius,
+              overflow: "hidden",
+              position: "relative",
+              backgroundColor: "rgba(0,0,0,0.02)",
+              border: "1px solid rgba(255,255,255,0.04)",
+            }}
+          >
+            {item.type === "image" ? (
+              <img
+                src={item.url}
+                alt={item.title || "Moodboard image"}
+                className="h-full w-full object-contain bg-black"
+                loading="lazy"
+              />
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center text-center px-3">
+                {item.type === "quote" && (
+                  <blockquote className="text-xs tracking-tight text-zinc-100">
+                    “{item.text}”
+                    {item.attribution && (
+                      <span className="mt-1 block text-[10px] not-italic text-zinc-300">
+                        — {item.attribution}
+                      </span>
+                    )}
+                  </blockquote>
+                )}
+                {item.type === "color" && (
+                  <div
+                    className="h-full w-full"
+                    style={{ backgroundColor: item.hex || "#888888" }}
+                  />
+                )}
+                {item.type === "keyword" && (
+                  <span className="rounded-full bg-black/60 px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-white">
+                    {item.text}
+                  </span>
+                )}
               </div>
             )}
           </div>
@@ -1744,7 +1727,6 @@ function CollageGrid({ items, cols, rowPx, canEdit = false, onReplace, onRemove,
     </div>
   );
 }
-
 /* ---------------- Add/Replace Dialog (Moodboard) ---------------- */
 function AddReplaceDialog({ onCancel, onConfirm, initialType = "image" }) {
   const [tab, setTab] = useState(initialType);

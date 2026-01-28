@@ -53,16 +53,19 @@ export default function PremiumPage() {
               </button>
             ) : (
               <button
-                onClick={async () => {
-                  try {
-                    setRedirecting(true);
-                    trackEvent("trial_started", { source: "premium_page" });
-                    await startCheckout();
-                  } catch (e) {
-                    console.error("Checkout error:", e);
-                  } finally {
-                    setRedirecting(false);
-                  }
+                onClick={() => {
+                  setRedirecting(true);
+
+                  // fire-and-forget analytics (do not block redirect)
+                  void trackEvent("trial_started", { source: "premium_page" });
+
+                  // allow UI to paint before network work
+                  requestAnimationFrame(() => {
+                    startCheckout().catch((e) => {
+                      console.error("Checkout error:", e);
+                      setRedirecting(false);
+                    });
+                  });
                 }}
                 disabled={!user || redirecting}
                 className="inline-flex items-center justify-center rounded-2xl px-6 py-3 font-semibold text-black bg-gradient-to-br from-yellow-300 to-amber-500 shadow-[0_0_30px_rgba(255,200,0,0.35)] ring-1 ring-yellow-300/60 hover:scale-[1.02] transition disabled:opacity-50 disabled:cursor-not-allowed"

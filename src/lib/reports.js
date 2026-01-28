@@ -1,5 +1,5 @@
 // src/lib/reports.js
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 
 /** Allowed values must match your Postgres enums exactly */
 export const REPORT_TARGETS = ["message", "post", "profile", "club"];

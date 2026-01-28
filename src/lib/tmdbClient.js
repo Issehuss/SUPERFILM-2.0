@@ -1,5 +1,5 @@
 // src/lib/tmdbClient.js
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 
 function _env(k) {
   try { if (typeof import.meta !== "undefined" && import.meta.env && k in import.meta.env) return import.meta.env[k]; } catch {}

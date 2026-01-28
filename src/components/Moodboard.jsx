@@ -1,11 +1,23 @@
 // src/components/Moodboard.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
-import supabase from "../supabaseClient";
-import { X, Plus, ArrowUpRight, Search, Upload, Trash2, Type, Palette } from "lucide-react";
+import supabase from "lib/supabaseClient";
+import Cropper from "react-easy-crop";
+import { X, Plus, ArrowUpRight, Search, Upload, Trash2, Type, Palette, Crop as CropIcon } from "lucide-react";
 import { searchMovies } from "../lib/tmdbClient"; // ✅ shared TMDB helper
 import { toast } from "react-hot-toast";
 import useEntitlements from "../hooks/useEntitlements";
 import { trackEvent } from "../lib/analytics";
+import {
+  GRID_COLUMNS,
+  GRID_GAP,
+  PREVIEW_GRID_COLUMNS,
+  PREVIEW_GRID_GAP,
+  ROW_HEIGHTS,
+  getAvailablePresets,
+  getPresetByKey,
+  estimateGridRows,
+  computeGridHeight,
+} from "./moodboardLayout";
 
 /**
  * Moodboard item types:
@@ -14,6 +26,24 @@ import { trackEvent } from "../lib/analytics";
  *  - { type: "color", hex, size?: ... }
  *  - { type: "keyword", text, size?: ... }
  */
+
+const CORS_PROXY_HOSTS = new Set(["image.tmdb.org"]);
+const CORS_PROXY_BASE = "https://images.weserv.nl/?url=";
+const CORS_PROXY_PARAMS = "&output=jpeg&il=1";
+
+function needsCorsProxy(url) {
+  try {
+    const host = new URL(url).host;
+    return CORS_PROXY_HOSTS.has(host);
+  } catch {
+    return false;
+  }
+}
+
+function buildProxyUrl(url) {
+  const trimmed = url.replace(/^https?:\/\//i, "");
+  return `${CORS_PROXY_BASE}${encodeURIComponent(trimmed)}${CORS_PROXY_PARAMS}`;
+}
 
 export default function Moodboard({
   profileId,
@@ -30,6 +60,32 @@ export default function Moodboard({
   const [adding, setAdding] = useState(false);
   const [replaceIndex, setReplaceIndex] = useState(null);
   const [error, setError] = useState("");
+  const [cropOpen, setCropOpen] = useState(false);
+  const [cropIdx, setCropIdx] = useState(null);
+  const [cropSrc, setCropSrc] = useState("");
+  const [cropAspect, setCropAspect] = useState(1.35);
+  const [cropZoom, setCropZoom] = useState(1.05);
+  const [cropPosition, setCropPosition] = useState({ x: 0, y: 0 });
+  const [cropPixels, setCropPixels] = useState(null);
+  const [cropBusy, setCropBusy] = useState(false);
+  const [cropError, setCropError] = useState("");
+  const slotRefs = useRef({});
+
+  const getSlotRef = (slotKey) => {
+    if (!slotKey) return null;
+    if (!slotRefs.current[slotKey]) {
+      slotRefs.current[slotKey] = { current: null };
+    }
+    return slotRefs.current[slotKey];
+  };
+
+  const measureSlotAspect = (slotKey) => {
+    const node = slotRefs.current[slotKey]?.current;
+    if (!node) return null;
+    const rect = node.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    return rect.width / rect.height;
+  };
 
   // Entitlements (limits with safe fallback)
   const { limits: rawLimits } = useEntitlements();
@@ -50,16 +106,6 @@ export default function Moodboard({
     window.addEventListener("sf:moodboard:updated", onUpdated);
     return () => window.removeEventListener("sf:moodboard:updated", onUpdated);
   }, [profileId]);
-
-  // Collage sizes → CSS spans
-  const SIZE_CLASSES = {
-    s: "col-span-2 row-span-2",
-    m: "col-span-3 row-span-2",
-    w: "col-span-4 row-span-2",
-    t: "col-span-2 row-span-3",
-  };
-  const SIZE_ORDER = ["m", "s", "w", "t"];
-  const OVERLAP = 2; // tiny overlap between tiles
 
   const cacheKey = profileId ? `sf.moodboard.cache.v1:${profileId}` : null;
   const lastRefreshRef = useRef({ key: refreshKey, tick: refreshTick });
@@ -135,32 +181,48 @@ export default function Moodboard({
   }, [profileId, refreshTick, disableAutoRefresh, cacheKey, refreshKey]);
 
   // Persist to DB (if available) + localStorage as backup
+  function safeStorageSet(storage, key, value) {
+    try {
+      storage?.setItem(key, value);
+    } catch (err) {
+      if (err?.name !== "QuotaExceededError") {
+        console.warn("[Moodboard] cache write failed:", err);
+      }
+    }
+  }
+
   async function persist(next) {
     setItems(next);
+    const serialized = JSON.stringify(next);
+    safeStorageSet(localStorage, "sf_moodboard_preview", serialized);
+    if (cacheKey) {
+      safeStorageSet(
+        sessionStorage,
+        cacheKey,
+        JSON.stringify({ ts: Date.now(), data: next })
+      );
+    }
+    if (!profileId) {
+      return { error: null };
+    }
     try {
-      localStorage.setItem("sf_moodboard_preview", JSON.stringify(next));
-      if (cacheKey) {
-        sessionStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), data: next }));
+      const { error } = await supabase
+        .from("profiles")
+        .update({ moodboard: next })
+        .eq("id", profileId);
+      if (!error && typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("sf:moodboard:updated", { detail: { profileId } })
+        );
       }
-      if (!profileId) return;
-      await supabase.from("profiles").update({ moodboard: next }).eq("id", profileId);
-    } catch {
-      // non-fatal
+      return { error };
+    } catch (err) {
+      return { error: err };
     }
   }
 
   function removeAt(idx) {
     const next = items.filter((_, i) => i !== idx);
-    persist(next);
-  }
-
-  function resizeAt(idx) {
-    const next = items.map((it, i) => {
-      if (i !== idx) return it;
-      const curr = it.size && SIZE_CLASSES[it.size] ? it.size : "m";
-      const nextSize = SIZE_ORDER[(SIZE_ORDER.indexOf(curr) + 1) % SIZE_ORDER.length];
-      return { ...it, size: nextSize };
-    });
     persist(next);
   }
 
@@ -225,7 +287,7 @@ export default function Moodboard({
   function addItem(newItem) {
     const normalized = normalizeItem(newItem);
     const idx = replaceIndex != null ? replaceIndex : items.length;
-    const seed = ["w", "t", "m", "s", "m", "s"];
+    const seed = ["w", "t", "b", "m", "s", "m"];
     const seeded = { ...normalized, size: normalized.size || seed[idx % seed.length] || "m" };
 
     // Safety: enforce limit in case something bypassed the button guard
@@ -253,7 +315,77 @@ export default function Moodboard({
     closeAddDialog();
   }
 
-  const preview = useMemo(() => items.slice(0, maxPreview), [items, maxPreview]);
+  function openCropperForTile(idx, slotKey) {
+    const tile = items[idx];
+    if (!tile || tile.type !== "image" || !tile.url) return;
+    setCropIdx(idx);
+    setCropSrc(needsCorsProxy(tile.url) ? buildProxyUrl(tile.url) : tile.url);
+    const measured = slotKey ? measureSlotAspect(slotKey) : null;
+    setCropAspect(measured || 1.35);
+    setCropPosition({ x: 0, y: 0 });
+    setCropZoom(1.05);
+    setCropPixels(null);
+    setCropError("");
+    setCropOpen(true);
+  }
+
+  function closeCropper() {
+    setCropOpen(false);
+    setCropIdx(null);
+    setCropSrc("");
+    setCropAspect(1.35);
+    setCropPosition({ x: 0, y: 0 });
+    setCropZoom(1.05);
+    setCropPixels(null);
+    setCropError("");
+  }
+
+  function handleCropComplete(_, areaPixels) {
+    setCropPixels(areaPixels);
+  }
+
+  async function handleCropSave() {
+    if (cropIdx == null || !cropSrc || !cropPixels) return;
+    setCropBusy(true);
+    setCropError("");
+    try {
+      const dataUrl = await getCroppedDataUrl(cropSrc, cropPixels);
+      const next = items.map((it, index) =>
+        index === cropIdx ? { ...it, url: dataUrl } : it
+      );
+      const { error: persistErr } = await persist(next);
+      if (persistErr) {
+        throw persistErr;
+      }
+      toast.success("Moodboard tile updated");
+      closeCropper();
+    } catch (err) {
+      console.error("[Moodboard] crop failed:", err);
+      const message = err?.message || "Couldn’t crop the image.";
+      setCropError(message);
+      toast.error(message);
+    } finally {
+      setCropBusy(false);
+    }
+  }
+
+  const previewItems = useMemo(() => items.slice(0, maxPreview), [items, maxPreview]);
+  const previewRows = estimateGridRows(previewItems, PREVIEW_GRID_COLUMNS);
+  const previewHeight = Math.max(
+    computeGridHeight(previewRows, ROW_HEIGHTS.compact, PREVIEW_GRID_GAP),
+    previewRows ? previewRows * ROW_HEIGHTS.compact : ROW_HEIGHTS.compact
+  );
+  const extraItems = isPremium && items.length > maxPreview ? items.slice(maxPreview) : [];
+  const expandedRows = estimateGridRows(items);
+  const expandedHeight = Math.max(
+    computeGridHeight(expandedRows, ROW_HEIGHTS.expanded),
+    ROW_HEIGHTS.expanded
+  );
+  const premiumExtraRows = estimateGridRows(extraItems);
+  const premiumExtraHeight = Math.max(
+    computeGridHeight(premiumExtraRows, ROW_HEIGHTS.expanded),
+    ROW_HEIGHTS.expanded
+  );
 
   const themed = usePremiumTheme || isPremium;
 
@@ -311,39 +443,98 @@ export default function Moodboard({
       </div>
       {/* helper text intentionally removed per request */}
 
-      {/* Collage preview: tight grid, no borders, slight overlap */}
-      <div className="grid grid-cols-6 auto-rows-[48px] sm:auto-rows-[60px] gap-0" style={{ overflow: "visible" }}>
-        {preview.map((it, i) => (
-          <Tile
-            key={i}
-            idx={i}
-            item={it}
-            canEdit={isOwner}
-            onReplace={() => openAddDialog({ replaceAt: i })}
-            onRemove={() => removeAt(i)}
-            onResize={() => resizeAt(i)}
-            sizeClasses={SIZE_CLASSES}
-            overlap={OVERLAP}
-            tight
-          />
-        ))}
-
-        {isOwner &&
-          Array.from({ length: Math.max(0, maxPreview - preview.length) }).map((_, i) => (
-            <button
-              key={`empty-${i}`}
-              type="button"
-              onClick={handleAddTileRequest}
-              className="col-span-2 row-span-2 -m-[2px] bg-zinc-900/20 text-zinc-400 hover:bg-zinc-900/40"
-              title="Add moodboard item"
-              style={{ outline: "none" }}
-            >
-              <div className="flex h-full w-full items-center justify-center">
-                <Plus className="h-6 w-6" />
-              </div>
-            </button>
-          ))}
+      {/* Collage preview: structured puzzle grid */}
+      <div
+        className="relative overflow-hidden rounded-xl border border-zinc-800 bg-black/30"
+        style={{ width: "100%", height: previewHeight }}
+      >
+        <div
+          className="grid h-full"
+          style={{
+            gridTemplateColumns: `repeat(${PREVIEW_GRID_COLUMNS}, minmax(0, 1fr))`,
+            gridAutoRows: `${ROW_HEIGHTS.compact}px`,
+            gap: `${PREVIEW_GRID_GAP}px`,
+            padding: "0",
+            height: "100%",
+            gridAutoFlow: "dense",
+          }}
+        >
+          {previewItems.map((item, index) => {
+            const slotKey = `preview-${index}`;
+            const slotRef = getSlotRef(slotKey);
+            const sizeInfo = getPresetByKey(item.size);
+            return (
+              <Tile
+                key={`preview-${index}`}
+                item={item}
+                sizeInfo={sizeInfo}
+                canEdit={isOwner}
+                slotRef={slotRef}
+                onReplace={() => openAddDialog({ replaceAt: index })}
+                onRemove={() => removeAt(index)}
+                onRequestCrop={
+                  isOwner ? () => openCropperForTile(index, slotKey) : undefined
+                }
+              />
+            );
+          })}
+        </div>
+        {!items.length && (
+          <div className="absolute inset-0 flex items-center justify-center text-sm text-zinc-500">
+            No moodboard items yet. Add some from your profile page.
+          </div>
+        )}
       </div>
+
+      {extraItems.length > 0 && (
+        <div className="mt-4">
+          <div className="mb-2 flex items-center justify-between text-[11px] uppercase tracking-[0.45em] text-zinc-500">
+            <span>Director’s Cut canvas</span>
+            <span className="text-[10px] text-yellow-300">
+              {extraItems.length} additional tile
+              {extraItems.length === 1 ? "" : "s"}
+            </span>
+          </div>
+          <div
+            className="relative overflow-hidden rounded-2xl border border-zinc-800 bg-black/20"
+            style={{ width: "100%", height: premiumExtraHeight }}
+          >
+            <div
+              className="grid h-full"
+              style={{
+                gridTemplateColumns: `repeat(${GRID_COLUMNS}, minmax(0, 1fr))`,
+                gridAutoRows: `${ROW_HEIGHTS.expanded}px`,
+                gap: `${GRID_GAP}px`,
+                padding: `${GRID_GAP / 2}px`,
+                height: "100%",
+                gridAutoFlow: "dense",
+              }}
+            >
+              {extraItems.map((item, index) => {
+                const slotKey = `premium-${index}`;
+                const slotRef = getSlotRef(slotKey);
+                const sizeInfo = getPresetByKey(item.size);
+                return (
+                  <Tile
+                    key={`premium-${index}`}
+                    item={item}
+                    sizeInfo={sizeInfo}
+                    canEdit={isOwner}
+                    slotRef={slotRef}
+                    onReplace={() =>
+                      openAddDialog({ replaceAt: maxPreview + index })
+                    }
+                    onRemove={() => removeAt(maxPreview + index)}
+                    onRequestCrop={
+                      isOwner ? () => openCropperForTile(maxPreview + index, slotKey) : undefined
+                    }
+                  />
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Fullscreen modal */}
       {open && (
@@ -360,37 +551,58 @@ export default function Moodboard({
               </button>
             </div>
 
-            {/* Collage fullscreen: taller rows, same tight style */}
-            <div className="grid grid-cols-6 auto-rows-[64px] sm:auto-rows-[80px] gap-0" style={{ overflow: "visible" }}>
-              {items.map((it, i) => (
-                <Tile
-                  key={`full-${i}`}
-                  idx={i}
-                  item={it}
-                  canEdit={isOwner}
-                  onReplace={() => openAddDialog({ replaceAt: i })}
-                  onRemove={() => removeAt(i)}
-                  onResize={() => resizeAt(i)}
-                  sizeClasses={SIZE_CLASSES}
-                  overlap={OVERLAP}
-                  tight
-                />
-              ))}
-
-              {isOwner && (
+            {/* Collage fullscreen: puzzle layout expanded */}
+            <div
+              className="grid h-full"
+              style={{
+                gridTemplateColumns: `repeat(${GRID_COLUMNS}, minmax(0, 1fr))`,
+                gridAutoRows: `${ROW_HEIGHTS.expanded}px`,
+                gap: `${GRID_GAP}px`,
+                height: expandedHeight,
+                gridAutoFlow: "dense",
+              }}
+            >
+              {items.length ? (
+                items.map((item, index) => {
+                  const slotKey = `expanded-${index}`;
+                  const slotRef = getSlotRef(slotKey);
+                  const sizeInfo = getPresetByKey(item.size);
+                  return (
+                    <Tile
+                      key={`full-${index}`}
+                      item={item}
+                      sizeInfo={sizeInfo}
+                      canEdit={isOwner}
+                      slotRef={slotRef}
+                      onReplace={() => openAddDialog({ replaceAt: index })}
+                      onRemove={() => removeAt(index)}
+                      onRequestCrop={
+                        isOwner ? () => openCropperForTile(index, slotKey) : undefined
+                      }
+                    />
+                  );
+                })
+              ) : (
+                <div
+                  className="flex items-center justify-center text-sm text-zinc-500"
+                  style={{ gridColumn: "1 / -1" }}
+                >
+                  No moodboard items yet. Add one to see them here.
+                </div>
+              )}
+            </div>
+            {isOwner && (
+              <div className="mt-4 flex justify-center">
                 <button
                   type="button"
                   onClick={handleAddTileRequest}
-                  className="col-span-2 row-span-2 -m-[2px] bg-zinc-900/20 text-zinc-400 hover:bg-zinc-900/40"
-                  title="Add moodboard item"
-                  style={{ outline: "none" }}
+                  className="inline-flex items-center gap-2 rounded-lg border border-zinc-700 px-3 py-1 text-xs font-semibold text-white hover:bg-zinc-900"
                 >
-                  <div className="flex h-full w-full items-center justify-center">
-                    <Plus className="h-6 w-6" />
-                  </div>
+                  <Plus className="h-4 w-4" />
+                  Add tile
                 </button>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </FullscreenModal>
       )}
@@ -401,7 +613,73 @@ export default function Moodboard({
           initialType="image"
           onCancel={closeAddDialog}
           onConfirm={addItem}
+          isPremium={isPremium}
         />
+      )}
+
+      {cropOpen && cropSrc && (
+        <div
+          className="fixed inset-0 z-[90] flex items-center justify-center bg-black/80 px-4 py-8"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div
+            className="relative w-full max-w-4xl overflow-hidden rounded-[32px] border border-zinc-800 bg-zinc-950 shadow-[0_20px_60px_rgba(0,0,0,0.9)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+              <div className="relative h-[70vh] bg-black">
+                <Cropper
+                  image={cropSrc}
+                  crop={cropPosition}
+                  zoom={cropZoom}
+                  aspect={cropAspect}
+                  onCropChange={setCropPosition}
+                  onZoomChange={setCropZoom}
+                  onCropComplete={handleCropComplete}
+                  restrictPosition={false}
+                  showGrid
+                  crossOrigin="anonymous"
+                />
+              </div>
+            <div className="flex flex-col gap-3 border-t border-zinc-900 px-4 py-4">
+              <div className="flex items-center gap-3 text-xs uppercase tracking-[0.2em] text-zinc-400">
+                <span>Adjust the crop to fit the tile</span>
+                <span className="ml-auto text-[11px] text-yellow-300">
+                  Aspect {cropAspect ? cropAspect.toFixed(2) : "auto"}
+                </span>
+              </div>
+              <input
+                type="range"
+                min="0.7"
+                max="4"
+                step="0.01"
+                value={cropZoom}
+                onChange={(e) => setCropZoom(Number(e.target.value))}
+                className="h-2 rounded-full bg-zinc-800 accent-yellow-400"
+              />
+              {cropError ? (
+                <p className="text-xs text-red-400">{cropError}</p>
+              ) : null}
+              <div className="flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={closeCropper}
+                  className="inline-flex items-center gap-2 rounded-full border border-zinc-800 px-3 py-1 text-xs font-semibold text-white hover:border-zinc-600"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCropSave}
+                  disabled={!cropPixels || cropBusy}
+                  className="inline-flex items-center gap-2 rounded-full bg-yellow-400 px-3 py-1 text-xs font-semibold text-black transition hover:bg-yellow-300 disabled:opacity-50"
+                >
+                  {cropBusy ? "Saving…" : "Save crop"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {error ? <p className="mt-3 text-sm text-red-400">{error}</p> : null}
@@ -413,7 +691,7 @@ export default function Moodboard({
 
 function normalizeItem(it) {
   if (!it) return null;
-  const size = it.size && ["s", "m", "w", "t"].includes(it.size) ? it.size : "m";
+  const size = it.size && ["s", "m", "w", "t", "b"].includes(it.size) ? it.size : "m";
   if (it.type === "image") {
     return { type: "image", url: it.url, source: it.source || "tmdb", title: it.title || "", size };
   }
@@ -435,53 +713,70 @@ function cleanHex(hex) {
   return `#${s}`;
 }
 
-// deterministic little tilt for that cutout feel
-function tiltForIndex(i) {
-  const angles = [-1.6, 0.8, -0.7, 1.2, -0.4, 0.6, 0, -0.9, 0.5, -0.3];
-  return angles[i % angles.length];
+async function getCroppedDataUrl(imageSrc, pixelCrop) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = pixelCrop.width;
+      canvas.height = pixelCrop.height;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(
+        image,
+        pixelCrop.x,
+        pixelCrop.y,
+        pixelCrop.width,
+        pixelCrop.height,
+        0,
+        0,
+        pixelCrop.width,
+        pixelCrop.height
+      );
+      try {
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
+        resolve(dataUrl);
+      } catch (err) {
+        reject(err);
+      }
+    };
+    image.onerror = reject;
+    image.src = imageSrc;
+  });
 }
 
-function Tile({
-  item,
-  idx = 0,
-  canEdit,
-  onReplace,
-  onRemove,
-  onResize,
-  sizeClasses,
-  overlap = 2,
-  tight = false,
-}) {
-  if (!item) return null;
-  const span = sizeClasses?.[item.size] || sizeClasses?.m || "";
-  const rotate = tiltForIndex(idx);
 
-  const wrapStyle = {
-    margin: tight ? `-${overlap}px` : undefined,
-    transform: `rotate(${rotate}deg)`,
+function Tile({ item, sizeInfo, canEdit, onReplace, onRemove, onRequestCrop, slotRef }) {
+  if (!item) return null;
+  const radius =
+    !sizeInfo || sizeInfo.rows > 1 ? "28px" : "20px";
+  const wrapperStyle = {
+    gridColumn: `span ${sizeInfo?.cols || 1}`,
+    gridRow: `span ${sizeInfo?.rows || 1}`,
+    borderRadius: radius,
+    overflow: "hidden",
+    position: "relative",
+    backgroundColor: "rgba(0,0,0,0.02)",
+    boxShadow: "0 16px 40px rgba(0,0,0,0.5)",
+    border: "1px solid rgba(255,255,255,0.04)",
   };
   const wrapperCls =
-    "group relative overflow-visible select-none will-change-transform hover:z-20 hover:scale-[1.01] transition-transform";
+    "group relative select-none overflow-hidden transition-all duration-200 hover:shadow-[0_26px_50px_rgba(0,0,0,0.55)]";
 
-  if (item.type === "image") {
-    return (
-      <div className={`${wrapperCls} ${span}`} style={wrapStyle}>
-        {/* eslint-disable-next-line jsx-a11y/img-redundant-alt */}
+  const content = (() => {
+    if (item.type === "image") {
+      return (
         <img
           src={item.url}
           alt={item.title || "Moodboard image"}
-          className="h-full w-full object-cover"
+          className="h-full w-full object-cover bg-black"
           loading="lazy"
           style={{ display: "block" }}
         />
-        {canEdit && <TileControls onReplace={onReplace} onRemove={onRemove} onResize={onResize} />}
-      </div>
-    );
-  }
-
-  if (item.type === "quote") {
-    return (
-      <div className={`${wrapperCls} ${span}`} style={wrapStyle}>
+      );
+    }
+    if (item.type === "quote") {
+      return (
         <div className="flex h-full w-full items-center justify-center text-center bg-black/35 backdrop-blur-[1px] px-3 py-2">
           <blockquote className="text-sm sm:text-base italic text-zinc-100 drop-shadow-[0_1px_1px_rgba(0,0,0,0.6)]">
             “{item.text}”
@@ -490,64 +785,70 @@ function Tile({
             ) : null}
           </blockquote>
         </div>
-        {canEdit && <TileControls onReplace={onReplace} onRemove={onRemove} onResize={onResize} />}
-      </div>
-    );
-  }
-
-  if (item.type === "color") {
-    return (
-      <div className={`${wrapperCls} ${span}`} style={{ ...wrapStyle, backgroundColor: item.hex || "#888888" }}>
-        <div className="absolute bottom-1 right-1 rounded bg-black/50 px-2 py-0.5 text-[10px] leading-none text-white">
-          {item.hex}
+      );
+    }
+    if (item.type === "color") {
+      return (
+        <div className="absolute inset-0" style={{ backgroundColor: item.hex || "#888888" }}>
+          <div className="absolute bottom-1 right-1 rounded bg-black/50 px-2 py-0.5 text-[10px] leading-none text-white">
+            {item.hex}
+          </div>
         </div>
-        {canEdit && <TileControls onReplace={onReplace} onRemove={onRemove} onResize={onResize} />}
-      </div>
-    );
-  }
-
-  if (item.type === "keyword") {
-    return (
-      <div className={`${wrapperCls} ${span}`} style={wrapStyle}>
+      );
+    }
+    if (item.type === "keyword") {
+      return (
         <div className="flex h-full w-full items-center justify-center">
           <span className="bg-black/60 px-3 py-1 text-sm font-semibold uppercase tracking-wide text-white">
             {item.text}
           </span>
         </div>
-        {canEdit && <TileControls onReplace={onReplace} onRemove={onRemove} onResize={onResize} />}
-      </div>
-    );
-  }
+      );
+    }
+    return null;
+  })();
 
-  return null;
+  return (
+    <div className={wrapperCls} style={wrapperStyle} ref={slotRef}>
+      {content}
+      {canEdit && (
+        <TileControls
+          onRequestCrop={onRequestCrop}
+          onReplace={onReplace}
+          onRemove={onRemove}
+        />
+      )}
+    </div>
+  );
 }
 
-function TileControls({ onReplace, onRemove, onResize }) {
+function TileControls({ onRequestCrop, onReplace, onRemove }) {
   return (
-    <div className="absolute inset-x-2 top-2 flex justify-end gap-2 opacity-0 transition group-hover:opacity-100">
-      <button
-        type="button"
-        onClick={onResize}
-        className="rounded-md bg-black/70 px-2 py-1 text-xs text-white hover:bg-black/90"
-        title="Resize"
-      >
-        Resize
-      </button>
-      <button
-        type="button"
-        onClick={onReplace}
-        className="rounded-md bg-black/70 px-2 py-1 text-xs text-white hover:bg-black/90"
-      >
-        Replace
-      </button>
-      <button
-        type="button"
-        onClick={onRemove}
-        className="rounded-md bg-black/70 px-2 py-1 text-xs text-red-300 hover:bg-black/90"
-        title="Remove"
-      >
-        <Trash2 className="h-3 w-3" />
-      </button>
+    <div className="absolute inset-x-2 top-2 flex items-center justify-between gap-2 opacity-0 transition group-hover:opacity-100">
+        <button
+          type="button"
+          onClick={onRequestCrop}
+          className="flex items-center gap-1 rounded-full bg-yellow-400/90 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-black shadow"
+        >
+          <CropIcon className="h-3 w-3" />
+          Crop
+        </button>
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={onReplace}
+          className="rounded-full bg-black/60 px-2 py-1 text-[10px] text-white hover:bg-black/80"
+        >
+          Replace
+        </button>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="rounded-full bg-red-500/90 px-2 py-1 text-[10px] text-white hover:bg-red-600"
+        >
+          <Trash2 className="h-3 w-3" />
+        </button>
+      </div>
     </div>
   );
 }
@@ -571,7 +872,7 @@ function FullscreenModal({ children, onClose }) {
 }
 
 /* ---------------- Add/Replace Dialog ---------------- */
-function AddReplaceDialog({ onCancel, onConfirm, initialType = "image" }) {
+function AddReplaceDialog({ onCancel, onConfirm, initialType = "image", isPremium = false }) {
   const [tab, setTab] = useState(initialType);
 
   // Quote / Color / Keyword
@@ -586,6 +887,25 @@ function AddReplaceDialog({ onCancel, onConfirm, initialType = "image" }) {
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
   const [tmdbErr, setTmdbErr] = useState("");
+  const presets = getAvailablePresets(isPremium);
+  const [selectedSize, setSelectedSize] = useState(presets[0]?.key || "m");
+  const [pendingImage, setPendingImage] = useState(null);
+  const resetImageSelection = () => {
+    setPendingImage(null);
+    setSelectedSize(presets[0]?.key || "m");
+  };
+
+  const handleDialogCancel = () => {
+    resetImageSelection();
+    onCancel();
+  };
+
+  useEffect(() => {
+    if (!presets.length) return;
+    setSelectedSize((prev) =>
+      presets.some((p) => p.key === prev) ? prev : presets[0].key
+    );
+  }, [presets]);
 
   async function searchTMDBLocal() {
     setTmdbErr("");
@@ -605,6 +925,19 @@ function AddReplaceDialog({ onCancel, onConfirm, initialType = "image" }) {
     }
   }
 
+  function handleImageConfirm() {
+    if (!pendingImage) return;
+    onConfirm({
+      type: "image",
+      url: pendingImage.url,
+      title: pendingImage.title,
+      source: pendingImage.source,
+      size: selectedSize,
+    });
+    resetImageSelection();
+    onCancel();
+  }
+
   function handleConfirm() {
     if (tab === "quote" && qText.trim()) {
       onConfirm({ type: "quote", text: qText.trim(), attribution: qAttr.trim() });
@@ -621,14 +954,13 @@ function AddReplaceDialog({ onCancel, onConfirm, initialType = "image" }) {
       onCancel();
       return;
     }
-    // Image flow handled by clicking a result
-    onCancel();
+    // Image flow handled via the size picker UI
   }
 
   return (
     <div
       className="fixed inset-0 z-[120] flex items-end justify-center bg-black/70 p-0 sm:items-center sm:p-6"
-      onClick={onCancel}
+      onClick={handleDialogCancel}
     >
       <div
         className="w-full max-w-2xl rounded-2xl border border-zinc-800 bg-zinc-950"
@@ -672,7 +1004,7 @@ function AddReplaceDialog({ onCancel, onConfirm, initialType = "image" }) {
 
           <button
             type="button"
-            onClick={onCancel}
+            onClick={handleDialogCancel}
             className="rounded-md border border-zinc-700 px-2 py-1 text-sm text-white hover:bg-zinc-900"
           >
             Cancel
@@ -720,13 +1052,11 @@ function AddReplaceDialog({ onCancel, onConfirm, initialType = "image" }) {
                             key={m.id}
                             type="button"
                             onClick={() => {
-                              onConfirm({
-                                type: "image",
+                              setPendingImage({
                                 url: poster,
                                 title: m.title || "",
                                 source: "tmdb",
                               });
-                              onCancel(); // close after picking
                             }}
                             className="aspect-[2/3] overflow-hidden rounded-md border border-zinc-800 hover:ring-2 hover:ring-yellow-500"
                             title="Use this image"
@@ -745,6 +1075,65 @@ function AddReplaceDialog({ onCancel, onConfirm, initialType = "image" }) {
                 </div>
 
                 {tmdbErr ? <p className="mt-2 text-xs text-red-400">{tmdbErr}</p> : null}
+                {pendingImage ? (
+                  <div className="rounded-2xl border border-zinc-800 bg-black/60 p-3 text-sm text-white shadow-lg">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                      <img
+                        src={pendingImage.url}
+                        alt="Selected still"
+                        className="h-20 w-32 rounded-md border border-zinc-700 object-contain"
+                      />
+                      <div className="flex-1 text-xs text-zinc-300">
+                        <p className="font-semibold text-white">
+                          {pendingImage.title || "Untitled film"}
+                        </p>
+                        <p>Choose a tile size for this image.</p>
+                      </div>
+                    </div>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                      {presets.map((preset) => (
+                        <button
+                          type="button"
+                          key={preset.key}
+                          onClick={() => setSelectedSize(preset.key)}
+                          className={`rounded-2xl border px-3 py-2 text-left text-xs font-semibold transition ${
+                            selectedSize === preset.key
+                              ? "border-yellow-400 bg-yellow-400/10 text-white shadow-[0_0_20px_rgba(250,204,21,0.35)]"
+                              : "border-zinc-800 text-zinc-300 hover:border-zinc-500"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span>{preset.label}</span>
+                            <span className="text-[10px] text-zinc-400">
+                              {preset.cols}×{preset.rows}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-zinc-500">{preset.description}</p>
+                        </button>
+                      ))}
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={handleImageConfirm}
+                        className="flex-1 rounded-full bg-yellow-500 px-4 py-2 text-sm font-semibold text-black hover:bg-yellow-400"
+                      >
+                        Add tile
+                      </button>
+                      <button
+                        type="button"
+                        onClick={resetImageSelection}
+                        className="rounded-full border border-zinc-700 px-4 py-2 text-sm text-white hover:border-zinc-500"
+                      >
+                        Choose another
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="mt-2 text-xs text-zinc-500">
+                    Select an image to choose a tile size.
+                  </p>
+                )}
               </div>
             </div>
           )}
@@ -819,7 +1208,8 @@ function AddReplaceDialog({ onCancel, onConfirm, initialType = "image" }) {
           <button
             type="button"
             onClick={handleConfirm}
-            className="rounded-md bg-yellow-500 px-3 py-1.5 text-sm font-medium text-black hover:bg-yellow-400"
+            disabled={tab === "image"}
+            className="rounded-md bg-yellow-500 px-3 py-1.5 text-sm font-medium text-black hover:bg-yellow-400 disabled:opacity-60 disabled:cursor-not-allowed"
           >
             Save
           </button>

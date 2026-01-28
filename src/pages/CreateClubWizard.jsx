@@ -1,7 +1,7 @@
 // src/pages/CreateClubWizard.jsx
 import React, { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import supabase from "../supabaseClient.js";
+import supabase from "lib/supabaseClient";
 import { useUser } from "../context/UserContext";
 import TmdbImage from "../components/TmdbImage";
 import { MapPin, ChevronDown } from "lucide-react";

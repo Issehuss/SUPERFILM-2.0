@@ -1,8 +1,10 @@
 // src/components/JoinClubButton.jsx
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import { requestToJoinClub } from "../utils/membershipRequests";
+import { useMembershipRefresh } from "../context/UserContext";
+import { hasRecentlyLeftClub } from "../lib/membershipCooldown";
 import toast from "react-hot-toast";
 
 /**
@@ -13,6 +15,7 @@ import toast from "react-hot-toast";
  */
 export default function JoinClubButton({ club, user, isMember }) {
   const navigate = useNavigate();
+  const { bumpMembership } = useMembershipRefresh();
 
   const [loading, setLoading] = useState(false);
   const [pending, setPending] = useState(false);
@@ -74,6 +77,10 @@ export default function JoinClubButton({ club, user, isMember }) {
   if (isMember) return null;
 
   async function handleJoin() {
+    if (hasRecentlyLeftClub(club?.id)) {
+      toast.error("You recently left this club. Give it a few minutes before rejoining.");
+      return;
+    }
     setLoading(true);
     try {
       // Re-read privacy mode from DB in case it changed
@@ -93,6 +100,7 @@ export default function JoinClubButton({ club, user, isMember }) {
 
         if (error && error.code !== "23505") throw error;
 
+        bumpMembership();
         toast.success("Joined the club!");
         // refresh to flip the gated UI
         window.location.reload();

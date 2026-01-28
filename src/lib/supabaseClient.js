@@ -1,4 +1,4 @@
-// src/supabaseClient.js
+// src/lib/supabaseClient.js
 import { createClient } from "@supabase/supabase-js";
 
 /* -------------------------------------------------------------------------- */
@@ -36,8 +36,8 @@ if (supabaseUrl?.startsWith("http://")) {
 const options = {
   auth: {
     persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true,
+    autoRefreshToken: false,
+    detectSessionInUrl: false,
   },
   global: {
     headers: {
@@ -57,6 +57,14 @@ if (functionsUrl) {
 
 const supabase = createClient(supabaseUrl, supabaseAnonKey, options);
 export default supabase;
+
+export async function refreshSupabaseSession() {
+  const { data, error } = await supabase.auth.refreshSession();
+  if (error) {
+    console.warn("[SF] session refresh failed", error.message);
+  }
+  return data;
+}
 
 /* -------------------------------------------------------------------------- */
 /*                        DEV MODE DEBUGGING HELPERS                           */

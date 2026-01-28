@@ -2,7 +2,7 @@
 // src/pages/SettingsPremium.jsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import { useUser } from "../context/UserContext";
 import { openBillingPortal, startCheckout } from "../lib/billing";
 import { toast } from "react-hot-toast";

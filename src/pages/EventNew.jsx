@@ -1,7 +1,7 @@
 // src/pages/EventNew.jsx
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import EventPosterPicker from "../components/EventPosterPicker.jsx";
 import "./Events.css";
 

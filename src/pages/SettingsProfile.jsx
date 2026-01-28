@@ -2,13 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-hot-toast";
 import { Bell, Download, Mail, Shield, Trash2 } from "lucide-react";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import { useUser } from "../context/UserContext";
 import { env } from "../lib/env";
 import { getPushSubscription, subscribeToPush, sendTestPush } from "../lib/push";
+import useMyClubs from "../hooks/useMyClubs";
 
 export default function SettingsProfile() {
-  const { user } = useUser();
+  const { user, profile, saveProfilePatch } = useUser();
   const navigate = useNavigate();
   const [currentEmail, setCurrentEmail] = useState("");
   const [newEmail, setNewEmail] = useState("");
@@ -18,6 +19,9 @@ export default function SettingsProfile() {
   const [pushStatus, setPushStatus] = useState("default");
   const [pushBusy, setPushBusy] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(false);
+  const { clubs: myClubs, loading: clubsLoading } = useMyClubs();
+  const [savingPrimary, setSavingPrimary] = useState(false);
+  const [localPrimaryClubId, setLocalPrimaryClubId] = useState(profile?.primary_club_id || null);
 
   const defaultPrefs = useMemo(
     () => ({
@@ -38,6 +42,10 @@ export default function SettingsProfile() {
       setPrefs(defaultPrefs);
     }
   }, [user?.email, user?.user_metadata?.notification_prefs, defaultPrefs]);
+
+  useEffect(() => {
+    setLocalPrimaryClubId(profile?.primary_club_id || null);
+  }, [profile?.primary_club_id]);
 
   useEffect(() => {
     let mounted = true;
@@ -117,6 +125,33 @@ export default function SettingsProfile() {
       toast.error(err?.message || "Couldn’t save preferences.");
     } finally {
       setSavingPrefs(false);
+    }
+  };
+
+  const handleSelectPrimary = async (clubId) => {
+    if (!user?.id || savingPrimary) return;
+    const clearing = clubId === localPrimaryClubId;
+    setSavingPrimary(true);
+    setLocalPrimaryClubId(clearing ? null : clubId);
+    try {
+      await saveProfilePatch({ primary_club_id: clearing ? null : clubId });
+      if (clearing) {
+        toast("Primary club cleared.", { icon: "ℹ️" });
+      } else {
+        toast.success("Primary club updated.");
+      }
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(
+          new CustomEvent("sf:primary-club:changed", {
+            detail: { clubId: clearing ? null : clubId },
+          })
+        );
+      }
+    } catch (err) {
+      toast.error(err?.message || "Couldn’t save your primary club.");
+      setLocalPrimaryClubId(profile?.primary_club_id || null);
+    } finally {
+      setSavingPrimary(false);
     }
   };
 
@@ -359,6 +394,68 @@ export default function SettingsProfile() {
             </span>
           </button>
         </div>
+      </section>
+      <section className="rounded-2xl border border-zinc-800 bg-black/40 p-6 space-y-4">
+        <div className="flex items-center justify-between gap-4">
+          <div className="text-sm font-semibold text-zinc-200 flex items-center gap-2">
+            <span className="h-4 w-4 rounded-full bg-emerald-500" />
+            Club Settings
+          </div>
+          <p className="text-xs text-zinc-400 max-w-[30ch] text-right">
+            Highlight one club as your primary club for Home, leaderboard, and dropdown indicators.
+          </p>
+        </div>
+        {clubsLoading && !myClubs.length ? (
+          <div className="text-sm text-zinc-400">Loading clubs…</div>
+        ) : !myClubs.length ? (
+          <div className="text-sm text-zinc-400">
+            You’re not a member of any clubs yet. Join a club to feature it here.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {myClubs.map((clubOption) => {
+              const isPrimary = clubOption.id === localPrimaryClubId;
+              return (
+                <button
+                  key={clubOption.id}
+                  type="button"
+                  onClick={() => handleSelectPrimary(clubOption.id)}
+                  disabled={savingPrimary && !isPrimary}
+                  className={`w-full rounded-2xl border px-4 py-3 text-left transition focus:outline-none ${
+                    isPrimary
+                      ? "border-emerald-500/70 bg-emerald-500/5 shadow-[0_0_15px_rgba(16,185,129,0.25)]"
+                      : "border-white/10 bg-transparent hover:border-white/30"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                        <span>{clubOption.name}</span>
+                        {isPrimary && (
+                          <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-300">
+                            Primary
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-zinc-500">ID: {clubOption.id}</div>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-zinc-400">
+                      <span
+                        className={`h-3 w-3 rounded-full border ${
+                          isPrimary ? "bg-emerald-400 border-emerald-300" : "border-white/30"
+                        }`}
+                      />
+                      <span>{isPrimary ? "Featured club" : "Set as primary"}</span>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        <p className="text-xs text-zinc-500">
+          This choice is read-only elsewhere on the site and only determines which club is highlighted.
+        </p>
       </section>
     </div>
   );

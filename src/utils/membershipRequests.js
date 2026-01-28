@@ -1,4 +1,4 @@
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import { createNotification } from "./notify";
 
 export async function requestToJoinClub(clubId) {
@@ -6,14 +6,15 @@ export async function requestToJoinClub(clubId) {
     const userId = auth?.user?.id;
     if (!userId) throw new Error("Sign in first.");
   
-    const { error } = await supabase.rpc("upsert_membership_request", {
-      p_club_id: clubId,
-      p_user_id: userId,
-    });
-  
-    if (error) throw error;
+  const { error } = await supabase.rpc("upsert_membership_request", {
+    p_club_id: clubId,
+    p_user_id: userId,
+  });
 
-    // Notify club presidents about the new request
+  if (error) throw error;
+
+  // Notify club presidents about the new request
+  (async () => {
     try {
       // If the SECURITY DEFINER RPC exists, prefer it (bypasses RLS safely)
       const { error: rpcNotifyErr } = await supabase.rpc("notify_membership_request", {
@@ -21,7 +22,7 @@ export async function requestToJoinClub(clubId) {
         p_requester_id: userId,
       });
       if (!rpcNotifyErr) {
-        return { ok: true };
+        return;
       }
 
       // Fallback to client-side notification inserts (may be blocked by RLS)
@@ -69,6 +70,7 @@ export async function requestToJoinClub(clubId) {
     } catch (notifyErr) {
       console.warn("[membership request notify] failed", notifyErr?.message || notifyErr);
     }
+  })();
 
-    return { ok: true };
-  }
+  return { ok: true };
+}

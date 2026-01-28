@@ -1,5 +1,5 @@
 // src/lib/leaveClub.js
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 
 export async function leaveClubAndMaybeDelete(clubId) {
   const { data, error } = await supabase.rpc("leave_club_and_maybe_delete", {

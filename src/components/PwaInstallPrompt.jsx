@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-
-const DISMISS_KEY = "sf:pwa-install-dismissed";
+import {
+  getPwaInstallFlags,
+  markPwaInstalled,
+  markPwaPromptDismissed,
+  PWA_INSTALL_SYNC_EVENT,
+} from "../constants/pwaInstall";
 
 function isIos() {
   if (typeof window === "undefined") return false;
@@ -19,16 +23,17 @@ function isStandalone() {
 
 export default function PwaInstallPrompt() {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
-  const [dismissed, setDismissed] = useState(false);
+  const [flags, setFlags] = useState(() => getPwaInstallFlags());
   const ios = useMemo(() => isIos(), []);
   const standalone = useMemo(() => isStandalone(), []);
   const navigate = useNavigate();
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    try {
-      setDismissed(localStorage.getItem(DISMISS_KEY) === "1");
-    } catch {}
+    function updateFlagState() {
+      setFlags(getPwaInstallFlags());
+    }
+    updateFlagState();
 
     function onBeforeInstallPrompt(e) {
       e.preventDefault();
@@ -36,21 +41,24 @@ export default function PwaInstallPrompt() {
     }
 
     window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
-    return () => window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+    window.addEventListener(PWA_INSTALL_SYNC_EVENT, updateFlagState);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+      window.removeEventListener(PWA_INSTALL_SYNC_EVENT, updateFlagState);
+    };
   }, []);
 
-  if (standalone || dismissed) return null;
+  if (standalone || flags.dismissed || flags.installed) return null;
   if (!deferredPrompt && !ios) return null;
 
   const dismiss = () => {
-    setDismissed(true);
-    try {
-      localStorage.setItem(DISMISS_KEY, "1");
-    } catch {}
+    markPwaPromptDismissed();
+    setFlags((prev) => ({ ...prev, dismissed: true }));
   };
 
   const handleInstall = () => {
-    dismiss();
+    markPwaInstalled();
+    setFlags({ dismissed: true, installed: true });
     navigate("/pwa");
   };
 

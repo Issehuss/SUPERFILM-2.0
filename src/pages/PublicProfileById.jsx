@@ -1,7 +1,7 @@
 // src/pages/PublicProfileById.jsx
 import { useEffect, useMemo, useState } from "react";
 import { useParams, Navigate } from "react-router-dom";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import PublicProfile from "./PublicProfile";
 
 /**

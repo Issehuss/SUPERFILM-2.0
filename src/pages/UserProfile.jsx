@@ -1,9 +1,9 @@
 // src/pages/UserProfile.jsx
-import React, { useState, useEffect, useMemo, useRef, lazy, Suspense } from "react";
+import React, { useCallback, useState, useEffect, useMemo, useRef, lazy, Suspense } from "react";
 import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { toast } from "react-hot-toast";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import { fetchActiveScheme } from "../lib/ratingSchemes";
 import RatingSchemeView from "../components/RatingSchemeView";
 import DirectorsCutBadge from "../components/DirectorsCutBadge";
@@ -18,6 +18,9 @@ import FilmTakeCard from "../components/FilmTakeCard.jsx";
 import uploadAvatar from "../lib/uploadAvatar";
 import { PROFILE_SELECT } from "../lib/profileSelect";
 import ProfileSkeleton from "../components/ProfileSkeleton";
+import useAppResume from "../hooks/useAppResume";
+import useHydratedSupabaseFetch from "../hooks/useHydratedSupabaseFetch";
+import isAbortError from "lib/isAbortError";
 
 
 
@@ -128,6 +131,7 @@ async function loadAnyProfileLocal(identifier) {
     if (usernameErr) throw usernameErr;
     return byUsername || null;
   } catch (e) {
+    if (isAbortError(e)) return null;
     console.error("[loadAnyProfileLocal] failed:", e);
     return null;
   }
@@ -192,94 +196,6 @@ function Stars5({ value = 0, size = 14 }) {
   );
 }
 
-function ClubTakeItem({ t, showUser = false, canEdit = false, onRemove }) {
-  const poster = t.movie?.poster || t.movie_poster || t.poster || null;
-  const title = t.movie?.title || t.movie_title || t.title || "Untitled";
-  const year = t.movie?.year ?? t.movie_year ?? null;
-
-  const rating5 =
-    typeof t.rating_5 === "number"
-      ? t.rating_5
-      : typeof t.rating === "number"
-      ? t.rating
-      : null;
-
-  const clubName = t.club?.name || t.club_name || null;
-  const clubSlug = t.club?.slug || t.club_slug || null;
-  const clubId = t.club?.id || t.club_id || null;
-  const clubHref = clubSlug ? `/clubs/${clubSlug}` : clubId ? `/clubs/${clubId}` : "#";
-
-  return (
-    <li className="group rounded-2xl border border-zinc-800 bg-zinc-950/60 p-3 hover:bg-zinc-900/60 transition">
-      <div className="flex items-start gap-3">
-        {poster ? (
-          <img
-            src={poster}
-            alt={title}
-            className="h-16 w-12 rounded-md object-cover border border-zinc-800"
-            loading="lazy"
-          />
-        ) : null}
-
-        <div className="min-w-0 flex-1">
-          <div className="text-sm text-zinc-300">
-            {showUser && t.user?.name ? (
-              <span className="font-semibold text-white">{t.user.name}</span>
-            ) : (
-              <span className="font-semibold text-white">You</span>
-            )}{" "}
-            contributed to{" "}
-            {clubName ? (
-              <a href={clubHref} className="font-semibold text-white hover:underline">
-                {clubName}
-              </a>
-            ) : (
-              <span className="font-semibold text-white">a club</span>
-            )}
-            ’s review of <span className="font-semibold text-white">{title}</span>
-            {year ? <span className="text-zinc-500"> ({year})</span> : null}
-          </div>
-
-          <div className="mt-1 flex items-center gap-3">
-            {typeof rating5 === "number" ? (
-              <div className="flex items-center gap-2">
-                <Stars5 value={rating5} />
-                <span className="text-xs text-zinc-400">{rating5}/5</span>
-              </div>
-            ) : null}
-
-            {typeof t.club_avg_5 === "number" ? (
-              <span className="text-xs text-zinc-400">Club avg {t.club_avg_5}/5</span>
-            ) : null}
-
-            {t.contributors > 1 ? (
-              <span className="text-xs rounded-full bg-white/10 px-2 py-0.5">
-                {t.contributors} contributors
-              </span>
-            ) : null}
-
-            <span className="ml-auto text-xs text-zinc-500">
-              {timeAgo(t.created_at || t.updated_at || new Date().toISOString())}
-            </span>
-          </div>
-
-          {t.blurb ? (
-            <p className="mt-2 text-sm text-zinc-200 line-clamp-3">{t.blurb}</p>
-          ) : null}
-
-          {canEdit && (
-            <div className="mt-2 flex justify-end">
-              <button onClick={onRemove} className="text-xs text-zinc-400 hover:text-red-400">
-                remove
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-    </li>
-  );
-}
-
 /* ============================ PAGE ============================ */
 const UserProfile = () => {
   const location = useLocation();
@@ -290,19 +206,364 @@ const UserProfile = () => {
     profile,
     setAvatar,
     saveProfilePatch,
-    refreshProfile,
     loading,
+    sessionLoaded,
   } = useUser();
-  
+  const { appResumeTick, ready: resumeReady } = useAppResume();
+
+  const identifier = routeSlug || routeId || null;
+  const hasWindow = typeof window !== "undefined";
+  const cachedProfileFromStorage =
+    hasWindow && identifier ? readProfileCache(identifier) : null;
+  const resolvedProfileId = identifier || profile?.id;
+  const statsCache = useMemo(() => {
+    if (!hasWindow || !resolvedProfileId) return null;
+    return readSectionCache(sectionCacheKey(resolvedProfileId, "stats"));
+  }, [hasWindow, resolvedProfileId]);
+  const filmTakesCache = useMemo(() => {
+    if (!hasWindow || !resolvedProfileId) return null;
+    return readSectionCache(sectionCacheKey(resolvedProfileId, "film_takes"));
+  }, [hasWindow, resolvedProfileId]);
+  const profileWatchlistCache = useMemo(() => {
+    if (!hasWindow || !resolvedProfileId) return null;
+    return readSectionCache(sectionCacheKey(resolvedProfileId, "profile_watchlist"));
+  }, [hasWindow, resolvedProfileId]);
+  const tasteCardsCache = useMemo(() => {
+    if (!hasWindow || !resolvedProfileId) return null;
+    return readSectionCache(sectionCacheKey(resolvedProfileId, "taste_cards"));
+  }, [hasWindow, resolvedProfileId]);
+  const [profileRefreshEpoch, setProfileRefreshEpoch] = useState(0);
+  const triggerProfileRefresh = useCallback(() => {
+    setProfileRefreshEpoch((prev) => prev + 1);
+  }, []);
+  const {
+    data: hydratedProfile,
+  } = useHydratedSupabaseFetch(
+    async () => {
+      if (!identifier) return profile || null;
+      const loaded = await loadAnyProfileLocal(identifier);
+      return loaded || null;
+    },
+    [identifier, profileRefreshEpoch],
+    {
+      sessionLoaded,
+      userId: user?.id || null,
+      initialData:
+        cachedProfileFromStorage ||
+        (!identifier ? profile || null : null),
+      timeoutMs: 8000,
+      enabled: Boolean(sessionLoaded),
+    }
+  );
 
   // this is the profile we actually render (could be me, could be someone else)
-  const [viewProfile, setViewProfile] = useState(null);
+  const [viewProfile, setViewProfile] = useState(() => {
+    if (cachedProfileFromStorage) return cachedProfileFromStorage;
+    if (!identifier) return profile || null;
+    return null;
+  });
+  const [profileWatchlist, setProfileWatchlist] = useState(() => profileWatchlistCache ?? []);
+  const isOwnProfile = Boolean(user?.id && viewProfile?.id && user.id === viewProfile.id);
   const [displayProfile, setDisplayProfile] = useState(null);
-  const [viewLoading, setViewLoading] = useState(true);
-  const [refreshTick, setRefreshTick] = useState(0);
+  const [viewLoading, setViewLoading] = useState(() => {
+    if (!identifier) return false;
+    return !Boolean(cachedProfileFromStorage);
+  });
+  const defaultStatsState = {
+    roleBadge: null,
+    roleClub: null,
+    counts: { followers: 0, following: 0 },
+  };
+  const [shownStats, setShownStats] = useState(statsCache ?? defaultStatsState);
+  const counts = shownStats?.counts ?? defaultStatsState.counts;
+  const roleBadge = shownStats?.roleBadge ?? defaultStatsState.roleBadge;
+  const roleClub = shownStats?.roleClub ?? defaultStatsState.roleClub;
+  const latestRefreshRef = useRef(profileRefreshEpoch);
   const lastProfileRefreshRef = useRef(0);
-  const lastStatsRefreshRef = useRef(0);
-  const lastTakesRefreshRef = useRef(0);
+  const displayHydrationIdleRef = useRef(null);
+  const schemeIdleRef = useRef(null);
+  const userProfileInitialRef = useRef(null);
+  const cancelQueuedIdle = useCallback((handle) => {
+    if (!handle) return;
+    if (typeof window !== "undefined" && "cancelIdleCallback" in window) {
+      window.cancelIdleCallback(handle);
+    } else {
+      clearTimeout(handle);
+    }
+  }, []);
+  const scheduleDisplayHydration = useCallback(
+    (profileId, fallbackAvatar, requestId) => {
+      if (!profileId) return;
+      cancelQueuedIdle(displayHydrationIdleRef.current);
+      const run = async () => {
+        displayHydrationIdleRef.current = null;
+        try {
+          const { data: displayData, error: displayError } = await supabase.rpc(
+            "get_profile_display",
+            {
+              p_user_id: profileId,
+            }
+          );
+          if (requestId !== latestRefreshRef.current) return;
+          if (!displayError && displayData) {
+            const displaySource = {
+              ...displayData,
+            };
+            if (!displaySource.avatar_url && fallbackAvatar) {
+              displaySource.avatar_url = fallbackAvatar;
+            }
+            setDisplayProfile(displaySource);
+          }
+        } catch (error) {
+        console.error("[UserProfile] display hydration failed:", error);
+        }
+      };
+
+      if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+        displayHydrationIdleRef.current = window.requestIdleCallback(run, { timeout: 2000 });
+      } else {
+        displayHydrationIdleRef.current = setTimeout(run, 0);
+      }
+    },
+    [cancelQueuedIdle]
+  );
+
+  useEffect(() => {
+    return () => {
+      cancelQueuedIdle(displayHydrationIdleRef.current);
+      cancelQueuedIdle(schemeIdleRef.current);
+    };
+  }, [cancelQueuedIdle]);
+  const {
+    data: statsResult,
+  } = useHydratedSupabaseFetch(
+    async () => {
+      if (!viewProfile?.id) return null;
+      const profileId = viewProfile.id;
+      const { data: rolesRow, error: rolesError } = await supabase
+        .from("profile_roles")
+        .select("roles")
+        .eq("user_id", profileId)
+        .maybeSingle();
+      if (rolesError) throw rolesError;
+      const roles = rolesRow?.roles || [];
+      const top = roles[0] || null;
+      const nextRoleClub = top
+        ? {
+            club_slug: top.club_slug,
+            club_name: top.club_name,
+            club_id: top.club_id,
+          }
+        : null;
+      const { data: fc, error: countsError } = await supabase
+        .from("follow_counts")
+        .select("followers, following")
+        .eq("user_id", profileId)
+        .maybeSingle();
+      if (countsError) throw countsError;
+      return {
+        roleBadge: top?.role || null,
+        roleClub: nextRoleClub,
+        counts: fc || { followers: 0, following: 0 },
+      };
+    },
+    [viewProfile?.id, profileRefreshEpoch],
+    {
+      sessionLoaded,
+      userId: user?.id || null,
+      initialData: statsCache || null,
+      timeoutMs: 8000,
+      enabled: Boolean(sessionLoaded && viewProfile?.id),
+    }
+  );
+
+  useEffect(() => {
+    if (!statsResult) return;
+    setShownStats(statsResult);
+    if (viewProfile?.id) {
+      writeSectionCache(sectionCacheKey(viewProfile.id, "stats"), statsResult);
+    }
+  }, [statsResult, viewProfile?.id]);
+
+  const {
+    data: filmTakesResult,
+    loading: filmTakesLoading,
+  } = useHydratedSupabaseFetch(
+    async () => {
+      if (!viewProfile?.id) return [];
+      const { data, error } = await supabase
+        .from("club_film_takes")
+        .select(FILM_TAKES_SELECT)
+        .eq("is_archived", false)
+        .order("created_at", { ascending: false })
+        .limit(20);
+      if (error) throw error;
+      return Array.isArray(data)
+        ? data.map((t) => ({
+            id: t.id,
+            user_id: t.user_id,
+            club_id: t.club_id,
+            film_id: t.film_id,
+            film_title: t.film_title,
+            title: t.film_title,
+            text: t.take || t.text || "",
+            rating_5:
+              typeof t.rating_5 === "number" ? t.rating_5 : t.rating || null,
+            aspect_key: t.aspect_key,
+            poster_path: t.poster_path,
+            created_at: t.created_at,
+            updated_at: t.updated_at,
+            screening_id: t.screening_id,
+          }))
+        : [];
+    },
+    [viewProfile?.id, profileRefreshEpoch],
+    {
+      sessionLoaded,
+      userId: user?.id || null,
+      initialData: filmTakesCache || [],
+      timeoutMs: 8000,
+      enabled: Boolean(sessionLoaded && viewProfile?.id),
+    }
+  );
+
+  useEffect(() => {
+    if (!Array.isArray(filmTakesResult)) return;
+    setFilmTakes(filmTakesResult);
+    setFilmTakesHasContent((prev) => prev || filmTakesResult.length > 0);
+    if (viewProfile?.id) {
+      writeSectionCache(
+        sectionCacheKey(viewProfile.id, "film_takes"),
+        filmTakesResult
+      );
+    }
+  }, [filmTakesResult, viewProfile?.id]);
+
+  const {
+    data: profileWatchlistResult,
+    showSkeleton: profileWatchlistSkeleton,
+  } = useHydratedSupabaseFetch(
+    async () => {
+      if (!isOwnProfile || !viewProfile?.id) return [];
+      const { data, error } = await supabase
+        .from("user_watchlist")
+        .select("id, movie_id, title, poster_path")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return Array.isArray(data)
+        ? data.map((item) => ({
+            id: item.id,
+            movie_id: item.movie_id,
+            title: item.title,
+            poster_path: item.poster_path,
+          }))
+        : [];
+    },
+    [viewProfile?.id, isOwnProfile, profileRefreshEpoch],
+    {
+      sessionLoaded,
+      userId: user?.id || null,
+      initialData: profileWatchlistCache || [],
+      timeoutMs: 8000,
+      enabled: Boolean(sessionLoaded && isOwnProfile && user?.id && viewProfile?.id),
+    }
+  );
+
+  useEffect(() => {
+    if (!Array.isArray(profileWatchlistResult)) return;
+    setProfileWatchlist(profileWatchlistResult);
+    if (viewProfile?.id) {
+      writeSectionCache(
+        sectionCacheKey(viewProfile.id, "profile_watchlist"),
+        profileWatchlistResult
+      );
+    }
+  }, [profileWatchlistResult, viewProfile?.id]);
+
+  useEffect(() => {
+    if (isOwnProfile) return;
+    setProfileWatchlist([]);
+  }, [isOwnProfile]);
+
+  const {
+    data: tasteCardsResult,
+    showSkeleton: tasteCardsSkeleton,
+  } = useHydratedSupabaseFetch(
+    async () => {
+      if (!viewProfile?.id) return null;
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("taste_cards, taste_card_style_global")
+        .eq("id", viewProfile.id)
+        .maybeSingle();
+      if (error) throw error;
+      return {
+        cards: Array.isArray(data?.taste_cards) ? data.taste_cards : [],
+        glow: data?.taste_card_style_global ?? null,
+      };
+    },
+    [viewProfile?.id, profileRefreshEpoch],
+    {
+      sessionLoaded,
+      userId: user?.id || null,
+      initialData: tasteCardsCache ?? { cards: [], glow: null },
+      timeoutMs: 8000,
+      enabled: Boolean(sessionLoaded && viewProfile?.id),
+    }
+  );
+
+  useEffect(() => {
+    if (!tasteCardsResult) return;
+    setLiveTasteCards(tasteCardsResult.cards ?? []);
+    setLiveGlobalGlow(tasteCardsResult.glow ?? null);
+    tasteCardsHydratedRef.current = true;
+    if (viewProfile?.id) {
+      writeSectionCache(
+        sectionCacheKey(viewProfile.id, "taste_cards"),
+        tasteCardsResult
+      );
+    }
+  }, [tasteCardsResult, viewProfile?.id]);
+
+  useEffect(() => {
+    profileWatchlistHydratedRef.current = Boolean(profileWatchlistCache);
+    setProfileWatchlist(profileWatchlistCache ?? []);
+  }, [profileWatchlistCache]);
+
+  useEffect(() => {
+    tasteCardsHydratedRef.current = Boolean(tasteCardsCache);
+    if (tasteCardsCache) {
+      setLiveTasteCards(tasteCardsCache.cards ?? []);
+      setLiveGlobalGlow(tasteCardsCache.glow ?? null);
+    } else {
+      setLiveTasteCards(
+        Array.isArray(profile?.taste_cards) ? profile.taste_cards : []
+      );
+      setLiveGlobalGlow(profile?.taste_card_style_global ?? null);
+    }
+  }, [tasteCardsCache, profile?.taste_cards, profile?.taste_card_style_global]);
+  const schemeRequestRef = useRef(0);
+  const bumpWatchlistRefresh = useCallback(() => {
+    triggerProfileRefresh();
+  }, [triggerProfileRefresh]);
+
+  useEffect(() => {
+    if (!sessionLoaded || !identifier) return;
+    if (userProfileInitialRef.current === identifier) return;
+    userProfileInitialRef.current = identifier;
+    triggerProfileRefresh();
+  }, [sessionLoaded, identifier, triggerProfileRefresh]);
+
+  useEffect(() => {
+    if (!resumeReady || !sessionLoaded) return;
+    if (appResumeTick === 0) return;
+    triggerProfileRefresh();
+  }, [appResumeTick, resumeReady, sessionLoaded, triggerProfileRefresh]);
+
+  useEffect(() => {
+    if (!sessionLoaded || identifier) return;
+    setProfileRefreshEpoch((epoch) => epoch + 1);
+  }, [sessionLoaded, identifier]);
 
   // View vs edit
   const [editMode, setEditMode] = useState(false);
@@ -310,36 +571,37 @@ const UserProfile = () => {
 
   // Avatar editing
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
-  const fileInputRef = useRef(null);
 
   // Banner overrides (local only)
   const [bannerOverride, setBannerOverride] = useState(null);
   const [bannerGradientOverride, setBannerGradientOverride] = useState(null);
 
   // Taste cards live state
-  const [liveTasteCards, setLiveTasteCards] = useState(
-    Array.isArray(profile?.taste_cards) ? profile.taste_cards : []
+  const [liveTasteCards, setLiveTasteCards] = useState(() =>
+    tasteCardsCache?.cards ??
+    (Array.isArray(profile?.taste_cards) ? profile.taste_cards : [])
   );
   const [liveGlobalGlow, setLiveGlobalGlow] = useState(
-    profile?.taste_card_style_global ?? null
+    tasteCardsCache?.glow ?? profile?.taste_card_style_global ?? null
   );
+  const tasteCardsHydratedRef = useRef(Boolean(tasteCardsCache));
+  const profileWatchlistHydratedRef = useRef(Boolean(profileWatchlistCache));
 
   // Premium rating scheme (view mode)
   const [viewScheme, setViewScheme] = useState(null);
 
   // Editing buffer
-  const [editingTasteCards, setEditingTasteCards] = useState([]);
+  // Film takes (from Supabase table)
+  const hasFilmCache = Array.isArray(filmTakesCache);
+  const [filmTakes, setFilmTakes] = useState(() =>
+    hasFilmCache ? filmTakesCache : []
+  );
+  const [filmTakesHasContent, setFilmTakesHasContent] = useState(hasFilmCache);
+  const filmTakesHasContentRef = useRef(hasFilmCache);
 
-  // role / club / followers
-  const [roleBadge, setRoleBadge] = useState(null);
-  const [roleClub, setRoleClub] = useState(null);
-  const [counts, setCounts] = useState({ followers: 0, following: 0 });
-
-    // Film takes (from Supabase table)
-    
-    const [filmTakesLoading, setFilmTakesLoading] = useState(true);
-      // Film takes (loaded from Supabase)
-  const [filmTakes, setFilmTakes] = useState([]);
+  useEffect(() => {
+    filmTakesHasContentRef.current = filmTakesHasContent;
+  }, [filmTakesHasContent]);
 
     // Editing a single take (owner only)
   const [editingTake, setEditingTake] = useState(null);
@@ -358,99 +620,51 @@ const UserProfile = () => {
 
   
 
+  const canFetchPrivateScheme = Boolean(sessionLoaded && user?.id && isOwnProfile);
   // anchor for Moodboard
   const moodboardAnchorRef = useRef(null);
-
   useEffect(() => {
-    function onProfileRefresh() {
-      setRefreshTick((t) => t + 1);
+    if (hydratedProfile === undefined) return;
+    if (hydratedProfile) {
+      const key = identifier || hydratedProfile.id;
+      const requestId = profileRefreshEpoch;
+      latestRefreshRef.current = requestId;
+      if (key && hasWindow) {
+        writeProfileCache(key, hydratedProfile);
+      }
+      setViewProfile(hydratedProfile);
+      setDisplayProfile(hydratedProfile);
+      setViewLoading(false);
+      lastProfileRefreshRef.current = Date.now();
+      const profileId = hydratedProfile.id;
+      if (profileId) {
+        scheduleDisplayHydration(profileId, hydratedProfile?.avatar_url, requestId);
+      }
+      return;
     }
-    window.addEventListener("sf:profile:refresh", onProfileRefresh);
-    return () => window.removeEventListener("sf:profile:refresh", onProfileRefresh);
-  }, []);
 
-  /* =========================================================
-     1. Decide whose profile to show (me vs /u/:slug vs /profile/:id)
-     ========================================================= */
-  useEffect(() => {
-    let mounted = true;
-
-    (async () => {
-      setViewLoading(true);
-      const identifier = routeSlug || routeId || null;
-      const shouldForceRefresh = refreshTick !== lastProfileRefreshRef.current;
-
-      // No identifier in URL → show my own profile
-      if (!identifier) {
-        if (shouldForceRefresh && refreshProfile) {
-          try {
-            const fresh = await refreshProfile();
-            if (mounted) setViewProfile(fresh || profile || null);
-          } catch {
-            if (mounted) setViewProfile(profile || null);
-          }
-          if (mounted) setViewLoading(false);
-          lastProfileRefreshRef.current = refreshTick;
-          return;
-        }
-        setViewProfile(profile || null);
-        setViewLoading(false);
-        return;
-      }
-
-      // If identifier matches my own profile → also use current profile
-      if (
-        profile?.id === identifier ||
-        (profile?.slug && profile.slug === identifier) ||
-        (profile?.username && profile.username === identifier)
-      ) {
-        setViewProfile(profile);
-        setViewLoading(false);
-        return;
-      }
-
-      // Otherwise fetch that user
-      // 1) show cached profile instantly (if fresh)
-      const cached = readProfileCache(identifier);
-      if (cached && mounted) {
-        setViewProfile(cached);
-        setViewLoading(false);
-      }
-
-      // 2) revalidate in background (only when forced or no cache)
-      if (cached && !shouldForceRefresh) return;
-      const fetched = await loadAnyProfileLocal(identifier);
-      if (mounted) {
-        if (fetched) writeProfileCache(identifier, fetched);
-        setViewProfile(fetched);
-        setViewLoading(false);
-      }
-      lastProfileRefreshRef.current = refreshTick;
-    })();
-
-    return () => {
-      mounted = false;
-    };
-  }, [routeSlug, routeId, profile?.id, profile?.slug, refreshTick, refreshProfile]);
+    if (!identifier) {
+      setViewProfile(profile || null);
+      setDisplayProfile(profile || null);
+    } else {
+      setViewProfile(null);
+      setDisplayProfile(null);
+    }
+    setViewLoading(false);
+  }, [
+    hydratedProfile,
+    identifier,
+    profile,
+    hasWindow,
+    scheduleDisplayHydration,
+    profileRefreshEpoch,
+  ]);
 
   useEffect(() => {
-    let active = true;
-    (async () => {
-      if (!viewProfile?.id) {
-        if (active) setDisplayProfile(null);
-        return;
-      }
-      const { data, error } = await supabase.rpc("get_profile_display", {
-        p_user_id: viewProfile.id,
-      });
-      if (!active) return;
-      if (!error) setDisplayProfile(data || null);
-    })();
-    return () => {
-      active = false;
-    };
+    if (!viewProfile?.id) {
+      setDisplayProfile(null);
+    }
   }, [viewProfile?.id]);
-
 
   /* =========================================================
      2. Keep live taste cards in sync when actual profile changes
@@ -466,6 +680,37 @@ const UserProfile = () => {
   }, [viewProfile?.taste_card_style_global]);
 
   useEffect(() => {
+    if (!viewProfile?.id || !canFetchPrivateScheme) {
+      setViewScheme(null);
+      return;
+    }
+    const requestId = ++schemeRequestRef.current;
+    cancelQueuedIdle(schemeIdleRef.current);
+
+    const run = async () => {
+      schemeIdleRef.current = null;
+      try {
+        const scheme = await fetchActiveScheme(viewProfile.id);
+        if (requestId !== schemeRequestRef.current) return;
+        setViewScheme(scheme);
+      } catch (error) {
+        if (isAbortError(error) || error?.message === "Load failed") return;
+        console.error("[UserProfile] rating scheme fetch failed:", error);
+      }
+    };
+
+    if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+      schemeIdleRef.current = window.requestIdleCallback(run, { timeout: 2000 });
+    } else {
+      schemeIdleRef.current = setTimeout(run, 0);
+    }
+
+    return () => {
+      cancelQueuedIdle(schemeIdleRef.current);
+    };
+  }, [viewProfile?.id, canFetchPrivateScheme, profileRefreshEpoch, cancelQueuedIdle]);
+
+  useEffect(() => {
     function onTasteCardsUpdated(e) {
       if (Array.isArray(e?.detail?.cards)) {
         setLiveTasteCards(e.detail.cards);
@@ -479,36 +724,28 @@ const UserProfile = () => {
      3. Premium rating scheme for viewed profile
      ========================================================= */
   useEffect(() => {
-    let mounted = true;
-    async function loadScheme() {
-      if (!viewProfile?.id) {
-        if (mounted) setViewScheme(null);
-        return;
-      }
-      try {
-        const sch = await fetchActiveScheme(viewProfile.id);
-        if (mounted) setViewScheme(sch);
-      } catch {
-        if (mounted) setViewScheme(null);
-      }
+    if (!viewProfile?.id) {
+      setViewScheme(null);
     }
-    loadScheme();
-    return () => {
-      mounted = false;
-    };
   }, [viewProfile?.id]);
 
-  // listen for updates from edit panel to refetch scheme
   useEffect(() => {
-    function onSchemeUpdated() {
-      if (!viewProfile?.id) return;
-      fetchActiveScheme(viewProfile.id)
-        .then((sch) => setViewScheme(sch))
-        .catch(() => {});
+    function handleSchemeUpdate() {
+      triggerProfileRefresh();
     }
-    window.addEventListener("sf:ratingscheme:updated", onSchemeUpdated);
-    return () => window.removeEventListener("sf:ratingscheme:updated", onSchemeUpdated);
-  }, [viewProfile?.id]);
+    window.addEventListener("sf:ratingscheme:updated", handleSchemeUpdate);
+    return () =>
+      window.removeEventListener("sf:ratingscheme:updated", handleSchemeUpdate);
+  }, [triggerProfileRefresh]);
+
+  useEffect(() => {
+    function handleProfileRefresh() {
+      triggerProfileRefresh();
+    }
+    window.addEventListener("sf:profile:refresh", handleProfileRefresh);
+    return () =>
+      window.removeEventListener("sf:profile:refresh", handleProfileRefresh);
+  }, [triggerProfileRefresh]);
 
   /* =========================================================
      4. Respect ?edit=true (open once, then clean URL)
@@ -518,9 +755,6 @@ const UserProfile = () => {
     if (params.get("edit") === "true") {
       setEditMode(true);
       setEditOpen(true);
-      setEditingTasteCards(
-        Array.isArray(viewProfile?.taste_cards) ? [...viewProfile.taste_cards] : []
-      );
       params.delete("edit");
       navigate({ search: params.toString() }, { replace: true });
     }
@@ -531,7 +765,6 @@ const UserProfile = () => {
      5. Restore banner from localStorage (for own profile only)
      ========================================================= */
   useEffect(() => {
-    const isOwnProfile = !!(user?.id && viewProfile?.id === user.id);
     if (!isOwnProfile) {
       setBannerOverride(null);
       setBannerGradientOverride(null);
@@ -548,7 +781,7 @@ const UserProfile = () => {
       }
       if (ls && !bannerOverride) setBannerOverride(ls);
     } catch {}
-  }, [bannerOverride, user?.id, viewProfile?.id]);
+  }, [bannerOverride, user?.id, viewProfile?.id, isOwnProfile]);
 
   /* =========================================================
      6. Exit edit mode when panel broadcasts close
@@ -561,151 +794,6 @@ const UserProfile = () => {
     window.addEventListener("sf:editpanel:close", handleExitEdit);
     return () => window.removeEventListener("sf:editpanel:close", handleExitEdit);
   }, []);
-
-  /* =========================================================
-     7. Role pill + follow counts (for viewed profile)
-     ========================================================= */
-  useEffect(() => {
-    let isMounted = true;
-    (async () => {
-      if (!viewProfile?.id) return;
-      const cacheKey = sectionCacheKey(viewProfile.id, "stats");
-      const shouldForceRefresh = refreshTick !== lastStatsRefreshRef.current;
-      const cached = readSectionCache(cacheKey);
-      if (cached && !shouldForceRefresh && isMounted) {
-        setRoleBadge(cached.roleBadge || null);
-        setRoleClub(cached.roleClub || null);
-        setCounts(cached.counts || { followers: 0, following: 0 });
-        return;
-      }
-
-    const { data: rolesRow } = await supabase
-        .from("profile_roles")
-        .select("roles")
-        .eq("user_id", viewProfile.id)
-        .maybeSingle();
-
-      const roles = rolesRow?.roles || [];
-      const top = roles?.[0] || null;
-      if (isMounted) {
-        setRoleBadge(top?.role || null);
-        setRoleClub(
-          top
-            ? { club_slug: top.club_slug, club_name: top.club_name, club_id: top.club_id }
-            : null
-        );
-      }
-
-      const { data: fc } = await supabase
-        .from("follow_counts")
-        .select("followers, following")
-        .eq("user_id", viewProfile.id)
-        .maybeSingle();
-
-      if (isMounted && fc) setCounts(fc);
-      if (isMounted) {
-        writeSectionCache(cacheKey, {
-          roleBadge: top?.role || null,
-          roleClub: top
-            ? { club_slug: top.club_slug, club_name: top.club_name, club_id: top.club_id }
-            : null,
-          counts: fc || { followers: 0, following: 0 },
-        });
-      }
-      lastStatsRefreshRef.current = refreshTick;
-    })();
-    return () => {
-      isMounted = false;
-    };
-  }, [viewProfile?.id, refreshTick]);
-
-    /* =========================================================
-     7b. Load film takes from Supabase (public)
-     ========================================================= */
-     useEffect(() => {
-      let cancelled = false;
-  
-    async function loadTakes() {
-      if (!viewProfile?.id) {
-        if (!cancelled) {
-          setFilmTakes([]);
-          setFilmTakesLoading(false);
-        }
-        return;
-      }
-
-      const cacheKey = sectionCacheKey(viewProfile.id, "film_takes");
-      const shouldForceRefresh = refreshTick !== lastTakesRefreshRef.current;
-      const cached = readSectionCache(cacheKey);
-      if (cached && !shouldForceRefresh) {
-        if (!cancelled) {
-          setFilmTakes(cached);
-          setFilmTakesLoading(false);
-        }
-        return;
-      }
-  
-      setFilmTakesLoading(true);
-      try {
-        // Load unified Film Takes (from club_film_takes)
-const { data, error } = await supabase
-.from("club_film_takes")
-.select(FILM_TAKES_SELECT)
-.eq("user_id", viewProfile.id)
-.eq("is_archived", false)
-.order("created_at", { ascending: false })
-.limit(20);
-
-
-
-  
-          if (cancelled) return;
-  
-          if (error) {
-            console.error("[film_takes] load error:", error);
-            setFilmTakes([]);
-          } else {
-            const mapped =
-              Array.isArray(data)
-                ? data.map((t) => ({
-                    id: t.id,
-                    user_id: t.user_id,
-                    club_id: t.club_id,
-                    film_id: t.film_id,
-                    film_title: t.film_title,
-title: t.film_title,      // <-- THIS fixes missing names in FilmTakeCard
-
-                    text: t.take || t.text || "",
-                    rating_5: typeof t.rating_5 === "number" ? t.rating_5 : t.rating || null,
-                    aspect_key: t.aspect_key,
-                    poster_path: t.poster_path,
-                    created_at: t.created_at,
-                    updated_at: t.updated_at,
-                    screening_id: t.screening_id,
-                  }))
-                : []
-            ;
-            setFilmTakes(mapped);
-            writeSectionCache(cacheKey, mapped);
-            lastTakesRefreshRef.current = refreshTick;
-            
-          }
-        } catch (e) {
-          if (!cancelled) {
-            console.error("[film_takes] exception:", e);
-            setFilmTakes([]);
-          }
-        } finally {
-          if (!cancelled) setFilmTakesLoading(false);
-        }
-      }
-  
-      loadTakes();
-      return () => {
-        cancelled = true;
-      };
-    }, [viewProfile?.id]);
-  
 
   /* =========================================================
      8. Navigate back to this profile after save
@@ -797,8 +885,6 @@ title: t.film_title,      // <-- THIS fixes missing names in FilmTakeCard
       setAvatar(nextAvatar || "/default-avatar.svg");
       setViewProfile((prev) => (prev ? { ...prev, avatar_url: nextAvatar } : prev));
     }
-
-    const isOwnProfile = !!(user?.id && viewProfile?.id === user.id);
 
     if (typeof patch.banner_url === "string" && patch.banner_url) {
       setBannerOverride(patch.banner_url);
@@ -894,6 +980,7 @@ title: t.film_title,      // <-- THIS fixes missing names in FilmTakeCard
       // Update local state
       setFilmTakes((prev) => prev.filter((t) => t.id !== id));
       setEditingTake(null);
+      bumpWatchlistRefresh();
       toast.success("Take removed.");
     } catch (e) {
       console.error("Failed to remove take:", e);
@@ -951,6 +1038,7 @@ title: t.film_title,      // <-- THIS fixes missing names in FilmTakeCard
       );
 
       setEditingTake(null);
+      bumpWatchlistRefresh();
     } catch (e) {
       console.error("Failed to save edited take:", e);
       alert("Couldn't save that take. Please try again.");
@@ -962,12 +1050,12 @@ title: t.film_title,      // <-- THIS fixes missing names in FilmTakeCard
 
   /* ---------------- derived display from viewed profile ---------------- */
   const displayName = displayProfile?.display_name || "Member";
-  const isPremiumProfile =
-    viewProfile?.plan === "directors_cut" || viewProfile?.is_premium === true;
+  const isPremiumProfile = viewProfile?.plan === "directors_cut";
 
   const username = viewProfile?.slug || viewProfile?.username || "username";
   const bio = viewProfile?.bio || "";
-  const avatarUrl = displayProfile?.avatar_url || "/default-avatar.svg";
+  const avatarUrl =
+    displayProfile?.avatar_url || viewProfile?.avatar_url || "/default-avatar.svg";
 
   const bannerUrl =
     bannerOverride ?? viewProfile?.banner_url ?? viewProfile?.banner_image ?? "";
@@ -977,6 +1065,13 @@ title: t.film_title,      // <-- THIS fixes missing names in FilmTakeCard
  // allow null (default/base look) when no theme is selected
 const themeId = isPremiumProfile ? (viewProfile?.theme_preset ?? null) : null;
 const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
+
+  const showTasteCardsSkeleton =
+    tasteCardsSkeleton && !tasteCardsHydratedRef.current && liveTasteCards.length === 0;
+
+  const showRefreshHint = Boolean(
+    viewProfile && (loading || viewLoading)
+  );
 
   
 
@@ -1114,7 +1209,10 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
   };
 
   /* ---------------- loading ---------------- */
-  if (loading || viewLoading) {
+  if (!viewProfile && !viewLoading) {
+    return <ProfileSkeleton />;
+  }
+  if (!viewProfile && (loading || viewLoading)) {
     return <ProfileSkeleton />;
   }
 
@@ -1134,12 +1232,12 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
             following: counts.following,
             role: roleBadge,
             roleClub,
-            isPremium: isPremiumProfile,    // NEW
+            isPremium: isPremiumProfile,
           }}
-          
+          profileWatchlist={profileWatchlist}
+          watchlistSkeleton={profileWatchlistSkeleton}
           userId={viewProfile?.id}
-          watchlistRefreshKey={refreshTick}
-          disableWatchlistAutoRefresh
+          skipWatchlist={!isOwnProfile}
           movieRoute="/movie"
           onFollowersClick={() => {
             const handle = viewProfile?.slug || viewProfile?.id;
@@ -1150,42 +1248,80 @@ const themeStyle = useMemo(() => getThemeVars(themeId), [themeId]);
             if (handle) navigate(`/u/${handle}/following`);
           }}
         />
+        {showRefreshHint && (
+          <div className="flex items-center gap-2 px-3 sm:px-6 pt-2 text-xs text-zinc-400">
+            <img
+              src="/superfilm-logo.png"
+              alt="SuperFilm"
+              className="h-4 w-auto opacity-80"
+              loading="lazy"
+            />
+            <span className="text-xs uppercase tracking-[0.3em]">Refreshing profile…</span>
+          </div>
+        )}
 
         {/* Avatar cropper removed; direct file upload handles images now */}
 
         <div className="px-3 sm:px-6 pt-6">
           <div ref={moodboardAnchorRef} id="moodboard">
-            <Suspense
-              fallback={
-                <div className="h-40 rounded-2xl border border-zinc-800 bg-zinc-900/60 animate-pulse" />
-              }
-            >
+          <Suspense
+            fallback={
+              <div className="h-40 rounded-2xl border border-zinc-800 bg-zinc-900/60 animate-pulse" />
+            }
+          >
               <Moodboard
                 profileId={viewProfile?.id}
                 isOwner={viewingOwn}
                 className="w-full"
                 usePremiumTheme={isPremiumProfile}
                 disableAutoRefresh
-                refreshKey={refreshTick}
+                refreshKey={profileRefreshEpoch}
               />
-            </Suspense>
+          </Suspense>
           </div>
         </div>
 
         {/* Taste Cards — view */}
-        {!editMode && liveTasteCards.length > 0 && (
+        {showTasteCardsSkeleton ? (
           <section className="mt-6 px-0 sm:px-6">
-            <div className={
-              isPremiumProfile
-                ? "themed-card themed-outline forge rounded-2xl border border-zinc-800 bg-black/40"
-                : "rounded-2xl border border-zinc-800 bg-black/40"
-            }>
+            <div
+              className={
+                isPremiumProfile
+                  ? "themed-card themed-outline forge rounded-2xl border border-zinc-800 bg-black/40"
+                  : "rounded-2xl border border-zinc-800 bg-black/40"
+              }
+            >
               <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-zinc-900 sm:border-zinc-800">
                 <h3 className="text-sm font-semibold text-white">Taste Cards</h3>
               </div>
-              <ProfileTasteCards cards={liveTasteCards} globalGlow={liveGlobalGlow} />
+              <div className="grid grid-cols-2 gap-2 sm:gap-4 md:grid-cols-4 md:gap-5 p-4">
+                {Array.from({ length: 4 }).map((_, idx) => (
+                  <div
+                    key={idx}
+                    className="h-24 rounded-2xl border border-zinc-800 bg-zinc-900/60 animate-pulse"
+                  />
+                ))}
+              </div>
             </div>
           </section>
+        ) : (
+          !editMode &&
+          liveTasteCards.length > 0 && (
+            <section className="mt-6 px-0 sm:px-6">
+              <div
+                className={
+                  isPremiumProfile
+                    ? "themed-card themed-outline forge rounded-2xl border border-zinc-800 bg-black/40"
+                    : "rounded-2xl border border-zinc-800 bg-black/40"
+                }
+              >
+                <div className="flex items-center justify-between px-4 sm:px-6 py-3 border-b border-zinc-900 sm:border-zinc-800">
+                  <h3 className="text-sm font-semibold text-white">Taste Cards</h3>
+                </div>
+                <ProfileTasteCards cards={liveTasteCards} globalGlow={liveGlobalGlow} />
+              </div>
+            </section>
+          )
         )}
 
         {/* Rating language — view (premium users' phrase groups) */}

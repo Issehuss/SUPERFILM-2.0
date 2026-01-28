@@ -1,6 +1,6 @@
 // src/components/AttendButton.jsx
 import { useEffect, useState } from "react";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import { useUser } from "../context/UserContext";
 
 export default function AttendButton({ clubId, eventId, className = "" }) {

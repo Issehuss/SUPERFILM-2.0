@@ -1,4 +1,3 @@
-// src/context/UserContext.jsx
 import {
   createContext,
   useContext,
@@ -8,10 +7,23 @@ import {
   useCallback,
   useRef,
 } from "react";
-import supabase from "../supabaseClient.js";
+import supabase, { refreshSupabaseSession } from "lib/supabaseClient";
+import useAppResume from "../hooks/useAppResume";
+
+const SESSION_THROTTLE_MS = 30 * 1000;
+const PROFILE_COOLDOWN_MS = 3 * 1000;
+const PROFILE_STALE_MS = 5 * 60 * 1000;
+const SUBSCRIPTION_STALE_MS = 5 * 60 * 1000;
+const INACTIVITY_MS = 60 * 60 * 1000;
 
 const UserContext = createContext(null);
+const MembershipRefreshContext = createContext({
+  membershipEpoch: 0,
+  bumpMembership: () => {},
+});
+
 export const useUser = () => useContext(UserContext);
+export const useMembershipRefresh = () => useContext(MembershipRefreshContext);
 
 function UserProvider({ children }) {
   const [user, setUser] = useState(null);            // supabase.auth user
@@ -22,181 +34,277 @@ function UserProvider({ children }) {
   const [sessionLoaded, setSessionLoaded] = useState(false); // ★ new — token restored
   const [subscription, setSubscription] = useState(null); // cached subscription row
   const [subscriptionLoading, setSubscriptionLoading] = useState(false);
-  const lastProfileFetchRef = useRef(0);
-  const refreshInFlightRef = useRef(null);
+  const [membershipEpoch, setMembershipEpoch] = useState(0);
+  const lastProfileFetchRef = useRef({});
+  const refreshInFlightRef = useRef({});
+  const subscriptionInFlightRef = useRef(null);
+  const lastSessionCheckRef = useRef(0);
+  const lastSubscriptionFetchRef = useRef(0);
+  const profileRef = useRef(null);
+  const subscriptionRef = useRef(null);
+  const lastActivityRef = useRef(Date.now());
+  const { appResumeTick, ready: resumeReady } = useAppResume();
+  const lastResumeTickRef = useRef(appResumeTick);
+
+  const isOffline = useCallback(
+    () =>
+      typeof navigator !== "undefined" &&
+      typeof navigator.onLine !== "undefined" &&
+      !navigator.onLine,
+    []
+  );
+
+  useEffect(() => {
+    profileRef.current = profile;
+  }, [profile]);
+
+  useEffect(() => {
+    subscriptionRef.current = subscription;
+  }, [subscription]);
+
+  const restoreSession = useCallback(
+    async ({ force = false, reason = "resume" } = {}) => {
+      if (isOffline()) {
+        console.warn(`[UserContext] session restore (${reason}) skipped (offline)`);
+        // sessionLoaded here means "auth check attempt finished or skipped due to offline"
+        setSessionLoaded(true);
+        return null;
+      }
+      const now = Date.now();
+      if (!force && now - lastSessionCheckRef.current < SESSION_THROTTLE_MS) {
+        return null;
+      }
+      lastSessionCheckRef.current = now;
+      try {
+        const {
+          data: { session: nextSession },
+          error,
+        } = await supabase.auth.getSession();
+        setSessionLoaded(true);
+        if (error) {
+          console.warn(`[UserContext] session restore (${reason}) failed:`, error.message);
+          return null;
+        }
+        setSession(nextSession || null);
+        const authUser = nextSession?.user ?? null;
+        setUser(authUser);
+        if (!authUser) {
+          setProfile(null);
+          setAvatar(null);
+          setSubscription(null);
+          lastSubscriptionFetchRef.current = 0;
+        }
+        return authUser;
+      } catch (err) {
+        console.warn(`[UserContext] session restore (${reason}) error:`, err?.message || err);
+        return null;
+      }
+    },
+    [isOffline]
+  );
+
+  const fetchProfileDisplay = useCallback(
+    async (userId, { reason = "unknown", force = false } = {}) => {
+      if (!userId) return null;
+      if (isOffline()) {
+        console.warn(`[UserContext] profile fetch (${reason}) skipped (offline)`);
+        return profileRef.current;
+      }
+      const meta = refreshInFlightRef.current;
+      const now = Date.now();
+      const lastSuccess = lastProfileFetchRef.current[userId] || 0;
+      if (!force && now - lastSuccess < PROFILE_COOLDOWN_MS) {
+        return profileRef.current;
+      }
+      if (meta[userId]) {
+        return meta[userId];
+      }
+      const promise = (async () => {
+        const { data, error } = await supabase.rpc("get_profile_display", {
+          p_user_id: userId,
+        });
+        if (error) {
+          console.warn(`[UserContext] profile fetch (${reason}) failed:`, error.message);
+          return profileRef.current;
+        }
+        const row = Array.isArray(data) ? data[0] : data;
+
+setProfile(row || null);
+setAvatar(row?.avatar_url || null);
+
+        lastProfileFetchRef.current[userId] = Date.now();
+        return data || null;
+      })();
+      meta[userId] = promise;
+      try {
+        return await promise;
+      } finally {
+        if (meta[userId] === promise) {
+          delete meta[userId];
+        }
+      }
+    },
+    [isOffline]
+  );
+
+  const refreshProfile = useCallback(
+    async ({ force } = {}) => {
+      if (!user?.id) return null;
+      return fetchProfileDisplay(user.id, {
+        reason: "manual-refresh",
+        force: !!force,
+      });
+    },
+    [user?.id, fetchProfileDisplay]
+  );
+
+  const refreshSubscription = useCallback(
+    async ({ skipLoading = false, force = false } = {}) => {
+      const userId = user?.id || null;
+      if (!userId) {
+        setSubscription(null);
+        lastSubscriptionFetchRef.current = 0;
+        return null;
+      }
+      if (isOffline()) {
+        if (!skipLoading) {
+          console.warn("[UserContext] subscription refresh skipped (offline)");
+        }
+        return subscriptionRef.current;
+      }
+      const now = Date.now();
+      if (!force && now - lastSubscriptionFetchRef.current < SUBSCRIPTION_STALE_MS) {
+        return subscriptionRef.current;
+      }
+      if (subscriptionInFlightRef.current) {
+        return subscriptionInFlightRef.current;
+      }
+      if (!skipLoading) {
+        setSubscriptionLoading(true);
+      }
+      const fetchPromise = (async () => {
+        const { data, error } = await supabase
+          .from("subscriptions")
+          .select(
+            "id,status,price_id,current_period_start,current_period_end,cancel_at_period_end,updated_at"
+          )
+          .eq("user_id", userId)
+          .order("current_period_end", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (error) {
+          console.warn("[UserContext] subscription fetch failed:", error.message);
+          return subscriptionRef.current;
+        }
+        lastSubscriptionFetchRef.current = Date.now();
+        setSubscription(data || null);
+        return data || null;
+      })();
+      subscriptionInFlightRef.current = fetchPromise;
+      try {
+        return await fetchPromise;
+      } finally {
+        subscriptionInFlightRef.current = null;
+        if (!skipLoading) {
+          setSubscriptionLoading(false);
+        }
+      }
+    },
+    [user?.id, isOffline]
+  );
+
+  const handleResume = useCallback(async () => {
+    if (isOffline()) return;
+    await refreshSupabaseSession();
+    const authUser = await restoreSession({ reason: "resume" });
+    if (!authUser?.id) return;
+    const lastProfile = lastProfileFetchRef.current[authUser.id] || 0;
+    if (Date.now() - lastProfile > PROFILE_STALE_MS) {
+      fetchProfileDisplay(authUser.id, { reason: "resume" });
+    }
+    if (Date.now() - lastSubscriptionFetchRef.current > SUBSCRIPTION_STALE_MS) {
+      refreshSubscription({ skipLoading: true });
+    }
+  }, [isOffline, restoreSession, fetchProfileDisplay, refreshSubscription]);
 
   /* ---------------------------------------------------------------------- */
   /*                           INITIAL HYDRATION                            */
   /* ---------------------------------------------------------------------- */
   useEffect(() => {
     let cancelled = false;
-
     (async () => {
-      try {
-        // 1) Restore session from local storage
-        const {
-          data: { session },
-          error,
-        } = await supabase.auth.getSession();
-        if (error) throw error;
-
-        setSessionLoaded(true);  // ★ session token now available
-
-        setSession(session || null);
-        const authUser = session?.user ?? null;
+      if (isOffline()) {
+        console.warn("[UserContext] init skipped (offline)");
         if (!cancelled) {
-          setUser(authUser);
+          setSessionLoaded(true);
+          setLoading(false);
         }
-
-        // 2) Fetch profile if logged in
-        if (authUser?.id) {
-          const { data, error: pErr } = await supabase.rpc("get_profile_display", {
-            p_user_id: authUser.id,
-          });
-
-          if (!cancelled) {
-            if (pErr) {
-              console.warn("[UserContext] profile fetch failed:", pErr.message);
-              setProfile(null);
-              setAvatar(null);
-            } else {
-              setProfile(data || null);
-              setAvatar(data?.avatar_url || null);
-              lastProfileFetchRef.current = Date.now();
-            }
-          }
-        } else {
-          if (!cancelled) {
-            setProfile(null);
-            setAvatar(null);
-          }
-        }
-      } catch (e) {
-        console.warn("[UserContext] init error:", e?.message);
-        if (!cancelled) {
-          setUser(null);
-          setProfile(null);
-          setAvatar(null);
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false); // ★ full hydration complete
-        }
+        return;
+      }
+      const authUser = await restoreSession({ force: true, reason: "initial" });
+      if (cancelled) return;
+      setLoading(false);
+      if (authUser?.id) {
+        fetchProfileDisplay(authUser.id, { reason: "initial" });
       }
     })();
-
-    /* ------------------------------------------------------------------- */
-    /*                  LISTEN TO AUTH STATE CHANGES                       */
-    /* ------------------------------------------------------------------- */
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      setSessionLoaded(true); // ★ ensure app sees session immediately
-
-      setSession(session || null);
-      const authUser = session?.user ?? null;
-      setUser(authUser);
-
-      // refresh profile
-      if (authUser?.id) {
-        const { data, error: pErr } = await supabase.rpc("get_profile_display", {
-          p_user_id: authUser.id,
-        });
-
-        if (pErr) {
-          console.warn("[UserContext] profile fetch (auth change) failed:", pErr.message);
-          setProfile(null);
-          setAvatar(null);
-        } else {
-          setProfile(data || null);
-          setAvatar(data?.avatar_url || null);
-          lastProfileFetchRef.current = Date.now();
-        }
-      } else {
-        setProfile(null);
-        setAvatar(null);
-        setSubscription(null);
-      }
-    });
-
     return () => {
       cancelled = true;
-      subscription?.unsubscribe?.();
     };
-  }, []);
+  }, [fetchProfileDisplay, isOffline, restoreSession]);
 
-  /* ---------------------------------------------------------------------- */
-  /*                   SESSION REHYDRATION ON RESUME                         */
-  /* ---------------------------------------------------------------------- */
-  const rehydrateSession = useCallback(async () => {
-    try {
-      const {
-        data: { session: nextSession },
-        error,
-      } = await supabase.auth.getSession();
-      if (error) throw error;
-
+  /* ------------------------------------------------------------------- */
+  /*                  LISTEN TO AUTH STATE CHANGES                       */
+  /* ------------------------------------------------------------------- */
+  useEffect(() => {
+    const {
+      data: { subscription: subscriptionHandle },
+    } = supabase.auth.onAuthStateChange(async (_event, nextSession) => {
       setSessionLoaded(true);
       setSession(nextSession || null);
       const authUser = nextSession?.user ?? null;
       setUser(authUser);
-
-      if (authUser?.id && (!profile || !avatar)) {
-        const { data, error: pErr } = await supabase.rpc("get_profile_display", {
-          p_user_id: authUser.id,
-        });
-        if (!pErr) {
-          setProfile(data || null);
-          setAvatar(data?.avatar_url || null);
-          lastProfileFetchRef.current = Date.now();
-        }
+      if (authUser?.id) {
+        fetchProfileDisplay(authUser.id, { reason: "authStateChange" });
+        refreshSubscription({ skipLoading: true, force: true });
+      } else {
+        setProfile(null);
+        setAvatar(null);
+        setSubscription(null);
+        lastSubscriptionFetchRef.current = 0;
       }
-    } catch (e) {
-      console.warn("[UserContext] rehydrate failed:", e?.message || e);
-    }
-  }, [profile, avatar]);
-
-  useEffect(() => {
-    const onFocus = () => {
-      rehydrateSession();
-    };
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") {
-        rehydrateSession();
-      }
-    };
-    window.addEventListener("focus", onFocus);
-    document.addEventListener("visibilitychange", onVisibility);
+    });
     return () => {
-      window.removeEventListener("focus", onFocus);
-      document.removeEventListener("visibilitychange", onVisibility);
+      subscriptionHandle?.unsubscribe?.();
     };
-  }, [rehydrateSession]);
-
-  const isReady = sessionLoaded && !loading;
+  }, [fetchProfileDisplay, refreshSubscription]);
 
   /* ---------------------------------------------------------------------- */
-  /*                                ROLES                                   */
+  /*                      RESUME / VISIBILITY / FOCUS                      */
   /* ---------------------------------------------------------------------- */
-  const roles = useMemo(() => [], []);
-
-  const hasRole = useCallback(
-    () => false,
-    []
-  );
-
-  const isPartner = false;
-
-  /* ---------------------------------------------------------------------- */
-  /*                           PREMIUM / DIRECTORS CUT                      */
-  /* ---------------------------------------------------------------------- */
-  // Single source of truth for entitlements: profiles
-  const isPremium = false;
+  useEffect(() => {
+    if (!resumeReady || !sessionLoaded || !user?.id) return;
+    if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+    if (appResumeTick === lastResumeTickRef.current) return;
+    lastResumeTickRef.current = appResumeTick;
+    handleResume();
+  }, [appResumeTick, resumeReady, sessionLoaded, user?.id, handleResume]);
 
   /* ---------------------------------------------------------------------- */
-  /*                           UPDATE PROFILE HELPER                         */
+  /*                         SUBSCRIPTION CACHING                           */
   /* ---------------------------------------------------------------------- */
+  useEffect(() => {
+    if (!user?.id) return;
+    refreshSubscription({ skipLoading: true, force: true });
+  }, [user?.id, refreshSubscription]);
+
+  /* ---------------------------------------------------------------------- */
+  /*                         REFRESH PROFILE (MANUAL)                        */
+  /* ---------------------------------------------------------------------- */
+  const bumpMembership = useCallback(() => {
+    setMembershipEpoch((epoch) => epoch + 1);
+  }, []);
+
   const saveProfilePatch = useCallback(
     async (patch) => {
       if (!user?.id) return;
@@ -205,6 +313,8 @@ function UserProvider({ children }) {
       if (safePatch.theme_preset == null) {
         delete safePatch.theme_preset;
       }
+
+      setProfile((prev) => (prev ? { ...prev, ...safePatch } : prev));
 
       const { error } = await supabase
         .from("profiles")
@@ -216,53 +326,10 @@ function UserProvider({ children }) {
         return;
       }
 
-      const { data, error: pErr } = await supabase.rpc("get_profile_display", {
-        p_user_id: user.id,
-      });
-      if (pErr) {
-        console.warn("[UserContext] saveProfilePatch refresh failed:", pErr.message);
-        return;
-      }
-      setProfile(data || null);
-      if (data?.avatar_url) setAvatar(data.avatar_url);
+      await fetchProfileDisplay(user.id, { reason: "saveProfilePatch", force: true });
     },
-    [user?.id, profile]
+    [user?.id, fetchProfileDisplay]
   );
-
-  /* ---------------------------------------------------------------------- */
-  /*                        REFRESH PROFILE (MANUAL)                        */
-  /* ---------------------------------------------------------------------- */
-  const refreshProfile = useCallback(async () => {
-    if (!user?.id) {
-      setProfile(null);
-      setAvatar(null);
-      return null;
-    }
-    if (refreshInFlightRef.current) {
-      return refreshInFlightRef.current;
-    }
-    const p = (async () => {
-      const { data, error } = await supabase.rpc("get_profile_display", {
-        p_user_id: user.id,
-      });
-
-      if (error) {
-        console.warn("[UserContext] refreshProfile failed:", error.message);
-        setProfile(null);
-        setAvatar(null);
-        return null;
-      }
-
-      setProfile(data || null);
-      setAvatar(data?.avatar_url || null);
-      lastProfileFetchRef.current = Date.now();
-      return data || null;
-    })();
-    refreshInFlightRef.current = p.finally(() => {
-      refreshInFlightRef.current = null;
-    });
-    return refreshInFlightRef.current;
-  }, [user?.id]);
 
   /* ---------------------------------------------------------------------- */
   /*                                LOGOUT                                  */
@@ -272,156 +339,116 @@ function UserProvider({ children }) {
     setUser(null);
     setProfile(null);
     setAvatar(null);
+    setSubscription(null);
+    lastSubscriptionFetchRef.current = 0;
   }, []);
 
   /* ---------------------------------------------------------------------- */
   /*                          INACTIVITY TIMEOUT                            */
   /* ---------------------------------------------------------------------- */
-  const INACTIVITY_MS = 3 * 60 * 60 * 1000; // 3 hours
-  const lastActivityRef = useRef(Date.now());
+  const isReady = sessionLoaded && !loading;
 
   useEffect(() => {
-    if (!user?.id) return;
+    if (!user?.id || !isReady) return;
+    if (typeof window === "undefined") return;
+
+    let timerId;
+
+    function scheduleLogout(delay = INACTIVITY_MS) {
+      if (timerId) {
+        window.clearTimeout(timerId);
+      }
+      timerId = window.setTimeout(() => {
+        const idleTime = Date.now() - lastActivityRef.current;
+        if (idleTime >= INACTIVITY_MS) {
+          logout();
+          return;
+        }
+        const nextDelay = Math.max(INACTIVITY_MS - idleTime, 0);
+        scheduleLogout(nextDelay);
+      }, delay);
+    }
+
+    function recordActivity() {
+      lastActivityRef.current = Date.now();
+      scheduleLogout();
+    }
+
+    const activityEvents = [
+      "mousemove",
+      "mousedown",
+      "keydown",
+      "scroll",
+      "touchstart",
+    ];
+
+    activityEvents.forEach((eventName) => {
+      window.addEventListener(eventName, recordActivity, { passive: true });
+    });
 
     lastActivityRef.current = Date.now();
-    let timer = null;
-
-    const schedule = () => {
-      clearTimeout(timer);
-      const elapsed = Date.now() - lastActivityRef.current;
-      const remain = Math.max(1000, INACTIVITY_MS - elapsed);
-      timer = setTimeout(() => {
-        logout();
-      }, remain);
-    };
-
-    const mark = () => {
-      lastActivityRef.current = Date.now();
-      schedule();
-    };
-
-    const events = ["pointerdown", "keydown", "touchstart", "scroll", "visibilitychange"];
-    events.forEach((evt) => window.addEventListener(evt, mark, { passive: true }));
-
-    schedule();
+    scheduleLogout();
 
     return () => {
-      clearTimeout(timer);
-      events.forEach((evt) => window.removeEventListener(evt, mark));
+      activityEvents.forEach((eventName) => {
+        window.removeEventListener(eventName, recordActivity);
+      });
+      if (timerId) {
+        window.clearTimeout(timerId);
+      }
     };
-  }, [user?.id, logout]);
+  }, [isReady, user?.id, logout]);
 
   /* ---------------------------------------------------------------------- */
-  /*                         SUBSCRIPTION CACHING                           */
+  /*                                ROLES                                   */
   /* ---------------------------------------------------------------------- */
-  const refreshSubscription = useCallback(
-    async ({ skipLoading = false } = {}) => {
-      if (!user?.id) {
-        setSubscription(null);
-        return null;
-      }
-      if (!skipLoading) setSubscriptionLoading(true);
-      try {
-        const { data, error } = await supabase
-          .from("subscriptions")
-          .select("id,status,price_id,current_period_start,current_period_end,cancel_at_period_end,updated_at")
-          .eq("user_id", user.id)
-          .order("current_period_end", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        if (error) {
-          console.warn("[UserContext] subscription fetch failed:", error.message);
-          setSubscription(null);
-          return null;
-        }
-        setSubscription(data || null);
-        return data || null;
-      } finally {
-        if (!skipLoading) setSubscriptionLoading(false);
-      }
-    },
-    [user?.id]
+  const roles = useMemo(() => [], []);
+
+  const hasRole = useCallback(
+    () => false,
+    []
   );
 
-  // Fetch subscription on auth change
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (!user?.id) {
-        setSubscription(null);
-        return;
-      }
-      const sub = await refreshSubscription({ skipLoading: true });
-      if (cancelled) return;
-      if (!sub) return;
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.id, refreshSubscription]);
-
-  // Refresh subscription when tab becomes visible (lightweight)
-  useEffect(() => {
-    const handler = () => {
-      if (document.visibilityState === "visible") refreshSubscription({ skipLoading: true });
-    };
-    document.addEventListener("visibilitychange", handler);
-    return () => document.removeEventListener("visibilitychange", handler);
-  }, [refreshSubscription]);
+  const isPartner = false; // TODO: wire partner flag once roles are available
 
   /* ---------------------------------------------------------------------- */
-  /*                      STALE PROFILE AUTO-REFRESH                        */
+  /*                           PREMIUM / DIRECTORS CUT                      */
   /* ---------------------------------------------------------------------- */
-  useEffect(() => {
-    const STALE_MS = 5 * 60 * 1000;
-    const maybeRefresh = () => {
-      if (!user?.id) return;
-      const last = lastProfileFetchRef.current || 0;
-      if (Date.now() - last > STALE_MS) {
-        refreshProfile().catch(() => {});
-      }
-    };
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") maybeRefresh();
-    };
-    window.addEventListener("focus", maybeRefresh);
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      window.removeEventListener("focus", maybeRefresh);
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
-  }, [refreshProfile, user?.id]);
+  // Single source of truth for entitlements: profiles
+  const isPremium = false;
 
   /* ---------------------------------------------------------------------- */
-  /*                      PREMIUM DOWNGRADE (TRIAL CHURN)                   */
+  /*                           UPDATE PROFILE HELPER                         */
   /* ---------------------------------------------------------------------- */
-  /* ---------------------------------------------------------------------- */
-  /*                             PROVIDER VALUE                              */
-  /* ---------------------------------------------------------------------- */
+
   return (
-    <UserContext.Provider
-      value={{
-        user,
-        session,
-        profile,
-        avatar,
-        loading,         // full hydration done
-        sessionLoaded,   // ★ NEW: session token ready
-        roles,
-        hasRole,
-        isPartner,
-        isPremium,
-        subscription,
-        subscriptionLoading,
-        refreshSubscription,
-        refreshProfile,
-        saveProfilePatch,
-        logout,
-        isReady,
-      }}
-    >
-      {children}
-    </UserContext.Provider>
+    <MembershipRefreshContext.Provider value={{ membershipEpoch, bumpMembership }}>
+      <UserContext.Provider
+        value={{
+          user,
+          session,
+          profile,
+          avatar,
+          loading,         // full hydration done
+          sessionLoaded,   // ★ NEW: session token ready
+          roles,
+          hasRole,
+          isPartner,
+          isPremium,
+          subscription,
+          subscriptionLoading,
+          refreshSubscription,
+          refreshProfile,
+          saveProfilePatch,
+          logout,
+          isReady,
+          membershipEpoch,
+          bumpMembership,
+        }}
+      >
+        {children}
+      </UserContext.Provider>
+    </MembershipRefreshContext.Provider>
   );
 }
 

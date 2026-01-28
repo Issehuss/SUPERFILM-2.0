@@ -1,4 +1,4 @@
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import { env } from "./env";
 
 const VAPID_PUBLIC_KEY = process.env.REACT_APP_VAPID_PUBLIC_KEY || "";

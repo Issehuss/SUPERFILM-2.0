@@ -1,13 +1,67 @@
 import { useState, useEffect, useRef } from "react";
 import { toast } from "react-hot-toast";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import { MapPin, Info, X, Plus } from "lucide-react";
+
+const DISCOVER_CACHE_KEY = "sf.clubs2.cache.v2";
+const CLUB_ABOUT_UPDATED_EVENT = "sf:club:about-updated";
+
+const applyMetaPatch = (clubId, metaPatch) => {
+  if (typeof window === "undefined" || !clubId) return;
+  try {
+    const raw = localStorage.getItem(DISCOVER_CACHE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.data?.clubs?.length) return;
+    const normalizedId = String(clubId);
+    let changed = false;
+    const nextClubs = (parsed.data.clubs || []).map((entry) => {
+      const matches =
+        String(entry.rawId) === normalizedId ||
+        String(entry.id) === `db-${normalizedId}`;
+      if (!matches) return entry;
+      changed = true;
+      return {
+        ...entry,
+        meta: {
+          ...(entry.meta || {}),
+          ...metaPatch,
+        },
+      };
+    });
+    if (!changed) return;
+    localStorage.setItem(
+      DISCOVER_CACHE_KEY,
+      JSON.stringify({ ts: Date.now(), data: { ...parsed.data, clubs: nextClubs } })
+    );
+  } catch {}
+};
+
+const emitClubAboutUpdated = (clubId, metaPatch) => {
+  if (typeof window === "undefined" || !clubId) return;
+  window.dispatchEvent(
+    new CustomEvent(CLUB_ABOUT_UPDATED_EVENT, {
+      detail: { clubId, metaPatch },
+    })
+  );
+};
+
+const sanitizeMetaPatch = (patch) => {
+  const entries = Object.entries(patch || {}).filter(([, value]) => value !== undefined);
+  return Object.fromEntries(entries);
+};
 
 export default function ClubAboutCard({ club, isEditing, canEdit, onSaved }) {
   const [about, setAbout] = useState(club?.about || "");
   const [tagline, setTagline] = useState(club?.tagline || "");
   const [location, setLocation] = useState(club?.location || "");
-  const [genres, setGenres] = useState(club?.genres || []);
+  const [genres, setGenres] = useState(
+    Array.isArray(club?.genres) && club.genres.length
+      ? club.genres
+      : Array.isArray(club?.meta?.genres)
+      ? club.meta.genres
+      : []
+  );
   const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [genreInput, setGenreInput] = useState("");
@@ -19,7 +73,13 @@ export default function ClubAboutCard({ club, isEditing, canEdit, onSaved }) {
     setAbout(club?.about || "");
     setTagline(club?.tagline || "");
     setLocation(club?.location || "");
-    setGenres(Array.isArray(club?.genres) ? club.genres : []);
+    if (Array.isArray(club?.genres) && club.genres.length) {
+      setGenres(club.genres);
+    } else if (Array.isArray(club?.meta?.genres)) {
+      setGenres(club.meta.genres);
+    } else {
+      setGenres([]);
+    }
     setDirty(false);
   }, [club, isEditing, dirty]);
 
@@ -60,20 +120,45 @@ export default function ClubAboutCard({ club, isEditing, canEdit, onSaved }) {
     if (!canEdit || !club?.id) return;
     if (busy) return;
     setBusy(true);
+
+    const payload = { about, tagline, location, genres };
+    const trimmedTagline = tagline?.trim() || "";
+    const trimmedAbout = about?.trim() || "";
+    const summarySource = trimmedTagline || trimmedAbout;
+    const summary =
+      summarySource.length > 140 ? `${summarySource.slice(0, 140).trim()}…` : summarySource;
+
+    const metaPatch = sanitizeMetaPatch({
+      summary: summary || undefined,
+      tagline,
+      location,
+      genres,
+    });
+    const nextMeta = sanitizeMetaPatch({
+      ...(club?.meta || {}),
+      ...metaPatch,
+    });
+    const patch = {
+      ...payload,
+      summary,
+      meta: nextMeta,
+    };
+
+    const toastId = toast.loading("Saving about info…");
+    onSaved?.(patch);
+    applyMetaPatch(club.id, metaPatch);
+    emitClubAboutUpdated(club.id, metaPatch);
+
     try {
-      const { error } = await supabase
-        .from("clubs")
-        .update({ about, tagline, location, genres })
-        .eq("id", club.id);
+      const { error } = await supabase.from("clubs").update(payload).eq("id", club.id);
       if (error) throw error;
-      onSaved?.({ about, tagline, location, genres });
-      toast.success("About updated.");
+      toast.success("About updated.", { id: toastId });
       setDirty(false);
       try {
         localStorage.removeItem(`sf.club.aboutDraft:${club.id}`);
       } catch {}
     } catch (e) {
-      toast.error(e.message || "Could not save About section.");
+      toast.error(e.message || "Could not save About section.", { id: toastId });
     } finally {
       setBusy(false);
     }
@@ -179,7 +264,10 @@ export default function ClubAboutCard({ club, isEditing, canEdit, onSaved }) {
       </label>
       <input
         value={tagline}
-        onChange={(e) => setTagline(e.target.value)}
+        onChange={(e) => {
+          setTagline(e.target.value);
+          setDirty(true);
+        }}
         className="w-full bg-zinc-900/70 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white outline-none mb-3"
         placeholder="Short, punchy line that sums up the club"
       />
@@ -192,7 +280,10 @@ export default function ClubAboutCard({ club, isEditing, canEdit, onSaved }) {
         <MapPin className="w-4 h-4 text-yellow-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
         <input
           value={location}
-          onChange={(e) => setLocation(e.target.value)}
+          onChange={(e) => {
+            setLocation(e.target.value);
+            setDirty(true);
+          }}
           className="w-full bg-zinc-900/70 border border-zinc-800 rounded-lg pl-9 pr-3 py-2 text-sm text-white outline-none"
           placeholder="e.g., Electric Cinema, Notting Hill"
         />
@@ -204,7 +295,10 @@ export default function ClubAboutCard({ club, isEditing, canEdit, onSaved }) {
       </label>
       <textarea
         value={about}
-        onChange={(e) => setAbout(e.target.value)}
+        onChange={(e) => {
+          setAbout(e.target.value);
+          setDirty(true);
+        }}
         rows={6}
         className="w-full bg-zinc-900/70 border border-zinc-800 rounded-lg p-3 text-sm text-white outline-none mb-3"
         placeholder="Write about your club — focus, vibe, or what new members can expect."
@@ -233,9 +327,9 @@ export default function ClubAboutCard({ club, isEditing, canEdit, onSaved }) {
       </div>
 
       <div className="flex items-center gap-2 mb-3">
-        <input
-          value={genreInput}
-          onChange={(e) => setGenreInput(e.target.value)}
+      <input
+        value={genreInput}
+        onChange={(e) => setGenreInput(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && (e.preventDefault(), addGenre())}
           className="flex-1 bg-zinc-900/70 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white outline-none"
           placeholder="Type a genre and press Enter"
@@ -250,9 +344,11 @@ export default function ClubAboutCard({ club, isEditing, canEdit, onSaved }) {
         <button
           type="button"
           onClick={() => {
-            if (!genres.includes("Any and all genres"))
-              setGenres([...genres, "Any and all genres"]);
-          }}
+        if (!genres.includes("Any and all genres")) {
+          setGenres([...genres, "Any and all genres"]);
+          setDirty(true);
+        }
+      }}
           className="rounded-lg border border-zinc-700 px-3 py-2 text-xs text-zinc-300 hover:text-yellow-400"
         >
           Add “Any and all genres”

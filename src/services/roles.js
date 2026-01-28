@@ -1,4 +1,4 @@
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 
 /** Assign role (server enforces leader-only via RPC) */
 export async function assignClubRole({ clubId, userId, role }) {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 
 export default function ClubYearInReview({ clubId, year = new Date().getFullYear(), className = "" }) {
   const [totals, setTotals] = useState(null);

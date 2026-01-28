@@ -1,7 +1,20 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import useNotifications from "../hooks/useNotifications";
 import { Link } from "react-router-dom";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
+import { markPwaInstalled } from "../constants/pwaInstall";
+
+function formatNotificationTime(dateString) {
+  if (!dateString) return "";
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(new Date(dateString));
+  } catch {
+    return "";
+  }
+}
 
 function resolveNotificationHref(notification) {
   const d = notification?.data || {};
@@ -21,50 +34,24 @@ function resolveNotificationHref(notification) {
 
 export default function NotificationsPage() {
   const { items, loading, loadMore, hasMore, markItemRead, markAllAsRead } = useNotifications({ pageSize: 30 });
-  const [confirmingAll, setConfirmingAll] = useState(false);
   const [hiddenIds, setHiddenIds] = useState(() => new Set());
-
-  const handleMarkAllClick = () => {
-    if (!confirmingAll) {
-      setConfirmingAll(true);
-      return;
-    }
-    markAllAsRead();
-    setConfirmingAll(false);
-  };
+  const visibleItems = useMemo(
+    () => items.filter((n) => !hiddenIds.has(n.id)),
+    [items, hiddenIds]
+  );
 
   return (
     <div className="mx-auto w-full max-w-3xl px-4 md:px-6 py-8 text-white">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Notifications</h1>
         <div className="flex items-center gap-2">
-          {confirmingAll && (
-            <>
-              <button
-                type="button"
-                onClick={() => setConfirmingAll(false)}
-                className="text-xs px-3 py-1 rounded-full bg-white/10 hover:bg-white/15"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleMarkAllClick}
-                className="text-xs px-3 py-1 rounded-full bg-yellow-500 text-black hover:bg-yellow-400"
-              >
-                Confirm
-              </button>
-            </>
-          )}
-          {!confirmingAll && (
-            <button
-              type="button"
-              onClick={handleMarkAllClick}
-              className="text-sm text-yellow-400 hover:underline"
-            >
-              Mark all as read
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={markAllAsRead}
+            className="text-sm text-yellow-400 hover:underline"
+          >
+            Mark all as read
+          </button>
         </div>
       </div>
 
@@ -75,12 +62,14 @@ export default function NotificationsPage() {
           <div className="p-6 text-zinc-400 text-sm">No notifications yet.</div>
         ) : (
           <ul className="divide-y divide-white/10">
-            {items.filter((n) => !hiddenIds.has(n.id)).map((n) => {
+            {visibleItems.map((n) => {
               const d = n.data || {};
               const clubName = d.club_name || d.group_name || d.chat_name || d.title || "Club chat";
               const snippet = d.snippet || d.message || d.summary || "";
               const href = resolveNotificationHref(n);
               const isPwa = n.type?.startsWith("pwa.install");
+              const isUnread = !n.read_at;
+              const timeLabel = formatNotificationTime(n.created_at);
               const dismissPwa = async (e) => {
                 e.preventDefault();
                 const now = new Date().toISOString();
@@ -96,44 +85,61 @@ export default function NotificationsPage() {
                 } catch {}
                 await markItemRead(n.id);
                 setHiddenIds((prev) => new Set(prev).add(n.id));
-                try {
-                  localStorage.setItem("sf:pwa-installed", "1");
-                } catch {}
+                markPwaInstalled();
               };
               return (
-                <li key={n.id} className={`p-5 ${!n.read_at ? "bg-white/[0.03]" : ""}`}>
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="font-semibold">
-                        {isPwa
-                          ? "Install SuperFilm PWA"
-                          : n.type.startsWith("chat.mention")
-                          ? `Mention in ${clubName}`
-                          : n.type.startsWith("chat.new")
-                          ? `New messages in ${clubName}`
-                          : d.title || clubName}
+                <li
+                  key={n.id}
+                  className={`p-5 transition ${
+                    isUnread
+                      ? "bg-white/[0.04] border-l-4 border-yellow-400/80 shadow-[0_5px_25px_rgba(250,204,21,0.15)]"
+                      : "border border-transparent"
+                  }`}
+                >
+                  <div className="flex flex-col gap-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex flex-1 items-center gap-2">
+                        <div className="font-semibold leading-tight">
+                          {isPwa
+                            ? "Install SuperFilm PWA"
+                            : n.type.startsWith("chat.mention")
+                            ? `Mention in ${clubName}`
+                            : n.type.startsWith("chat.new")
+                            ? `New messages in ${clubName}`
+                            : d.title || clubName}
+                        </div>
+                        {isUnread && (
+                          <span className="text-[10px] uppercase tracking-[0.5em] text-yellow-300">
+                            New
+                          </span>
+                        )}
                       </div>
-                      {snippet && <div className="text-sm text-zinc-400 mt-1">{snippet}</div>}
+                      <Link
+                        to={href}
+                        onClick={() => markItemRead(n.id)}
+                        className="text-sm text-yellow-400 hover:underline shrink-0"
+                      >
+                        Open
+                      </Link>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      {snippet && <div className="text-sm text-zinc-400">{snippet}</div>}
                       {isPwa && d.question && (
-                        <div className="text-xs text-zinc-500 mt-1">{d.question}</div>
+                        <div className="text-xs text-zinc-500">{d.question}</div>
                       )}
                       {isPwa && (
                         <button
                           type="button"
                           onClick={dismissPwa}
-                          className="mt-2 inline-flex items-center rounded-full bg-white/10 px-2.5 py-1 text-[11px] text-zinc-200 hover:bg-white/15"
+                          className="self-start inline-flex items-center rounded-full bg-white/10 px-2.5 py-1 text-[11px] text-zinc-200 hover:bg-white/15"
                         >
                           Yes, installed
                         </button>
                       )}
+                      {timeLabel && (
+                        <div className="text-[12px] text-zinc-500">{timeLabel}</div>
+                      )}
                     </div>
-                    <Link
-                      to={href}
-                      onClick={() => markItemRead(n.id)}
-                      className="text-sm text-yellow-400 hover:underline shrink-0"
-                    >
-                      Open
-                    </Link>
                   </div>
                 </li>
               );

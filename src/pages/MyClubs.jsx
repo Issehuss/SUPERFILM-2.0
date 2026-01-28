@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import { useUser } from "../context/UserContext";
 import { Link } from "react-router-dom";
 import { Crown, Plus } from "lucide-react";
@@ -36,15 +36,15 @@ function writeCache(userId, payload) {
 }
 
 export default function MyClubs() {
-  const { user } = useUser();
+  const { user, isReady } = useUser();
   const cached = readCache(user?.id);
   const [owned, setOwned] = useState(cached?.owned || []);
   const [member, setMember] = useState(cached?.member || []);
   const resumeTick = useAppResume();
 
   const { data: clubsResult, error: clubsError } = useSafeSupabaseFetch(
-      async (session) => {
-        const resolvedUserId = user?.id || session?.user?.id;
+      async () => {
+        const resolvedUserId = user?.id;
         if (!resolvedUserId) throw new Error("no-user");
 
         const { data: o } = await supabase
@@ -84,7 +84,7 @@ export default function MyClubs() {
         return { owned: ownedList, member: memberList, userId: resolvedUserId };
       },
       [user?.id, resumeTick],
-      { enabled: true, timeoutMs: 8000, initialData: null }
+      { enabled: Boolean(user?.id && isReady), timeoutMs: 8000, initialData: null }
     );
 
   useEffect(() => {

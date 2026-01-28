@@ -1,7 +1,7 @@
 // src/components/AuthGate.jsx
 // Ensures Supabase session is hydrated before rendering the app.
 import { useEffect, useState } from "react";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 
 export default function AuthGate({ children }) {
   const [ready, setReady] = useState(false);

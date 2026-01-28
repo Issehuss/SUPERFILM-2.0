@@ -1,16 +1,30 @@
 // src/components/onboarding/OnboardingTutorial.jsx
 
 import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import slides from "./slideData";
 import Slide from "./Slide";
 import "./onboarding.css";
 import usePageVisibility from "../../hooks/usePageVisibility";
+import { useUser } from "../../context/UserContext";
+import supabase from "lib/supabaseClient";
 
 export default function OnboardingTutorial() {
   const [index, setIndex] = useState(0);
   const navigate = useNavigate();
+  const location = useLocation();
   const isVisible = usePageVisibility();
+  const { user } = useUser();
+
+  const searchParams = new URLSearchParams(location.search);
+  const isReplay = searchParams.get("replay") === "1";
+  const handleFinish = () => {
+    if (isReplay) {
+      navigate("/", { replace: true });
+      return;
+    }
+    finishOnboarding();
+  };
 
   const current = slides[index];
   const lastIndex = slides.length - 1;
@@ -28,21 +42,30 @@ export default function OnboardingTutorial() {
 
   // Auto-rotate every 2s until the last slide
   useEffect(() => {
-    if (index >= lastIndex || !isVisible) return;
-    const t = setInterval(() => {
-      setIndex((i) => {
-        if (i >= lastIndex) return i;
-        return i + 1;
-      });
+    if (!isVisible) return;
+    const t = setTimeout(() => {
+      setIndex((i) => (i + 1) % slides.length);
     }, 5000);
-    return () => clearInterval(t);
-  }, [index, lastIndex, isVisible]);
+    return () => clearTimeout(t);
+  }, [index, isVisible]);
 
   async function finishOnboarding() {
     try {
       localStorage.setItem("sf:onboarding_seen", "1");
     } catch {
       // ignore storage errors
+    }
+    if (user) {
+      try {
+        await supabase.auth.updateUser({
+          data: {
+            ...(user.user_metadata || {}),
+            onboarding_seen: true,
+          },
+        });
+      } catch (err) {
+        console.error("[Onboarding] failed to persist metadata:", err);
+      }
     }
 
     // Navigate immediately; fallback to hard redirect to avoid getting stuck
@@ -59,6 +82,25 @@ export default function OnboardingTutorial() {
     }, 600);
   }
 
+  const [seenLocal, setSeenLocal] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      setSeenLocal(localStorage.getItem("sf:onboarding_seen") === "1");
+    } catch {
+      setSeenLocal(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    if (isReplay) return;
+    if (seenLocal || Boolean(user.user_metadata?.onboarding_seen)) {
+      navigate("/", { replace: true });
+    }
+  }, [isReplay, seenLocal, user, navigate]);
+
   return (
     <div className="onboard-wrapper">
       {/* All Slides */}
@@ -72,8 +114,8 @@ export default function OnboardingTutorial() {
           isActive={i === index}      // 🔥 only active slide shows
           ctaButton={
             s.cta && i === index ? (
-              <button className="cta-btn inline" onClick={finishOnboarding}>
-                Set up your profile
+              <button className="cta-btn inline" onClick={handleFinish}>
+                {isReplay ? "Take me home" : "Set up your profile"}
               </button>
             ) : null
           }
@@ -107,7 +149,7 @@ export default function OnboardingTutorial() {
 
       {/* Skip button for early slides */}
       {index < slides.length - 1 && (
-        <button className="skip-btn" onClick={finishOnboarding}>
+        <button className="skip-btn" onClick={handleFinish}>
           Skip
         </button>
       )}

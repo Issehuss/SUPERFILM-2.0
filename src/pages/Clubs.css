@@ -3,7 +3,12 @@
    =========================== */
 .clubs2 {
   --brand-yellow: 241 183 7;
-  background: transparent;
+  background-color: var(--site-bg-edge, #0b0b0f);
+  background:
+    radial-gradient(1200px 600px at 50% 0%, rgba(255, 255, 255, 0.03), transparent 65%),
+    radial-gradient(900px 400px at 0% 50%, rgba(255, 255, 255, 0.02), transparent 60%),
+    radial-gradient(900px 400px at 100% 50%, rgba(255, 255, 255, 0.02), transparent 60%),
+    var(--site-bg-edge, #0b0b0f);
   color: #e5e5e5;
 }
 
@@ -180,6 +185,16 @@
   border-radius: 9999px;
   background: #facc15;
   box-shadow: 0 0 0 2px rgba(250, 204, 21, 0.25);
+}
+.club-card-genres {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: rgba(12, 12, 12, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  letter-spacing: 0.14em;
 }
 
 .events-grid {

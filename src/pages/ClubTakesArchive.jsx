@@ -1,7 +1,7 @@
 // src/pages/ClubTakesArchive.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import DirectorsCutBadge from "../components/DirectorsCutBadge";
 
 const normalizePoster = (posterPath) => {

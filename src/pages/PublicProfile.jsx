@@ -1,7 +1,7 @@
 // src/pages/PublicProfile.jsx
 import { useParams } from "react-router-dom";
 import { useEffect, useState } from "react";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import UserProfile from "./UserProfile"; // reuse your viewer component
 import { PROFILE_SELECT } from "../lib/profileSelect";
 import ProfileSkeleton from "../components/ProfileSkeleton";

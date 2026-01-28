@@ -1,6 +1,6 @@
 // src/hooks/useMembershipRequests.js
 import { useEffect, useState, useCallback } from "react";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 
 export default function useMembershipRequests(clubId, { status = "pending" } = {}) {
   const [rows, setRows] = useState([]);

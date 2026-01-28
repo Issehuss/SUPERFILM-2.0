@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import supabase from "../supabaseClient.js";
+import supabase from "lib/supabaseClient";
 import { useUser } from "../context/UserContext";
 import { createNotification } from "../utils/notify";
 

@@ -1,5 +1,5 @@
 // src/lib/points.js
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 
 /**
  * Call the server RPC to award points for an action.

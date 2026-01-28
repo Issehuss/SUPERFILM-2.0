@@ -1,7 +1,7 @@
 // src/pages/LeaderboardAndPlayoffs.jsx
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import { useUser } from "../context/UserContext";
 import { Info } from "lucide-react";
 import useRealtimeResume from "../hooks/useRealtimeResume";

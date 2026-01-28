@@ -1,5 +1,5 @@
 // src/components/MembershipRequestsPanel.jsx
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import { useEffect, useState } from "react";
 
 export default function MembershipRequestsPanel({ clubId }) {

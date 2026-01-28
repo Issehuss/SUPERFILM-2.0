@@ -1,19 +1,25 @@
 // src/components/ClubNoticeBoard.jsx
 import { useEffect, useState, useMemo } from "react";
 import { useUser } from "../context/UserContext";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import { Pin, Plus, History as HistoryIcon, ChevronDown } from "lucide-react";
 import useRealtimeResume from "../hooks/useRealtimeResume";
 import useSafeSupabaseFetch from "../hooks/useSafeSupabaseFetch";
 import useAppResume from "../hooks/useAppResume";
 
 const LEADER_ROLES = ["president", "vice_president"];
+const noticeCache = new Map();
 
 export default function ClubNoticeBoard({ clubId }) {
-  const { user } = useUser();
-  const [current, setCurrent] = useState(null);
-  const [history, setHistory] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const { user, isReady } = useUser();
+  const cachedNotices = clubId ? noticeCache.get(clubId) : null;
+  const initialCurrent = cachedNotices?.current || null;
+  const initialHistory = Array.isArray(cachedNotices?.history)
+    ? [...cachedNotices.history]
+    : [];
+  const [current, setCurrent] = useState(initialCurrent);
+  const [history, setHistory] = useState(initialHistory);
+  const [loading, setLoading] = useState(!Boolean(cachedNotices));
 
   // compose
   const [composeOpen, setComposeOpen] = useState(false);
@@ -30,9 +36,10 @@ export default function ClubNoticeBoard({ clubId }) {
 
   // ---- fetch leader role for this club (client UX; RLS still enforces on server) ----
   const { data: leaderRow } = useSafeSupabaseFetch(
-    async (session) => {
+    async () => {
       if (!clubId) throw new Error("no-club");
-      const resolvedUserId = user?.id || session?.user?.id;
+      const resolvedUserId = user?.id;
+      if (!resolvedUserId) throw new Error("no-user");
       const { data, error } = await supabase
         .from("club_members")
         .select("club_id, user_id, role, joined_at, accepted")
@@ -43,7 +50,7 @@ export default function ClubNoticeBoard({ clubId }) {
       return data || null;
     },
     [clubId, user?.id, appResumeTick],
-    { enabled: Boolean(clubId), timeoutMs: 8000 }
+    { enabled: Boolean(clubId && user?.id && isReady), timeoutMs: 8000 }
   );
 
   useEffect(() => {
@@ -72,18 +79,54 @@ export default function ClubNoticeBoard({ clubId }) {
         return { current: cur || null, history: hist || [] };
       },
       [clubId, resumeTick, appResumeTick],
-      { enabled: Boolean(clubId), timeoutMs: 8000 }
+      {
+        enabled: Boolean(clubId),
+        timeoutMs: 8000,
+        initialData: cachedNotices || null,
+      }
     );
 
   useEffect(() => {
+    if (cachedNotices) {
+      setLoading(false);
+      return;
+    }
     setLoading(noticesLoading);
-  }, [noticesLoading]);
+  }, [cachedNotices, noticesLoading]);
+
+  useEffect(() => {
+    if (!clubId) {
+      setCurrent(null);
+      setHistory([]);
+      return;
+    }
+    if (cachedNotices) {
+      setCurrent(cachedNotices.current || null);
+      setHistory(
+        Array.isArray(cachedNotices.history) ? cachedNotices.history : []
+      );
+      return;
+    }
+    setCurrent(null);
+    setHistory([]);
+  }, [cachedNotices, clubId]);
 
   useEffect(() => {
     if (!noticesResult) return;
     setCurrent(noticesResult.current || null);
-    setHistory(noticesResult.history || []);
+    setHistory(Array.isArray(noticesResult.history) ? noticesResult.history : []);
   }, [noticesResult]);
+
+  useEffect(() => {
+    if (!clubId || !noticesResult) return;
+    const cachedHistory = Array.isArray(noticesResult.history)
+      ? [...noticesResult.history]
+      : [];
+    noticeCache.set(clubId, {
+      current: noticesResult.current || null,
+      history: cachedHistory,
+    });
+  }, [clubId, noticesResult]);
 
   useEffect(() => {
     const ch = supabase

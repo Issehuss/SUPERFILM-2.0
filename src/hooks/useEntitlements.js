@@ -1,6 +1,6 @@
 // src/hooks/useEntitlements.js
 import { useEffect, useMemo, useState, useCallback } from "react";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import { useUser } from "../context/UserContext";
 import { trackEvent } from "../lib/analytics";
 

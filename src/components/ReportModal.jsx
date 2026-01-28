@@ -1,7 +1,7 @@
 // src/components/ReportModal.jsx
 import { useState, useMemo } from "react";
 import { X } from "lucide-react";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import { useUser } from "../context/UserContext";
 
 // Human label -> enum token (adjust to your enum)

@@ -1,7 +1,7 @@
 // src/pages/UserSearchPage.jsx
 import { useEffect, useState } from "react";
 import { useLocation, Link } from "react-router-dom";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import { profileHref } from "../utils/profileHref";
 
 function useQueryParam(name) {

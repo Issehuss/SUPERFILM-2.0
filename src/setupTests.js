@@ -42,7 +42,7 @@ jest.mock(
 );
 
 jest.mock(
-  "./supabaseClient",
+  "lib/supabaseClient",
   () => {
     const noop = () => {};
     const chain = () => ({

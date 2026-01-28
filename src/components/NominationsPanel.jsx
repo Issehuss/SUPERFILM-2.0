@@ -1,6 +1,6 @@
 // src/components/NominationsPanel.jsx
 import React, { useMemo, useState, useEffect } from "react";
-import supabase from "../supabaseClient.js";
+import supabase from "lib/supabaseClient";
 import { Trash2 } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import TmdbImage from "./TmdbImage";

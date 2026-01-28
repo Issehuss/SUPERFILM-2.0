@@ -1,6 +1,6 @@
 // src/hooks/useStaff.js
 import { useEffect, useState } from "react";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import { useUser } from "../context/UserContext";
 
 export default function useStaff(clubId) {
@@ -40,7 +40,6 @@ export default function useStaff(clubId) {
           .from("club_members")
           .select("club_id, user_id, role, joined_at, accepted")
           .eq("club_id", clubId)
-          .eq("user_id", resolvedUserId)
           .maybeSingle();
         const leader = ["president","vice_president"].includes(memRow?.role);
 

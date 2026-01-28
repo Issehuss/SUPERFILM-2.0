@@ -1,7 +1,7 @@
 // src/pages/MyClubGate.jsx
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import { useUser } from "../context/UserContext";
 
 export default function MyClubGate() {

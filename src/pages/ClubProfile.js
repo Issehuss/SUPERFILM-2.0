@@ -16,9 +16,9 @@ import {
   LogOut,
 } from "lucide-react";
 
-import { useUser } from "../context/UserContext";
+import { useUser, useMembershipRefresh } from "../context/UserContext";
 import "react-datepicker/dist/react-datepicker.css";
-import supabase from "../supabaseClient.js";
+import supabase from "lib/supabaseClient";
 import TmdbImage from "../components/TmdbImage";
 import uploadAvatar from "../lib/uploadAvatar";
 import { toast } from "react-hot-toast";
@@ -29,7 +29,7 @@ import { ASPECTS } from "../constants/aspects";
 import FilmAverageCell from "../components/FilmAverageCell.jsx";
 import DatePicker from "react-datepicker";
 import { leaveClubAndMaybeDelete } from "../lib/leaveClub";
-import useRealtimeResume from "../hooks/useRealtimeResume";
+import { markClubLeft } from "../lib/membershipCooldown";
 import useSafeSupabaseFetch from "../hooks/useSafeSupabaseFetch";
 import useAppResume from "../hooks/useAppResume";
 
@@ -44,8 +44,15 @@ import JoinClubButton from "../components/JoinClubButton";
 import DirectorsCutBadge from "../components/DirectorsCutBadge";
 import PartnerBadge from "../components/PartnerBadge.jsx";
 
+// helper that exposes a `preload()` hook on lazy components
+const lazyWithPreload = (factory) => {
+  const Component = lazy(factory);
+  Component.preload = factory;
+  return Component;
+};
+
 // lazy: below-the-fold / admin-ish / heavy
-const ClubNoticeBoard = lazy(() => import("../components/ClubNoticeBoard"));
+const ClubNoticeBoard = lazyWithPreload(() => import("../components/ClubNoticeBoard"));
 const FeaturedFilms = lazy(() => import("../components/FeaturedFilms.jsx"));
 const ClubYearInReview = lazy(() => import("../components/ClubYearInReview.jsx"));
 const NominationsCarousel = lazy(() => import("../components/NominationsCarousel.jsx"));
@@ -97,32 +104,79 @@ const AvatarCropper = lazy(() => import("../components/AvatarCropper"));
 // UUID detector
 const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CLUB_CACHE_TTL = 1000 * 60 * 5; // 5 minutes
-const clubCacheKey = (id) => `sf.club.cache.v1:${id}`;
+
+const clubCacheKeyById = (id) => `sf.club.cache.v1:id:${id}`;
+const clubSlugToIdKey = (slug) => `sf.club.slugToId.v1:${slug}`;
+const clubCacheKeyLegacy = (param) => `sf.club.cache.v1:${param}`;
 const CLUB_BANNER_ASPECT = 1152 / 276;
 
-const readClubCache = (id) => {
-  if (!id) return null;
+const readClubCache = ({ param, id, slug } = {}) => {
   try {
-    const raw = localStorage.getItem(clubCacheKey(id));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed?.ts || !parsed?.data) return null;
-    if (Date.now() - parsed.ts > CLUB_CACHE_TTL) return null;
-    return parsed.data;
+    if (id) {
+      const raw = localStorage.getItem(clubCacheKeyById(id));
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (
+          parsed?.ts &&
+          parsed?.data &&
+          Date.now() - parsed.ts <= CLUB_CACHE_TTL
+        ) {
+          return parsed.data;
+        }
+      }
+    }
+
+    if (slug) {
+      const pointedId = localStorage.getItem(clubSlugToIdKey(slug));
+      if (pointedId) {
+        const raw = localStorage.getItem(clubCacheKeyById(pointedId));
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (
+            parsed?.ts &&
+            parsed?.data &&
+            Date.now() - parsed.ts <= CLUB_CACHE_TTL
+          ) {
+            return parsed.data;
+          }
+        }
+      }
+    }
+
+    if (param) {
+      const raw = localStorage.getItem(clubCacheKeyLegacy(param));
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (
+          parsed?.ts &&
+          parsed?.data &&
+          Date.now() - parsed.ts <= CLUB_CACHE_TTL
+        ) {
+          return parsed.data;
+        }
+      }
+    }
   } catch {
-    return null;
+    //
   }
+  return null;
 };
 
-const writeClubCache = (id, data) => {
-  if (!id || !data) return;
+const writeClubCache = ({ clubId, slug, param, data }) => {
+  if (!data) return;
   try {
-    localStorage.setItem(
-      clubCacheKey(id),
-      JSON.stringify({ ts: Date.now(), data })
-    );
+    const payload = JSON.stringify({ ts: Date.now(), data });
+    if (clubId) {
+      localStorage.setItem(clubCacheKeyById(clubId), payload);
+    }
+    if (slug && clubId) {
+      localStorage.setItem(clubSlugToIdKey(slug), String(clubId));
+    }
+    if (param) {
+      localStorage.setItem(clubCacheKeyLegacy(param), payload);
+    }
   } catch {
-    // ignore storage write failures (private mode, quota)
+    //
   }
 };
 
@@ -403,6 +457,7 @@ function mapClubRowToUI(row) {
     tagline: row.tagline || "",
     about: row.about || "",
     location: row.location || "",
+    genres: Array.isArray(row.genres) ? row.genres : [],
     banner: safeImageSrc(row.banner_url, fallbackBanner),
     profileImageUrl: safeImageSrc(row.profile_image_url, ""),
     nameLastChangedAt: row.name_last_changed_at || null,
@@ -410,6 +465,7 @@ function mapClubRowToUI(row) {
     isPrivate: !!row.is_private || row.privacy_mode === "private",
     privacyMode: row.privacy_mode || null,
     visibility: row.visibility || null,
+    createdBy: row.created_by || null,
 
     // ---------------------------------------------------------------
     // NEXT EVENT (now correctly pulled ONLY from club_next_screening)
@@ -617,7 +673,7 @@ function useFilmTakes() {
 // ...
 
 // REPLACE your existing ClubAddTake function with this whole block
-function ClubAddTake({ movie, club }) {
+function ClubAddTake({ movie, club, clubRefreshEpoch }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [rating, setRating] = useState(null); // 0.5–5.0
@@ -627,7 +683,6 @@ function ClubAddTake({ movie, club }) {
 
   const { user } = useUser();
   const { addTake } = useFilmTakes();
-  const appResumeTick = useAppResume();
 
   // ✅ Hooks must come before any early return
   useEffect(() => {
@@ -655,7 +710,7 @@ function ClubAddTake({ movie, club }) {
       if (error) throw error;
       return count || 0;
     },
-    [user?.id, club?.id, movie?.id, appResumeTick],
+    [user?.id, club?.id, movie?.id, clubRefreshEpoch],
     { enabled: Boolean(user?.id && club?.id && movie?.id), timeoutMs: 8000, initialData: 0 }
   );
 
@@ -834,19 +889,51 @@ const [aspect, setAspect] = useState(null);  // standout craft key
   // 0.5–5.0
         // blurb
   
-        const { user, profile, saveProfilePatch, isPartner, hasRole } = useUser();
-        const appResumeTick = useAppResume();
+  const { user, profile, saveProfilePatch, isPartner, hasRole, sessionLoaded } = useUser();
+  const { appResumeTick, ready: resumeReady } = useAppResume();
+  const { bumpMembership } = useMembershipRefresh();
 
-  const [isMember, setIsMember] = useState(false);
-  const [showLazy, setShowLazy] = useState(false);
+const [isMember, setIsMember] = useState(false);
+const [showLazy, setShowLazy] = useState(false);
+const [clubRefreshEpoch, setClubRefreshEpoch] = useState(0);
+const noticeBoardPreloadedForClubRef = useRef(null);
+const tmdbPosterMemoRef = useRef({});
+const resumeTickRef = useRef(appResumeTick);
 
-  const { id: routeId, clubParam } = useParams();
-  const idParam = (clubParam || routeId || '').trim();
+  const { slug: routeSlug, clubParam, id: routeId } = useParams();
+  const idParam = (routeSlug || clubParam || routeId || "").trim();
   const navigate = useNavigate();
 
+  useEffect(() => {
+    if (!sessionLoaded || !resumeReady || !idParam) return;
+    if (appResumeTick === resumeTickRef.current) return;
+    resumeTickRef.current = appResumeTick;
+    setClubRefreshEpoch((prev) => prev + 1);
+  }, [appResumeTick, sessionLoaded, resumeReady, idParam]);
 
-  const [club, setClub] = useState(() => readClubCache(idParam));
-  const isCuratedClub = club?.type === "superfilm_curated";
+  const isUuidParam = UUID_RX.test(idParam);
+  const initialCachedClub = readClubCache({
+    param: idParam,
+    slug: !isUuidParam ? idParam : null,
+    id: isUuidParam ? idParam : null,
+  });
+const [club, setClub] = useState(initialCachedClub);
+const isCuratedClub = club?.type === "superfilm_curated";
+
+const isMemberByContext =
+  Array.isArray(user?.joinedClubs) &&
+  (club?.id
+    ? user.joinedClubs.some((c) => String(c) === String(club?.id))
+    : false);
+
+const canFetchMembers = Boolean(
+  user?.id &&
+    (isPartner ||
+      hasRole("admin") ||
+      hasRole("president") ||
+      hasRole("vice_president") ||
+      isMemberByContext)
+);
 
 // --- Next Screening state ---
 const [nextScreening, setNextScreening] = useState(null);
@@ -869,12 +956,21 @@ const [nextScreening, setNextScreening] = useState(null);
     };
   }, []);
 
+  useEffect(() => {
+    if (!club?.id || !showLazy) return;
+    if (noticeBoardPreloadedForClubRef.current === club.id) return;
+    ClubNoticeBoard.preload?.();
+    noticeBoardPreloadedForClubRef.current = club.id;
+  }, [club?.id, showLazy]);
+
 const saveNextScreening = async () => {
   if (savingNext) return;
+  setSavingNext(true);
   console.info("[nextScreening] save clicked", {
     nextScreening,
     persistedPosterPath,
   });
+  try {
 
   if (!club?.id) {
     console.warn("No club.id — aborting save");
@@ -930,11 +1026,12 @@ const saveNextScreening = async () => {
     caption: nextScreening.caption ?? null,
   };
 
-  console.info("🔥 Payload to save:", payload);
-  toast.loading("Saving next screening…", { id: "next-save" });
-
-  setSavingNext(false);
-  toast.error("Next screening updates are disabled.");
+    console.info("🔥 Payload to save:", payload);
+    toast.loading("Saving next screening…", { id: "next-save" });
+    toast.error("Next screening updates are disabled.");
+  } finally {
+    setSavingNext(false);
+  }
 };
 
 
@@ -944,7 +1041,7 @@ const nextPoster = nextScreening?.poster || null;
 const nextTitle  = nextScreening?.title || null;
 
   const nextFilmAverage = club?.nextEvent?.average ?? club?.nextEvent?.avg ?? null;
-  const [loading, setLoading] = useState(() => !readClubCache(idParam));
+  const [loading, setLoading] = useState(!initialCachedClub);
   const [notFound, setNotFound] = useState(false);
   const [lastAdded, setLastAdded] = useState(null);
   // Tracks the film_id currently persisted in DB (for archiving takes on change)
@@ -977,7 +1074,6 @@ const [rawAvatarImage, setRawAvatarImage] = useState(null);
 
   // NEW: avatar + rename UI state
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
-  const realtimeTick = useRealtimeResume();
 const [renameError, setRenameError] = useState('');
 const [renameOk, setRenameOk] = useState('');
 const [newName, setNewName] = useState('');
@@ -986,6 +1082,15 @@ const posterRef = useRef(null);
 const teaserWrapRef = useRef(null);
 const [teaserHeight, setTeaserHeight] = useState(null);
 const [members, setMembers] = useState([]);
+const [featuredFilmsState, setFeaturedFilmsState] = useState(
+  initialCachedClub?.featuredFilms || []
+);
+const [featuredMapState, setFeaturedMapState] = useState(
+  initialCachedClub?.featuredMap || {}
+);
+const [activityFeed, setActivityFeed] = useState(
+  initialCachedClub?.activityFeed || []
+);
 const membersCount = useMemo(
   () => (Array.isArray(members) ? members.length : Number(club?.members) || 0),
   [members, club?.members]
@@ -1000,12 +1105,8 @@ const { isStaff } = useStaff(club?.id);
 const [nextAvg, setNextAvg] = useState(null);
 const [nextRatingCounts, setNextRatingCounts] = useState([0, 0, 0, 0, 0]);
 const [nextRatingTotal, setNextRatingTotal] = useState(0);
-const [isClubAdmin, setIsClubAdmin] = useState(false);
-const allowed = ["president", "vice", "vice_president", "admin", "moderator", "partner"];
 const [tmdbBusy, setTmdbBusy] = useState(false);
 const [nominations, setNominations] = useState([]);
-
-
 
 const [isMounted, setIsMounted] = useState(false);
 
@@ -1052,19 +1153,6 @@ useEffect(() => {
         })
       : prev
   );
-
-  setClub((prev) =>
-    prev
-      ? {
-          ...prev,
-          membersList: Array.isArray(prev.membersList)
-            ? prev.membersList.map((m) =>
-                m.id === user.id ? { ...m, avatar: profile.avatar_url || m.avatar } : m
-              )
-            : prev.membersList,
-        }
-      : prev
-  );
 }, [user?.id, profile?.avatar_url]);
 
 
@@ -1080,65 +1168,67 @@ useEffect(() => {
 
 
 
-const {
-  data: membersResult,
-  loading: membersLoading,
-  error: membersError,
-  retry: retryMembers,
-} = useSafeSupabaseFetch(
-  async () => {
-    if (!club?.id) throw new Error("no-club");
-    const { data: memRows, error: memErr } = await supabase
-      .from("club_members")
-      .select("club_id, user_id, role, joined_at, accepted")
-      .eq("club_id", club.id);
+  const {
+    data: membersResult,
+    loading: membersLoading,
+    error: membersError,
+  } = useSafeSupabaseFetch(
+    async () => {
+      if (!club?.id) throw new Error("no-club");
 
-    if (memErr) throw memErr;
+      const { data: rows, error } = await supabase
+        .from("club_members")
+        .select(`
+          club_id, user_id, role, joined_at, accepted,
+          profiles:profiles!club_members_user_id_fkey (
+            id, slug, display_name, avatar_url, is_premium, plan
+          )
+        `)
+        .eq("club_id", club.id);
 
-    const ids = (memRows || []).map(r => r.user_id).filter(Boolean);
-    let profilesMap = {};
+      if (error) throw error;
 
-    if (ids.length) {
-      const { data: profRows, error: profErr } = await supabase
-        .from("profiles")
-        .select("id, slug, display_name, avatar_url, is_premium, plan")
-        .in("id", ids);
+      const priority = { president: 0, vice_president: 1, member: 2 };
+      const sorted = (rows || []).slice().sort((a, b) => {
+        const ra = a?.role || "member";
+        const rb = b?.role || "member";
+        const pa = priority[ra] ?? 9;
+        const pb = priority[rb] ?? 9;
+        if (pa !== pb) return pa - pb;
+        const an = (a?.profiles?.display_name || "").toLowerCase();
+        const bn = (b?.profiles?.display_name || "").toLowerCase();
+        return an.localeCompare(bn);
+      });
 
-      if (!profErr) {
-        profilesMap = Object.fromEntries(
-          (profRows || []).map(p => [p.id, p])
-        );
-      }
+      return sorted;
+    },
+    [club?.id, canFetchMembers, clubRefreshEpoch],
+    {
+      enabled: Boolean(canFetchMembers),
+      timeoutMs: 8000,
+      initialData: [],
     }
-
-    const priority = { president: 0, vice_president: 1, member: 2 };
-    const merged = (memRows || []).map(r => ({
-      user_id: r.user_id,
-      role: r.role || "member",
-      profiles: profilesMap[r.user_id] || null,
-    }));
-
-    const sorted = merged.slice().sort((a, b) => {
-      const pa = priority[a.role] ?? 9;
-      const pb = priority[b.role] ?? 9;
-      if (pa !== pb) return pa - pb;
-      const an = (a.profiles?.display_name || "").toLowerCase();
-      const bn = (b.profiles?.display_name || "").toLowerCase();
-      return an.localeCompare(bn);
-    });
-
-    return sorted;
-  },
-  [club?.id, appResumeTick],
-  { enabled: Boolean(club?.id), timeoutMs: 8000, initialData: [] }
-);
+  );
 
 useEffect(() => {
-  if (Array.isArray(membersResult)) {
-    setMembers(membersResult);
+  if (!Array.isArray(membersResult)) return;
+
+    const enriched = membersResult.map((m) => {
+      if (m.user_id === user?.id && profile?.avatar_url) {
+        return {
+          ...m,
+          profiles: {
+            ...(m.profiles || {}),
+            avatar_url: profile.avatar_url,
+          },
+        };
+      }
+      return m;
+    });
+
+    setMembers(enriched);
     setMembersErr("");
-  }
-}, [membersResult]);
+  }, [membersResult, profile?.avatar_url, profile?.display_name, user?.id]);
 
 useEffect(() => {
   if (membersError) {
@@ -1162,7 +1252,7 @@ const setMemberRole = async (userId, role) => {
     return;
   }
   toast?.success ? toast.success("Role updated") : console.log("Role updated");
-  await retryMembers();
+  setClubRefreshEpoch((v) => v + 1);
 };
 
 const transferPresidency = async (userId) => {
@@ -1178,7 +1268,7 @@ const transferPresidency = async (userId) => {
     return;
   }
   toast?.success ? toast.success("Presidency transferred") : console.log("Presidency transferred");
-  await retryMembers();
+  setClubRefreshEpoch((v) => v + 1);
 };
 
 
@@ -1220,8 +1310,8 @@ useEffect(() => {
 }, []);
 
 const { data: openReviewRow, error: openReviewError } = useSafeSupabaseFetch(
-  async () => {
-    if (!club?.id || !nextFilmId) return null;
+    async () => {
+      if (!club?.id || !nextFilmId) return null;
     const { data, error } = await supabase
       .from("club_reviews")
       .select("id, club_id, tmdb_id, title, poster_url, year, state, opens_at, closes_at")
@@ -1234,7 +1324,7 @@ const { data: openReviewRow, error: openReviewError } = useSafeSupabaseFetch(
     if (error) throw error;
     return data || null;
   },
-  [club?.id, nextFilmId, appResumeTick],
+  [club?.id, nextFilmId, clubRefreshEpoch],
   { enabled: Boolean(club?.id && nextFilmId), timeoutMs: 8000, initialData: null }
 );
 
@@ -1251,24 +1341,27 @@ useEffect(() => {
 
 
 useEffect(() => {
-  if (!club?.id) return;
+  if (!club?.id || !isMounted) {
+    return;
+  }
 
-  const ch = supabase
+  const channel = supabase
     .channel(`members:${club.id}`)
     .on(
       "postgres_changes",
       { event: "*", schema: "public", table: "club_members", filter: `club_id=eq.${club.id}` },
-      () => {
-        // just re-use existing loader
-        retryMembers();
-      }
+      () => setClubRefreshEpoch((v) => v + 1)
     )
     .subscribe();
 
   return () => {
-    supabase.removeChannel(ch);
+    if (channel) {
+      try {
+        supabase.removeChannel(channel);
+      } catch {}
+    }
   };
-}, [club?.id, retryMembers, realtimeTick]);
+}, [club?.id, isMounted]);
 
 
 
@@ -1279,12 +1372,17 @@ useEffect(() => {
   banner_url, profile_image_url, name_last_changed_at,
   featured_posters,
   type, is_private, privacy_mode, visibility,
+  created_by,
   next_screening:club_next_screening(*)
 `;
 
   // Loader: try UUID → slug → id (covers numeric IDs too)
   useEffect(() => {
-    const cached = readClubCache(idParam);
+    const cached = readClubCache({
+      param: idParam,
+      slug: !isUuidParam ? idParam : null,
+      id: isUuidParam ? idParam : null,
+    });
     if (cached) {
       setClub(cached);
       setLoading(false);
@@ -1292,75 +1390,76 @@ useEffect(() => {
       setClub(null);
       setLoading(true);
     }
-  }, [idParam]);
+  }, [idParam, isUuidParam]);
 
   const { data: clubLoadResult, error: clubLoadError } = useSafeSupabaseFetch(
     async () => {
       if (!idParam) return null;
-      let lastTried = "";
-      let lastError = null;
 
-      const tryFetch = async (field, value, label) => {
-        lastTried = lastTried ? `${lastTried} → ${label}` : label;
-        const { data, error } = await supabase
-          .from("clubs")
-          .select(clubSelectCols)
-          .eq(field, value)
-          .maybeSingle();
-        if (error) lastError = error;
-        return data || null;
-      };
+      const lookupField = UUID_RX.test(idParam) ? "id" : "slug";
+      const lookupValue = idParam;
 
-      let data = null;
-      if (UUID_RX.test(idParam)) {
-        data = await tryFetch("id", idParam, "id (uuid)");
-      }
-      if (!data) {
-        data = await tryFetch("slug", idParam, "slug");
-      }
-      if (!data && UUID_RX.test(idParam)) {
-        data = await tryFetch("id", idParam, "id");
+      const { data, error } = await supabase
+        .from("clubs")
+        .select(clubSelectCols)
+        .eq(lookupField, lookupValue)
+        .maybeSingle();
+
+      if (error) {
+        return {
+          data: null,
+          lastTried: `${lookupField}=${lookupValue}`,
+          error,
+        };
       }
 
       if (!data) {
-        return { data: null, lastTried, error: lastError };
+        return {
+          data: null,
+          lastTried: `${lookupField}=${lookupValue}`,
+          error: null,
+        };
       }
 
       const mapped = mapClubRowToUI(data);
-      if (mapped.nextEvent && !mapped.nextEvent.poster && mapped.nextEvent.title) {
-        const guess = await fetchPosterFromTMDB(cleanTitleForSearch(mapped.nextEvent.title));
-        mapped.nextEvent.poster = guess?.poster || fallbackNext;
-      }
       try {
         const raw = localStorage.getItem(`sf_featured_map_${data.id}`);
         mapped.featuredMap = raw ? JSON.parse(raw) : {};
       } catch {}
 
-      return { data: mapped, lastTried, error: lastError };
+      return {
+        data: mapped,
+        lastTried: `${lookupField}=${lookupValue}`,
+        error: null,
+      };
     },
-    [idParam, appResumeTick],
+    [idParam, clubRefreshEpoch],
     { enabled: Boolean(idParam), timeoutMs: 8000, initialData: null }
   );
 
   useEffect(() => {
     if (!idParam) return;
-    if (clubLoadResult) {
-      setDebugParam(idParam);
-      setLastTried(clubLoadResult.lastTried || "");
-      setLastError(clubLoadResult.error || null);
+    if (!clubLoadResult) return;
+    setDebugParam(idParam);
+    setLastTried(clubLoadResult.lastTried || "");
+    setLastError(clubLoadResult.error || null);
 
-      if (clubLoadResult.data) {
-        writeClubCache(idParam, clubLoadResult.data);
-        setClub(clubLoadResult.data);
-        setPersistedFilmId(clubLoadResult.data?.nextEvent?.movieId ?? null);
-        setNewName(clubLoadResult.data?.name || "");
-        setNotFound(false);
-        setLoading(false);
-        return;
-      }
-      setNotFound(true);
+    if (clubLoadResult.data) {
+      const nextClub = clubLoadResult.data;
+      writeClubCache({
+        clubId: nextClub.id,
+        slug: nextClub.slug || null,
+        param: idParam,
+        data: nextClub,
+      });
+      setClub(nextClub);
+      setPersistedFilmId(nextClub?.nextEvent?.movieId ?? null);
+      setNewName(nextClub?.name || "");
+      setNotFound(false);
       setLoading(false);
+      return;
     }
+    setLoading(false);
   }, [clubLoadResult, idParam]);
 
   useEffect(() => {
@@ -1370,6 +1469,13 @@ useEffect(() => {
       setLoading(false);
     }
   }, [clubLoadError]);
+
+  useEffect(() => {
+    if (loading) return;
+    if (!idParam) return;
+    if (clubLoadResult || clubLoadError) return;
+    setNotFound(true);
+  }, [loading, clubLoadResult, clubLoadError, idParam]);
 
 
 
@@ -1391,12 +1497,12 @@ const { data: featuredRows, error: featuredError } = useSafeSupabaseFetch(
     if (error) throw error;
     return rows || [];
   },
-  [club?.id, appResumeTick],
-  { enabled: Boolean(club?.id), timeoutMs: 8000, initialData: null }
+  [club?.id, showLazy, clubRefreshEpoch],
+  { enabled: Boolean(club?.id && showLazy), timeoutMs: 8000, initialData: null }
 );
 
 useEffect(() => {
-  if (!club?.id || !Array.isArray(featuredRows) || featuredRows.length === 0) return;
+  if (!club?.id || !Array.isArray(featuredRows)) return;
   const TMDB = "https://image.tmdb.org/t/p/w500";
   const urls = [];
   const map = {};
@@ -1409,21 +1515,12 @@ useEffect(() => {
     }
   }
 
-  if (urls.length) {
-    setClub((prev) =>
-      prev
-        ? {
-            ...prev,
-            featuredFilms: urls,
-            featuredMap: map,
-          }
-        : prev
-    );
+  setFeaturedFilmsState(urls);
+  setFeaturedMapState(map);
 
-    try {
-      localStorage.setItem(`sf_featured_map_${club.id}`, JSON.stringify(map));
-    } catch {}
-  }
+  try {
+    localStorage.setItem(`sf_featured_map_${club.id}`, JSON.stringify(map));
+  } catch {}
 }, [featuredRows, club?.id]);
 
 useEffect(() => {
@@ -1432,68 +1529,87 @@ useEffect(() => {
   }
 }, [featuredError]);
 
-// Load Next Screening from DB into state
-const { data: nextScreeningRow, error: nextScreeningError } = useSafeSupabaseFetch(
-  async () => {
-    if (!club?.id) return null;
-    const { data, error } = await supabase
-      .from("club_next_screening_v")
-      .select("club_id, title, poster_path, screening_at, location")
-      .eq("club_id", club.id)
-      .limit(1);
-    if (error) throw error;
-    return Array.isArray(data) ? data[0] : data || null;
-  },
-  [club?.id, appResumeTick],
-  { enabled: Boolean(club?.id), timeoutMs: 8000, initialData: null }
-);
-
 useEffect(() => {
-  const row = nextScreeningRow;
-  if (!row) return;
-
-  const posterUrl = row.poster_path
-    ? `https://image.tmdb.org/t/p/w500${row.poster_path}`
-    : fallbackNext;
-  const finalPoster = posterUrl || fallbackNext;
-  setNextScreening({
-    filmId: null,
-    title: row.title,
-    poster: finalPoster,
-    posterPath: row.poster_path || null,
-    date: row.screening_at,
-    location: row.location,
-    caption: null,
-    id: null,
-  });
-  setPersistedFilmId(null);
-
-  setClub((prev) =>
-    prev
-      ? {
-          ...prev,
-          nextEvent: {
-            ...prev.nextEvent,
-            title: row.title,
-            date: row.screening_at,
-            location: row.location,
-            caption: null,
-            poster:
-              normalizeTmdbPoster(row.poster_path).url ||
-              prev.nextEvent?.poster ||
-              fallbackNext,
-            movieId: null,
-          },
-        }
-      : prev
-  );
-}, [nextScreeningRow]);
-
-useEffect(() => {
-  if (nextScreeningError) {
-    console.warn("[nextScreening] load error:", nextScreeningError);
+  if (isEditing) return;
+  if (!club?.nextEvent) {
+    setNextScreening(null);
+    return;
   }
-}, [nextScreeningError]);
+
+  const ev = club.nextEvent;
+  const posterUrl =
+    ev.poster || (ev.posterPath ? normalizeTmdbPoster(ev.posterPath).url : null);
+
+  setNextScreening({
+    filmId: ev.movieId ?? null,
+    title: ev.title || "Screening",
+    poster: posterUrl || fallbackNext,
+    posterPath: extractTmdbPath(posterUrl) ?? null,
+    date: ev.date ?? null,
+    location: ev.location ?? "",
+    caption: ev.caption ?? null,
+    id: ev.id ?? null,
+  });
+}, [club?.nextEvent, isEditing]);
+
+useEffect(() => {
+  if (!showLazy || isEditing) return;
+
+  const title =
+    (club?.nextEvent?.title || nextScreening?.title || "").trim();
+  const filmId = club?.nextEvent?.movieId ?? nextScreening?.filmId ?? null;
+
+  if (!title) return;
+
+  const currentPoster =
+    nextScreening?.poster || club?.nextEvent?.poster || null;
+  const hasRealPoster =
+    !!currentPoster &&
+    currentPoster !== fallbackNext &&
+    !isBadPoster(currentPoster);
+
+  if (hasRealPoster) return;
+
+  const memoKey = `${filmId || "noid"}::${title.toLowerCase()}`;
+  if (tmdbPosterMemoRef.current[memoKey]) return;
+  tmdbPosterMemoRef.current[memoKey] = true;
+
+  let cancelled = false;
+
+  (async () => {
+    try {
+      const guess = await fetchPosterFromTMDB(cleanTitleForSearch(title));
+      if (cancelled) return;
+
+      const guessedUrl = guess?.poster || null;
+      const guessedPath = extractTmdbPath(guessedUrl) ?? null;
+      const normalized = guessedPath
+        ? normalizeTmdbPoster(guessedPath).url
+        : guessedUrl;
+
+      if (!normalized) return;
+
+      setNextScreening((prev) => ({
+        ...(prev || {}),
+        poster: normalized,
+        posterPath: guessedPath || prev?.posterPath || null,
+      }));
+    } catch {
+      // ignore
+    }
+  })();
+
+  return () => {
+    cancelled = true;
+  };
+}, [
+  showLazy,
+  isEditing,
+  club?.nextEvent?.title,
+  club?.nextEvent?.movieId,
+  nextScreening?.title,
+  nextScreening?.filmId,
+]);
 
 
 
@@ -1531,58 +1647,21 @@ useEffect(() => {
   }
 }, [nextScreening?.posterPath, nextScreening?.poster]);
   
-  // Hydrate members for real UUID clubs
-  const { data: memberListRows, error: memberListError } = useSafeSupabaseFetch(
-    async () => {
-      if (!club?.id || !UUID_RX.test(String(club.id))) return null;
-      const { data: rows, error } = await supabase
-        .from("club_members")
-        .select("club_id, user_id, role, joined_at, accepted")
-        .eq("club_id", club.id);
-      if (error) throw error;
-      return rows || [];
-    },
-    [club?.id, user?.id, appResumeTick],
-    { enabled: Boolean(club?.id), timeoutMs: 8000, initialData: null }
-  );
+const currentUserId = user?.id || 'u_creator';
+const isClubCreator = Boolean(user?.id && club?.createdBy && user?.id === club?.createdBy);
 
-  useEffect(() => {
-    if (!Array.isArray(memberListRows) || !memberListRows.length) return;
-    setClub((prev) =>
-      prev
-        ? {
-            ...prev,
-            membersList: memberListRows.map((r) => ({
-              id: r.user_id,
-              name: r.user_id === user?.id ? user?.name || "You" : "Member",
-              avatar: r.user_id === user?.id ? user?.avatar || fallbackAvatar : fallbackAvatar,
-              role: r.role || ROLE.NONE,
-            })),
-            members: memberListRows.length,
-          }
-        : prev
-    );
-  }, [memberListRows, user?.id]);
-
-  useEffect(() => {
-    if (memberListError) {
-      console.warn("[membersList] load error:", memberListError);
-    }
-  }, [memberListError]);
-
-
-  const currentUserId = user?.id || 'u_creator';
+  const clubWithFeatured = useMemo(() => {
+    if (!club) return club;
+    return { ...club, featuredFilms: featuredFilmsState };
+  }, [club, featuredFilmsState]);
 
   const viewerMember = useMemo(
-    () => (club?.membersList || []).find((m) => m.id === currentUserId),
-    [club, currentUserId]
+    () => (members || []).find((m) => m.id === currentUserId),
+    [members, currentUserId]
   );
  
   const isVice = viewerMember?.role === ROLE.VICE;
   
-  const isMemberByContext =
-    Array.isArray(user?.joinedClubs) && (club?.id ? user.joinedClubs.some((c) => String(c) === String(club.id)) : false);
-
   // Robust gate for member-only sections
 // TMDB numeric ID for rating & takes
 
@@ -1595,25 +1674,13 @@ useEffect(() => {
     // Put this AFTER hasRole/isPresident/isVice/isStaff/canEdit/isMember are defined
 
 
-const { data: memberRow } = useSafeSupabaseFetch(
-  async () => {
-    if (!club?.id || !user?.id) return null;
-    const { data, error } = await supabase
-      .from("club_members")
-      .select("club_id, user_id, role, joined_at, accepted")
-      .eq("club_id", club.id)
-      .eq("user_id", user.id)
-      .maybeSingle();
-    if (error) throw error;
-    return data || null;
-  },
-  [club?.id, user?.id, appResumeTick],
-  { enabled: Boolean(club?.id && user?.id), timeoutMs: 8000, initialData: null }
-);
-
 useEffect(() => {
-  setIsMember(Boolean(memberRow) || isPresident || isVice || isStaff);
-}, [memberRow, isPresident, isVice, isStaff]);
+  const hasMembership =
+    !!user?.id &&
+    (isMemberByContext ||
+      (Array.isArray(members) && members.some((m) => m.user_id === user.id)));
+  setIsMember(hasMembership || isClubCreator || isPresident || isVice || isStaff);
+}, [members, user?.id, isPresident, isVice, isStaff, isMemberByContext, isClubCreator]);
 
 const canSeeMembersOnly =
   !!user?.id &&
@@ -1625,6 +1692,12 @@ const canSeeMembersOnly =
     isStaff ||
     isMember
   );
+
+useEffect(() => {
+  if (!canSeeMembersOnly) {
+    setMembers([]);
+  }
+}, [canSeeMembersOnly]);
 
 
 
@@ -1667,13 +1740,13 @@ const { data: recentActivityRows, error: recentActivityError } = useSafeSupabase
     if (error) throw error;
     return data || [];
   },
-  [club?.id, appResumeTick],
-  { enabled: Boolean(club?.id), timeoutMs: 8000, initialData: [] }
+  [club?.id, showLazy, clubRefreshEpoch],
+  { enabled: Boolean(club?.id && showLazy), timeoutMs: 8000, initialData: [] }
 );
 
 useEffect(() => {
   if (!club?.id) {
-    setClub((prev) => (prev ? { ...prev, activityFeed: [] } : prev));
+    setActivityFeed([]);
     return;
   }
   if (Array.isArray(recentActivityRows)) {
@@ -1682,13 +1755,13 @@ useEffect(() => {
       text: r.summary || "",
       ts: new Date(r.created_at).getTime(),
     }));
-    setClub((prev) => (prev ? { ...prev, activityFeed: mapped } : prev));
+    setActivityFeed(mapped);
   }
 }, [recentActivityRows, club?.id]);
 
 useEffect(() => {
   if (recentActivityError) {
-    setClub((prev) => (prev ? { ...prev, activityFeed: [] } : prev));
+    setActivityFeed([]);
   }
 }, [recentActivityError]);
 
@@ -1702,7 +1775,6 @@ useEffect(() => {
 const {
   data: ratingRows,
   error: ratingError,
-  retry: retryRatings,
 } = useSafeSupabaseFetch(
   async () => {
     if (!club?.id || !nextFilmId) return [];
@@ -1714,8 +1786,8 @@ const {
     if (error) throw error;
     return data || [];
   },
-  [club?.id, nextFilmId, appResumeTick],
-  { enabled: Boolean(club?.id && nextFilmId), timeoutMs: 8000, initialData: [] }
+  [club?.id, nextFilmId, showLazy, clubRefreshEpoch],
+  { enabled: Boolean(club?.id && nextFilmId && showLazy), timeoutMs: 8000, initialData: [] }
 );
 
 useEffect(() => {
@@ -1754,76 +1826,19 @@ useEffect(() => {
 
 
 useEffect(() => {
-  function onRatingsUpdated(e) {
+  const onRatingsUpdated = (e) => {
     if (!club?.id || !nextFilmId) return;
     if (e?.detail?.clubId !== club.id) return;
     if (e?.detail?.filmId !== nextFilmId) return;
-    retryRatings();
-  }
+    setClubRefreshEpoch((v) => v + 1);
+  };
   window.addEventListener("ratings-updated", onRatingsUpdated);
   window.addEventListener("club-film-takes-updated", onRatingsUpdated);
   return () => {
     window.removeEventListener("ratings-updated", onRatingsUpdated);
     window.removeEventListener("club-film-takes-updated", onRatingsUpdated);
   };
-}, [club?.id, nextFilmId, retryRatings]);
-
-
-const { data: clubAdminOk, error: clubAdminError } = useSafeSupabaseFetch(
-  async () => {
-    if (!user?.id || !club?.id) return false;
-    const allowed = ["president", "vice", "admin", "moderator"];
-
-    const { data: staffRow, error: staffErr } = await supabase
-      .from("club_members")
-      .select("club_id, user_id, role, joined_at, accepted")
-      .eq("club_id", club.id)
-      .eq("user_id", user.id)
-      .maybeSingle();
-    if (staffErr) throw staffErr;
-
-    if (staffRow?.role) {
-      return allowed.includes(String(staffRow.role).toLowerCase());
-    }
-
-    const { data: roleRow, error: roleErr } = await supabase
-      .from("profile_roles")
-      .select("roles")
-      .eq("club_id", club.id)
-      .eq("user_id", user.id)
-      .maybeSingle();
-    if (roleErr) throw roleErr;
-
-    let rolesArr = [];
-    const raw = roleRow?.roles;
-    if (Array.isArray(raw)) {
-      rolesArr = raw;
-    } else if (raw && typeof raw === "object") {
-      if (Array.isArray(raw.roles)) rolesArr = raw.roles;
-    } else if (typeof raw === "string") {
-      rolesArr = raw.split(/[, ]+/).filter(Boolean);
-    }
-
-    return rolesArr.some((r) => allowed.includes(String(r).toLowerCase()));
-  },
-  [club?.id, user?.id, appResumeTick],
-  { enabled: Boolean(club?.id && user?.id), timeoutMs: 8000, initialData: false }
-);
-
-useEffect(() => {
-  if (clubAdminOk !== null && clubAdminOk !== undefined) {
-    setIsClubAdmin(Boolean(clubAdminOk));
-  }
-}, [clubAdminOk]);
-
-useEffect(() => {
-  if (clubAdminError) {
-    setIsClubAdmin(false);
-  }
-}, [clubAdminError]);
-
-
-
+}, [club?.id, nextFilmId]);
 
 
 
@@ -1872,47 +1887,37 @@ function onFeaturedKeyDown(e) {
   };
 
   const addFeaturedFilm = async (posterUrl, meta) => {
-    if (!posterUrl || !meta?.id) return;
-  
-    // ✅ confirmation toast
+    if (!posterUrl || !meta?.id || !club?.id) return;
+
     setLastAdded(meta?.title || "Film");
-  
-    setClub((prev) => {
-      const next = [...(prev.featuredFilms || []), posterUrl];
-      const nextMap = { ...(prev.featuredMap || {}) };
-      if (meta?.id) nextMap[posterUrl] = { id: meta.id, title: meta.title };
-  
-      try {
-        localStorage.setItem(`sf_featured_map_${prev.id}`, JSON.stringify(nextMap));
-      } catch {}
-  
-      return {
-        ...prev,
-        featuredFilms: next,
-        featuredMap: nextMap,
-        activityFeed: [
-          {
-            id: `a_${Date.now()}`,
-            type: "feature",
-            text: "Added a featured film",
-            ts: Date.now(),
-          },
-          ...(prev.activityFeed || []),
-        ],
-      };
-    });
-  
+
+    const nextMap = { ...featuredMapState };
+    nextMap[posterUrl] = { id: meta.id, title: meta.title };
+
     try {
-      const nextArr = [...(club?.featuredFilms || []), posterUrl];
-      await persistFeatured(nextArr);
+      localStorage.setItem(`sf_featured_map_${club.id}`, JSON.stringify(nextMap));
+    } catch {}
+
+    const nextFilms = [...featuredFilmsState, posterUrl];
+
+    setFeaturedFilmsState(nextFilms);
+    setFeaturedMapState(nextMap);
+    setActivityFeed((prev) => [
+      {
+        id: `a_${Date.now()}`,
+        type: "feature",
+        text: "Added a featured film",
+        ts: Date.now(),
+      },
+      ...(prev || []),
+    ]);
+
+    try {
+      await persistFeatured(nextFilms);
       await postActivity(`featured "${meta?.title || "a film"}"`);
-      if ((club?.featuredFilms?.length || 0) === 0) setShowFeaturedTip(true);
+      if (featuredFilmsState.length === 0) setShowFeaturedTip(true);
     } catch (e) {
-      // revert on error
-      setClub((prev) => ({
-        ...prev,
-        featuredFilms: (prev.featuredFilms || []).filter((u) => u !== posterUrl),
-      }));
+      setFeaturedFilmsState((prev) => prev.filter((u) => u !== posterUrl));
       alert(e?.message || "Could not save featured films.");
     }
   };
@@ -1972,20 +1977,18 @@ function onFeaturedKeyDown(e) {
 
   const removeFeaturedFilm = async (index) => {
     if (!club) return;
-    const prev = club.featuredFilms || [];
+    const prev = featuredFilmsState;
     if (index < 0 || index >= prev.length) return;
 
     const next = prev.filter((_, i) => i !== index);
-    // optimistic UI
-    setClub((p) => ({ ...p, featuredFilms: next }));
+    setFeaturedFilmsState(next);
 
     try {
       await persistFeatured(next);
       await postActivity("removed a featured film");
     } catch (e) {
-      // revert on error
-      setClub((p) => ({ ...p, featuredFilms: prev }));
-      alert(e?.message || 'Could not remove poster.');
+      setFeaturedFilmsState(prev);
+      alert(e?.message || "Could not remove poster.");
     }
   };
 
@@ -2072,7 +2075,7 @@ function onFeaturedKeyDown(e) {
       if (window.confirm('You need to sign in to join this club. Go to sign-in now?')) navigate('/auth');
       return;
     }
-    const list = club.membersList || [];
+    const list = members || [];
     const already = list.some((m) => m.id === currentUserId);
 
     if (already) {
@@ -2084,30 +2087,62 @@ function onFeaturedKeyDown(e) {
     if (!UUID_RX.test(String(club.id))) {
       if (already) {
         const updated = list.filter((m) => m.id !== currentUserId);
-        setClub((p) => ({ ...p, membersList: updated, members: updated.length }));
+        setMembers(updated);
       } else {
-        const optimistic = [...list, { id: currentUserId, name: user?.name || 'You', avatar: user?.avatar || fallbackAvatar, role: ROLE.NONE }];
-        setClub((p) => ({ ...p, membersList: optimistic, members: optimistic.length }));
+        const optimistic = [
+          ...list,
+          {
+            user_id: currentUserId,
+            id: currentUserId,
+            role: ROLE.NONE,
+            profiles: {
+              id: currentUserId,
+              display_name: user?.name || "You",
+              avatar_url: user?.avatar || fallbackAvatar,
+            },
+          },
+        ];
+        setMembers(optimistic);
       }
       return;
     }
 
     if (already) {
-      const prev = club.membersList;
-      setClub((p) => ({ ...p, membersList: prev.filter((m) => m.id !== currentUserId), members: prev.length - 1 }));
+      const prev = list;
+      const updated = prev.filter((m) => m.id !== currentUserId);
+      setMembers(updated);
       const { error } = await supabase.from('club_members').delete().eq('club_id', club.id).eq('user_id', currentUserId);
       if (error) {
-        setClub((p) => ({ ...p, membersList: prev, members: prev.length }));
+        setMembers(prev);
         alert(error.message || 'Could not leave the club.');
       }
+      else {
+        markClubLeft(club.id);
+        bumpMembership();
+      }
     } else {
-      const prev = club.membersList;
-      const optimistic = [...prev, { id: currentUserId, name: user?.name || 'You', avatar: user?.avatar || fallbackAvatar, role: ROLE.NONE }];
-      setClub((p) => ({ ...p, membersList: optimistic, members: optimistic.length }));
+      const prev = list;
+      const optimistic = [
+        ...prev,
+        {
+          user_id: currentUserId,
+          id: currentUserId,
+          role: ROLE.NONE,
+          profiles: {
+            id: currentUserId,
+            display_name: user?.name || "You",
+            avatar_url: user?.avatar || fallbackAvatar,
+          },
+        },
+      ];
+      setMembers(optimistic);
       const { error } = await supabase.from('club_members').insert([{ club_id: club.id, user_id: currentUserId, role: null }]);
       if (error) {
-        setClub((p) => ({ ...p, membersList: prev, members: prev.length }));
+        setMembers(prev);
         alert(error.message || 'Could not join the club.');
+      }
+      else {
+        bumpMembership();
       }
     }
   };
@@ -2374,7 +2409,7 @@ const postActivity = async (summary) => {
   /* -----------------------------
        Render
     ------------------------------*/
-  if (loading) {
+  if (!club && loading) {
     return (
       <div className="min-h-screen bg-black text-white p-6">
         <p className="text-zinc-300">Loading club…</p>
@@ -2435,7 +2470,11 @@ const postActivity = async (summary) => {
           <div
             className="rounded-2xl border border-zinc-800 bg-black/50 overflow-hidden"
           >
-            <ClubChatTeaserCard clubId={club.id} slug={club.slug} />
+            <ClubChatTeaserCard
+              clubId={club.id}
+              slug={club.slug}
+              canViewChat={canSeeMembersOnly}
+            />
           </div>
         ) : (
           <div className="rounded-xl bg-white/5 ring-1 ring-white/10 p-4 text-sm text-zinc-400">
@@ -2467,6 +2506,7 @@ const postActivity = async (summary) => {
                 poster: nextScreening?.poster,
               }}
               club={{ id: club.id, name: club.name, slug: club.slug }}
+              clubRefreshEpoch={clubRefreshEpoch}
             />
           </div>
         </div>
@@ -2792,7 +2832,7 @@ const postActivity = async (summary) => {
       const id = p?.id ?? m?.user_id ?? `m-${idx}`;
       const slug = p?.slug ?? m?.slug ?? null;
       const displayName = p?.display_name ?? m?.display_name ?? null;
-      const avatar = p?.avatar_url ?? m?.avatar_url ?? "/avatar_placeholder.png";
+              const avatar = p?.avatar_url ?? m?.avatar_url ?? "/default-avatar.svg";
       const role = m?.role ?? m?.member_role ?? p?.role ?? null;
 
       // premium flag from profile row
@@ -2824,7 +2864,7 @@ const postActivity = async (summary) => {
         id: youId,
         slug: profile?.slug || null,
         displayName: profile?.display_name || null,
-        avatar: profile?.avatar_url || "/avatar_placeholder.png",
+              avatar: profile?.avatar_url || "/default-avatar.svg",
         role: isPresident
           ? "president"
           : isVice
@@ -2858,13 +2898,13 @@ const postActivity = async (summary) => {
                 className="block h-12 w-12 rounded-full overflow-hidden ring-2 ring-yellow-400/70 hover:ring-yellow-300 focus:ring-yellow-300 transition transform duration-150 hover:scale-105 focus-visible:scale-105 shadow-[0_0_0_1px_rgba(0,0,0,0.35)]"
               >
                 <img
-  src={safeImageSrc(m.avatar || "/avatar_placeholder.png", "/avatar_placeholder.png")}
+  src={safeImageSrc(m.avatar || "/default-avatar.svg", "/default-avatar.svg")}
   alt={roleLabel || "Member"}
   className="h-full w-full object-cover"
   loading="lazy"
   onError={(e) => {
     e.currentTarget.onerror = null;
-    e.currentTarget.src = "/avatar_placeholder.png";
+    e.currentTarget.src = "/default-avatar.svg";
   }}
 />
                 
@@ -3142,19 +3182,35 @@ const postActivity = async (summary) => {
  
 {/* About + Featured (Option 1 layout) */}
 <div className="px-6 mt-6 grid md:grid-cols-2 gap-6 items-start">
-  <ClubAboutCard
-    club={club}
-    isEditing={isEditing}
-    canEdit={canEdit}
-    onSaved={(patch) => setClub((p)=> p ? { ...p, ...patch } : p)}
+    <ClubAboutCard
+      club={club}
+      isEditing={isEditing}
+      canEdit={canEdit}
+    onSaved={(patch) =>
+      setClub((prev) => {
+        if (!prev) return prev;
+        const { meta, summary, ...rest } = patch;
+        const nextMeta = {
+          ...(prev.meta || {}),
+          ...(meta || {}),
+        };
+        if (typeof summary === "string" && !meta?.summary) {
+          nextMeta.summary = summary;
+        }
+        return {
+          ...prev,
+          ...rest,
+          meta: nextMeta,
+        };
+      })}
   />
   {showLazy && (
     <Suspense fallback={<div className="text-xs text-zinc-500">Loading featured films…</div>}>
       <FeaturedFilms
-        club={club}
+        club={clubWithFeatured}
         canEdit={canEdit}
         showSearch={isEditing && canEdit}
-        onChange={(next) => setClub((p)=> p ? { ...p, featuredFilms: next } : p)}
+        onChange={(next) => setFeaturedFilmsState(next)}
       />
     </Suspense>
   )}

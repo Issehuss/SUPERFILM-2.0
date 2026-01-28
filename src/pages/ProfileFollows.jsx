@@ -1,7 +1,7 @@
 // src/pages/ProfileFollows.jsx
 import React, { useEffect, useState, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import { useUser } from "../context/UserContext";
 
 export default function ProfileFollows() {

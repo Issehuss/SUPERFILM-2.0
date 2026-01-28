@@ -1,7 +1,7 @@
 // src/components/ReviewCards.jsx
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "react-hot-toast";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import { useUser } from "../context/UserContext";
 import useEntitlements from "../hooks/useEntitlements";
 import { awardPointsForAction } from "../lib/points";

@@ -1,8 +1,8 @@
 // src/pages/ClubChat.jsx
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Send, Users, Image as ImageIcon, X, Plus } from "lucide-react";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import { useUser } from "../context/UserContext";
 import MessageItem from "../components/MessageItem";
 import PollComposer from "../components/polls/PollComposer";
@@ -97,10 +97,18 @@ function writeChatCache(clubId, data) {
 }
 
 export default function ClubChat() {
+
+  useEffect(() => {
+    (async () => {
+      const { data, error } = await supabase.rpc("debug_auth_uid");
+      console.log("auth.uid seen by db:", data, error);
+    })();
+  }, []);
+  
   // Route params (support legacy id and new slug forms)
   const { clubId: legacyClubId, clubParam } = useParams();
   const navigate = useNavigate();
-  const { user, profile } = useUser();
+  const { user, profile, sessionLoaded } = useUser();
 
   // Resolved club data
   const [clubRow, setClubRow] = useState(null);
@@ -309,18 +317,52 @@ useEffect(() => {
     }
   }, [chatTimedOut]);
 
+  const getSessionUserId = useCallback(async () => {
+    try {
+      const {
+        data: { session },
+        error,
+      } = await supabase.auth.getSession();
+      if (error) {
+        console.warn("[ClubChat] session fetch failed:", error.message);
+      }
+      if (!session?.user?.id) {
+        console.warn("[unread] skipped – no session yet");
+        return null;
+      }
+      return session.user.id;
+    } catch (e) {
+      console.warn("[ClubChat] session fetch exception:", e?.message || e);
+      return null;
+    }
+  }, []);
+
   useEffect(() => {
-    if (!resolvedClubId || !me) return;
+    if (!sessionLoaded || !resolvedClubId) return;
     if (!chatResult?.messages?.length) return;
-    supabase
-      .from("club_message_reads")
-      .upsert({
-        club_id: resolvedClubId,
-        user_id: me,
-        last_read_at: new Date().toISOString(),
-      })
-      .catch(() => {});
-  }, [chatResult, resolvedClubId, me]);
+
+    let cancelled = false;
+
+    (async () => {
+      const sessionUserId = await getSessionUserId();
+      if (!sessionUserId) return;
+      try {
+        await supabase.from("club_message_reads").upsert({
+          club_id: resolvedClubId,
+          user_id: sessionUserId,
+          last_read_at: new Date().toISOString(),
+        });
+      } catch (e) {
+        if (!cancelled) {
+          console.error("[ClubChat] mark read failed:", e?.message || e);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [chatResult, resolvedClubId, sessionLoaded, getSessionUserId]);
 
   // 4) Realtime subscribe after initial load
   useEffect(() => {
@@ -450,19 +492,23 @@ useEffect(() => {
       return;
     }
     const tid = toast.success("Report sent. We’ll review it.");
-    supabase.functions.invoke("notify-message2", { body: { messageId: message.id, clubId, reason } })
-      .then(({ error }) => {
-        if (error) {
-          toast.dismiss(tid);
-          toast.error("Couldn’t send report.");
-          console.error("report error:", error);
-        }
-      })
-      .catch((e) => {
-        toast.dismiss(tid);
-        toast.error("Couldn’t send report.");
-        console.error("report exception:", e);
-      });
+  try {
+    if (!supabase.functions?.invoke) {
+      throw new Error("Server function not available.");
+    }
+    const { error } = await supabase.functions.invoke("notify-message2", {
+      body: { messageId: message.id, clubId, reason },
+    });
+    if (error) {
+      toast.dismiss(tid);
+      toast.error("Couldn’t send report.");
+      console.error("report error:", error);
+    }
+  } catch (e) {
+    toast.dismiss(tid);
+    toast.error("Couldn’t send report.");
+    console.error("report exception:", e);
+  }
   }
 
   /** Input helpers */
@@ -491,12 +537,22 @@ useEffect(() => {
 
   // --------- sending (text + optional image)
   const send = async () => {
-    if (!resolvedClubId || !me || sending) return;
+    if (!resolvedClubId || !me || sending || !sessionLoaded) {
+      if (!sessionLoaded) {
+        console.warn("[ClubChat] send skipped – session still loading");
+      }
+      return;
+    }
 
     const body = (input || "").trim();
     const hasImage = !!imageFile;
     if (!body && !hasImage) return;
 
+    const sessionUserId = await getSessionUserId();
+    if (!sessionUserId) {
+      console.warn("[ClubChat] send aborted – session missing");
+      return;
+    }
     setSending(true);
 
     // Client-side banned-words warning (server trigger still blocks)
@@ -515,11 +571,11 @@ useEffect(() => {
 
     // Optimistic UI
     const tempId = `temp_${Date.now()}`;
-  const optimistic = {
+    const optimistic = {
       id: tempId,
       _optimistic: true,
       club_id: resolvedClubId,
-      user_id: me,
+      user_id: sessionUserId,
       body: body || null,
       image_url: imageObjectUrl || null,
       created_at: new Date().toISOString(),
@@ -532,7 +588,7 @@ useEffect(() => {
     try {
       // Upload image first (if any)
       if (hasImage) {
-        uploadedImageUrl = await uploadChatImage(imageFile, resolvedClubId, me);
+        uploadedImageUrl = await uploadChatImage(imageFile, resolvedClubId, sessionUserId);
       }
 
       // Insert the real row
@@ -541,7 +597,7 @@ useEffect(() => {
         .insert([
           {
             club_id: resolvedClubId,
-            user_id: me,
+            user_id: sessionUserId,
             body: body || null,
             image_url: uploadedImageUrl,
           },
@@ -552,20 +608,33 @@ useEffect(() => {
       if (error) throw error;
 
       // Replace optimistic with real id/timestamp and clear the flag
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === tempId
-            ? { ...m, id: data.id, created_at: data.created_at, _optimistic: false }
-            : m
-        )
-      );
+      // Replace optimistic with real id/timestamp and clear the flag
+setMessages((prev) =>
+  prev.map((m) =>
+    m.id === tempId
+      ? { ...m, id: data.id, created_at: data.created_at, _optimistic: false }
+      : m
+  )
+);
 
-      // Mark as read
+      if (!sessionUserId) {
+        console.warn("[ClubChat] send skipped – session missing before unread update");
+        return;
+      }
+
+      // Mark sender as read
       await supabase.from("club_message_reads").upsert({
         club_id: resolvedClubId,
-        user_id: me,
+        user_id: sessionUserId,
         last_read_at: new Date().toISOString(),
       });
+
+      // 🔐 Increment unread counts for other club members (server-side)
+      await supabase.rpc("increment_club_unreads", {
+        p_club_id: resolvedClubId,
+        p_sender_id: sessionUserId,
+      });
+
     } catch (err) {
       console.error("Send failed:", err?.message || err);
       // rollback optimistic
@@ -604,12 +673,12 @@ async function handleDeleteMessage(arg) {
 
   try {
     // Try to remove image from storage (best effort)
-    if (msg?.image_url) {
-      const path = extractStoragePathFromPublicUrl(msg.image_url);
-      if (path) {
-        await supabase.storage.from(CHAT_BUCKET).remove([path]).catch(() => {});
+      if (msg?.image_url) {
+        const path = extractStoragePathFromPublicUrl(msg.image_url);
+        if (path) {
+          await supabase.storage.from(CHAT_BUCKET).remove([path]);
+        }
       }
-    }
 
     // Hard delete via RPC
     const { data, error } = await supabase.rpc("delete_club_message_hard", {
@@ -846,7 +915,7 @@ async function handleDeleteMessage(arg) {
 
               <button
                 onClick={send}
-                disabled={(!input.trim() && !imageFile) || sending || !me}
+                disabled={(!input.trim() && !imageFile) || sending || !me || !sessionLoaded}
                 className="rounded-full w-10 h-10 shrink-0 grid place-items-center bg-yellow-500 hover:bg-yellow-400 disabled:opacity-50 text-black"
                 aria-label="Send"
               >
@@ -882,27 +951,27 @@ async function uploadChatImage(file, clubId, userId) {
 }
 
 // Client-side banned-words precheck (server trigger still enforces)
-let bannedWordsUnavailable = false;
 async function messageViolatesFilter(text) {
   try {
-    if (bannedWordsUnavailable) return false;
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+
+    // 🚫 not authenticated yet — skip client-side filter
+    if (!session?.user?.id) return false;
+
     const { data, error } = await supabase.from("banned_words").select("pattern");
-    if (error) {
-      if (error.code === "PGRST205" || error.status === 404) {
-        bannedWordsUnavailable = true;
-        return false;
-      }
-      return false;
-    }
-    if (!data) return false;
+    if (error || !data) return false;
+
     for (const { pattern } of data) {
       try {
-        if (new RegExp(pattern).test(text)) return true;
+        if (new RegExp(pattern, "i").test(text)) return true;
       } catch {}
     }
+
     return false;
   } catch {
-    return false; // fail-open on client
+    return false;
   }
 }
 

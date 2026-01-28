@@ -1,6 +1,6 @@
 // src/components/RecentPointAwards.jsx
 import { useEffect, useMemo, useState } from "react";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 
 /**
  * Shows recent approved point events for a club.

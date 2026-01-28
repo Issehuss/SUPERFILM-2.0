@@ -1,4 +1,4 @@
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 
 export async function searchStills(query) {
   if (!query?.trim()) return { data: [], error: null };

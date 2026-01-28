@@ -1,8 +1,9 @@
 // src/pages/LeaveClub.jsx
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
-import supabase from "../supabaseClient";
-import { useUser } from "../context/UserContext";
+import supabase from "lib/supabaseClient";
+import { useUser, useMembershipRefresh } from "../context/UserContext";
+import { markClubLeft } from "../lib/membershipCooldown";
 import Splash from "../components/Splash";
 
 const UUID_RX =
@@ -11,6 +12,7 @@ const UUID_RX =
 export default function LeaveClub() {
   const { clubParam } = useParams();
   const { user } = useUser();
+  const { bumpMembership } = useMembershipRefresh();
   const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
@@ -253,6 +255,9 @@ export default function LeaveClub() {
         .eq("user_id", user.id);
 
       if (delErr) throw delErr;
+
+      markClubLeft(club.id);
+      bumpMembership();
 
       // 3) Redirect out of the club
       navigate("/clubs", { replace: true });

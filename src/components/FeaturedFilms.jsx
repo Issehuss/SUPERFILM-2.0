@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 import { searchMovies } from "../lib/tmdbClient";
 import { Plus, Save, X } from "lucide-react";
 import { toast } from "react-hot-toast";
@@ -162,23 +162,9 @@ export default function FeaturedFilms({ club, canEdit, showSearch, onChange }) {
             Your club's mixtape is for everyone to see so add your essential picks!
           </p>
 
-          <div className="flex items-center gap-2">
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && doSearch()}
-              placeholder="Search films…"
-              className="bg-zinc-900/70 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-white outline-none w-56"
-            />
-            <button
-              onClick={doSearch}
-              disabled={searching}
-              className="inline-flex items-center gap-2 rounded-lg bg-yellow-500 px-4 py-2 text-sm font-semibold text-black disabled:opacity-50"
-              type="button"
-            >
-              {searching ? "Searching…" : <><Plus size={16}/> Add</>}
-            </button>
-          </div>
+          <p className="text-xs text-zinc-400 max-w-xs">
+            Use the search bar above to find films and add them to the lineup.
+          </p>
         </div>
       )}
 

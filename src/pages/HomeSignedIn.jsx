@@ -1,27 +1,27 @@
 // src/pages/HomeSignedIn.jsx
 // Fast-first: cache TMDB, fetch once, rotate only when visible; minimal re-renders.
-import { useEffect, useState, useCallback, useMemo, useRef } from "react";
+import { createContext, useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import {
   CalendarClock,
   Film,
   Users,
   PlusCircle,
-  ListChecks,
   ChevronLeft,
   ChevronRight,
   Home as HomeIcon,
   User as UserIcon,
 } from "lucide-react";
 import { useUser } from "../context/UserContext";
-import supabase from "../supabaseClient.js";
+import supabase from "lib/supabaseClient";
 import useWatchlist from "../hooks/useWatchlist";
 import usePageVisibility from "../hooks/usePageVisibility";
-import useSafeSupabaseFetch from "../hooks/useSafeSupabaseFetch";
+import useHydratedSupabaseFetch from "../hooks/useHydratedSupabaseFetch";
 import useAppResume from "../hooks/useAppResume";
 import LeaderboardWideCard from "../components/LeaderboardWideCard.jsx";
 import { env as ENV } from "../lib/env";
 import TmdbImage from "../components/TmdbImage";
+import usePrimaryClub from "../hooks/usePrimaryClub";
 
 /* ------------ skeletons ------------ */
 function HomeSkeleton() {
@@ -59,6 +59,8 @@ const CLUB_PLACEHOLDER =
   encodeURIComponent(
     `<svg xmlns='http://www.w3.org/2000/svg' width='300' height='300'><rect width='100%' height='100%' fill='%232a2a2a'/><text x='50%' y='50%' dominant-baseline='middle' text-anchor='middle' fill='%23999' font-family='Arial' font-size='14'>Club</text></svg>`
   );
+
+export const HomeRefreshContext = createContext(0);
 
 const sanitizeClubImage = (url) => {
   if (!url || typeof url !== "string") return CLUB_PLACEHOLDER;
@@ -157,8 +159,8 @@ const homeFeedMemoryCache = {
 };
 const NEXT_SCREENING_CACHE_KEY = "cache:clubNextScreening:v1";
 const NEXT_SCREENING_TTL_MS = 10 * 60 * 1000; // 10 minutes
-const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const isUuid = (v) => UUID_RX.test(String(v || ""));
+const NEXT_SCREENING_ROW_CACHE_KEY = "cache:homeNextScreeningRow:v1";
+const NEXT_SCREENING_ROW_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 function readHomeFeedCache(userId) {
   if (!userId || homeFeedMemoryCache.userId !== userId) return null;
@@ -191,22 +193,35 @@ function readNextScreeningCache(clubId) {
   }
 }
 
-function writeNextScreeningCache(clubId, title) {
-  if (!clubId) return;
+function readNextScreeningRowCache(clubId) {
+  if (!clubId) return null;
+  try {
+    const raw = sessionStorage.getItem(`${NEXT_SCREENING_ROW_CACHE_KEY}:${clubId}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.at || !parsed?.data) return null;
+    if (Date.now() - parsed.at > NEXT_SCREENING_ROW_TTL_MS) return null;
+    return parsed.data;
+  } catch {
+    return null;
+  }
+}
+
+function writeNextScreeningRowCache(clubId, row) {
+  if (!clubId || !row) return;
   try {
     sessionStorage.setItem(
-      `${NEXT_SCREENING_CACHE_KEY}:${clubId}`,
-      JSON.stringify({ at: Date.now(), title })
+      `${NEXT_SCREENING_ROW_CACHE_KEY}:${clubId}`,
+      JSON.stringify({ at: Date.now(), data: row })
     );
-  } catch {
-    /* ignore cache errors */
-  }
+  } catch {}
 }
 
 const ENABLE_CURATIONS =
   (typeof import.meta !== "undefined" &&
     import.meta.env?.VITE_ENABLE_CURATIONS === "true") ||
   false;
+
 
 /* ------------ lightweight cache ------------ */
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
@@ -245,7 +260,7 @@ function getFeedAvatar(item, fallback) {
     item?.actor?.avatar_url ||
     item?.club_avatar ||
     fallback ||
-    "/avatar_placeholder.png"
+    "/default-avatar.svg"
   );
 }
 
@@ -258,8 +273,10 @@ function getFeedCreatedAt(item) {
 }
 
 export default function HomeSignedIn() {
-  const { user, profile, isReady } = useUser();
+  const { user, sessionLoaded, profile } = useUser();
   const navigate = useNavigate();
+
+  const cachedFeed = readHomeFeedCache(user?.id);
 
   /* ============ refs for perf control ============ */
   const deckRef = useRef(null);
@@ -267,30 +284,25 @@ export default function HomeSignedIn() {
   const mountedRef = useRef(true);
   const deckVisibleRef = useRef(false);
   const hoverRef = useRef(false);
-  const leaderboardRef = useRef(null);
 
   /* ============ state ============ */
-  const [memberships, setMemberships] = useState([]);
-  const [membershipsLoading, setMembershipsLoading] = useState(true);
-  const [club, setClub] = useState(null);
 
-  const [activity, setActivity] = useState([]);
-  const [activityLoading, setActivityLoading] = useState(true);
-  const [activityLoadingMore, setActivityLoadingMore] = useState(false);
+  const [activity, setActivity] = useState(cachedFeed?.items ?? []);
   const [activityHasMore, setActivityHasMore] = useState(true);
-  const activityCursorRef = useRef(null);
+  const activityCursorRef = useRef(cachedFeed?.cursor ?? null);
   const activitySentinelRef = useRef(null);
-  const [feedRequest, setFeedRequest] = useState({ key: 0, cursor: null, append: false });
+  const [feedRequest, setFeedRequest] = useState({ cursor: null, append: false });
   const [nextFromClub, setNextFromClub] = useState(null);
-
+  const { appResumeTick } = useAppResume();
+  const [homeRefreshEpoch, setHomeRefreshEpoch] = useState(0);
+  const { club, loading: clubLoading } = usePrimaryClub({
+    refreshEpoch: homeRefreshEpoch,
+  });
+  const safeFetchEnabled = sessionLoaded;
   const [curated, setCurated] = useState([]);
   const [nowPlaying, setNowPlaying] = useState([]);
   const [deckIndex, setDeckIndex] = useState(0);
   const [deckLoading, setDeckLoading] = useState(true);
-
-  const [leaderboard, setLeaderboard] = useState([]);
-  const [loadingLeaderboard, setLoadingLeaderboard] = useState(true);
-  const [selfDisplay, setSelfDisplay] = useState(null);
   const recentActivity = useMemo(() => (activity || []).slice(0, 3), [activity]);
   const clubImage = useMemo(() => {
     if (!club) return CLUB_PLACEHOLDER;
@@ -306,115 +318,22 @@ export default function HomeSignedIn() {
     loading: wlLoading,
     add,
     remove,
-  } = useWatchlist(user?.id);
+  } = useWatchlist(user?.id, { useCache: true, refreshEpoch: homeRefreshEpoch });
 
   const [wlIndex, setWlIndex] = useState(0);
   const [wlMeta, setWlMeta] = useState({});
-  const [leaderboardReady, setLeaderboardReady] = useState(false);
   const isPageVisible = usePageVisibility();
-  const resumeTick = useAppResume();
 
-  const {
-    data: selfDisplayData,
-    error: selfDisplayError,
-  } = useSafeSupabaseFetch(
-    async (session) => {
-      const resolvedUserId = user?.id || session?.user?.id;
-      const { data, error } = await supabase.rpc("get_profile_display", {
-        p_user_id: resolvedUserId,
-      });
-      if (error) throw error;
-      return data || null;
-    },
-    [user?.id, resumeTick],
-    { enabled: true, timeoutMs: 8000, initialData: null }
-  );
-
-  useEffect(() => {
-    if (selfDisplayData) {
-      setSelfDisplay(selfDisplayData);
-      return;
-    }
-    if (selfDisplayError) {
-      setSelfDisplay(null);
-    }
-  }, [selfDisplayData, selfDisplayError]);
-
-  /* ============ memberships -> primary club ============ */
-  const {
-    data: membershipsResult,
-    loading: membershipsFetchLoading,
-    error: membershipsFetchError,
-  } = useSafeSupabaseFetch(
-    async (session) => {
-      const resolvedUserId = user?.id || session?.user?.id;
-      if (!resolvedUserId || !isUuid(resolvedUserId)) throw new Error("no-user");
-      const { data, error } = await supabase
-        .from("club_members")
-        .select("club_id, user_id, role, joined_at, accepted")
-        .eq("user_id", resolvedUserId);
-      if (error) throw error;
-
-      const clubIds = (data || []).map((row) => row.club_id).filter(Boolean);
-      let clubsMap = {};
-      if (clubIds.length) {
-        const { data: clubsData } = await supabase
-          .from("clubs_public")
-          .select("id, slug, name, profile_image_url")
-          .in("id", clubIds);
-        clubsMap = (clubsData || []).reduce((acc, c) => {
-          acc[c.id] = c;
-          return acc;
-        }, {});
-      }
-
-      return (data || []).map((row) => ({
-        ...row,
-        clubs: clubsMap[row.club_id] || null,
-      }));
-    },
-    [user?.id, isReady, resumeTick],
-    { enabled: true, timeoutMs: 8000 }
-  );
-
-  useEffect(() => {
-    setMembershipsLoading(membershipsFetchLoading);
-  }, [membershipsFetchLoading]);
-
-  useEffect(() => {
-    if (membershipsResult) {
-      setMemberships(membershipsResult);
-      return;
-    }
-    if (membershipsFetchError && membershipsFetchError.message !== "no-user") {
-      console.error("[HomeSignedIn] club_members fetch error:", membershipsFetchError.message);
-      setMemberships([]);
-    }
-  }, [membershipsResult, membershipsFetchError]);
-
-  const myClubs = useMemo(
-    () => (memberships || []).map((m) => m?.clubs).filter(Boolean),
-    [memberships]
-  );
-
-  useEffect(() => {
-    setClub((prev) => {
-      const next = myClubs?.[0] || null;
-      return prev?.id === next?.id ? prev : next;
-    });
-  }, [myClubs]);
-
+  /* ============ 1) home feed via RPC ============ */
   const {
     data: feedResult,
-    loading: feedLoading,
     error: feedError,
     timedOut: feedTimedOut,
-    retry: retryFeed,
-  } = useSafeSupabaseFetch(
-    async (session) => {
-      if (!feedRequest.key) return null;
-      const resolvedUserId = user?.id || session?.user?.id;
-      if (!resolvedUserId) throw new Error("no-user");
+    showSkeleton: feedSkeleton,
+  } = useHydratedSupabaseFetch(
+    async () => {
+      if (!user?.id) return null;
+      if (!homeRefreshEpoch && !feedRequest.append) return null;
       const { data, error } = await supabase.rpc("get_home_feed", {
         p_limit: HOME_FEED_LIMIT,
         p_cursor: feedRequest.cursor ?? null,
@@ -432,40 +351,35 @@ export default function HomeSignedIn() {
         rows,
         cursor: lastCreatedAt,
         append: feedRequest.append,
-        userId: resolvedUserId,
+        userId: user.id,
       };
     },
-    [feedRequest.key, feedRequest.cursor, feedRequest.append, user?.id, resumeTick],
-    { enabled: feedRequest.key > 0, timeoutMs: 8000 }
+    [homeRefreshEpoch, feedRequest.cursor, feedRequest.append],
+    {
+      sessionLoaded,
+      userId: user?.id || null,
+      enabled: Boolean(sessionLoaded && user?.id && homeRefreshEpoch > 0),
+      timeoutMs: 8000,
+    }
   );
+
+  const activityHydratedRef = useRef(false);
+  useEffect(() => {
+    if (activity.length > 0) {
+      activityHydratedRef.current = true;
+    }
+  }, [activity.length]);
+  const showActivitySkeleton = !activityHydratedRef.current && feedSkeleton;
 
   /* ============ 2) home feed via RPC ============ */
   useEffect(() => {
-    let cancelled = false;
-    const loadCache = async () => {
-      const { data: auth } = await supabase.auth.getSession();
-      const sessionUserId = auth?.session?.user?.id || null;
-      const resolvedUserId = user?.id || sessionUserId;
-      if (!resolvedUserId) return;
-      const cached = readHomeFeedCache(resolvedUserId);
-      if (cached?.items?.length && !cancelled) {
-        setActivity(cached.items);
-        activityCursorRef.current = cached.cursor ?? null;
-        setActivityLoading(false);
-      }
-      if (!cancelled) {
-        setFeedRequest((prev) =>
-          prev.key
-            ? prev
-            : { key: Date.now(), cursor: null, append: false }
-        );
-      }
-    };
-    loadCache();
-    return () => {
-      cancelled = true;
-    };
-  }, [user?.id, resumeTick]);
+    if (!user?.id) return;
+    const cached = readHomeFeedCache(user.id);
+    activityCursorRef.current = cached?.cursor ?? null;
+    if (cached?.items?.length) {
+      setActivity(cached.items);
+    }
+  }, [user?.id]);
 
   useEffect(() => {
     if (!feedResult) return;
@@ -477,7 +391,31 @@ export default function HomeSignedIn() {
     });
     activityCursorRef.current = feedResult.cursor;
     setActivityHasMore(rows.length === HOME_FEED_LIMIT);
+    if (!feedResult.append) {
+      // no op
+    }
   }, [feedResult]);
+
+  useEffect(() => {
+    if (!user?.id || !sessionLoaded) return;
+    setHomeRefreshEpoch((epoch) => epoch + 1);
+  }, [appResumeTick, user?.id, sessionLoaded]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    const onPrimaryClubChanged = () => {
+      setHomeRefreshEpoch((epoch) => epoch + 1);
+    };
+    window.addEventListener("sf:primary-club:changed", onPrimaryClubChanged);
+    return () => {
+      window.removeEventListener("sf:primary-club:changed", onPrimaryClubChanged);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!homeRefreshEpoch || !user?.id || !sessionLoaded) return;
+    setFeedRequest({ cursor: null, append: false });
+  }, [homeRefreshEpoch, user?.id, sessionLoaded]);
 
   useEffect(() => {
     if (feedError && feedError.message !== "no-user") {
@@ -493,48 +431,33 @@ export default function HomeSignedIn() {
   }, [feedTimedOut]);
 
   useEffect(() => {
-    if (feedRequest.append) {
-      setActivityLoadingMore(feedLoading);
-      return;
-    }
-    setActivityLoading(feedLoading);
-  }, [feedLoading, feedRequest.append]);
-
-  useEffect(() => {
     const el = activitySentinelRef.current;
-    if (!el || activityLoading || activityLoadingMore || !activityHasMore) return;
+    if (!el || showActivitySkeleton || !activityHasMore) return;
 
     const observer = new IntersectionObserver(
       (entries) => {
         const entry = entries[0];
         if (!entry?.isIntersecting) return;
         const cursor = activityCursorRef.current || null;
-        if (!cursor || activityLoadingMore) return;
-        setFeedRequest({ key: Date.now(), cursor, append: true });
+        if (!cursor) return;
+        setFeedRequest({ cursor, append: true });
       },
       { rootMargin: "300px 0px", threshold: 0.1 }
     );
 
     observer.observe(el);
     return () => observer.disconnect();
-  }, [activityLoading, activityLoadingMore, activityHasMore]);
+  }, [activityHasMore, showActivitySkeleton]);
 
   useEffect(() => {
     const onNew = (evt) => {
-      (async () => {
-        const payload = evt?.detail;
-        if (!payload) return;
-        const { data: auth } = await supabase.auth.getSession();
-        const sessionUserId = auth?.session?.user?.id || null;
-        const resolvedUserId = user?.id || sessionUserId;
-        if (!resolvedUserId) return;
-        setActivity((prev) => {
-          const next = [payload, ...(prev || [])];
-          writeHomeFeedCache(resolvedUserId, next, activityCursorRef.current);
-          return next;
-        });
-        setFeedRequest({ key: Date.now(), cursor: null, append: false });
-      })();
+      const payload = evt?.detail;
+      if (!payload || !user?.id) return;
+      setActivity((prev) => {
+        const next = [payload, ...(prev || [])];
+        writeHomeFeedCache(user.id, next, activityCursorRef.current);
+        return next;
+      });
     };
     window.addEventListener(HOME_FEED_EVENT, onNew);
     return () => window.removeEventListener(HOME_FEED_EVENT, onNew);
@@ -548,9 +471,10 @@ export default function HomeSignedIn() {
     }
   }, [club?.id]);
 
-  const { data: nextScreeningRow } = useSafeSupabaseFetch(
+  const cachedNextRow = useMemo(() => readNextScreeningRowCache(club?.id), [club?.id]);
+  const { data: nextScreeningRow } = useHydratedSupabaseFetch(
     async () => {
-      if (!club?.id) throw new Error("no-club");
+      if (!club?.id) return cachedNextRow || null;
       const { data, error } = await supabase
         .from("club_next_screening_v")
         .select("club_id, title, poster_path, screening_at, location")
@@ -559,18 +483,27 @@ export default function HomeSignedIn() {
       if (error) throw error;
       return data || null;
     },
-    [club?.id, resumeTick],
-    { enabled: Boolean(club?.id), timeoutMs: 8000 }
+    [club?.id, homeRefreshEpoch],
+    {
+      sessionLoaded,
+      userId: user?.id || null,
+      timeoutMs: 8000,
+      initialData: cachedNextRow || null,
+    }
   );
 
   useEffect(() => {
-    const title = nextScreeningRow?.title || null;
-    setNextFromClub(title);
-    if (title && club?.id) writeNextScreeningCache(club.id, title);
+    if (!nextScreeningRow?.club_id) return;
+    setNextFromClub(nextScreeningRow.title || null);
+    if (club?.id) writeNextScreeningRowCache(club.id, nextScreeningRow);
   }, [nextScreeningRow, club?.id]);
 
   /* ============ 4) TMDB deck (fetch once + cache) ============ */
   useEffect(() => {
+    if (!safeFetchEnabled) {
+      mountedRef.current = false;
+      return;
+    }
     mountedRef.current = true;
 
     const CACHE_KEY = ENABLE_CURATIONS
@@ -686,9 +619,7 @@ export default function HomeSignedIn() {
         rotateTimerRef.current = null;
       }
     };
-    // deliberately run ONCE on mount — no deps to avoid re-fetch loops
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [safeFetchEnabled]);
 
   /* ============ 5) Deck controls (no frequent re-renders) ============ */
   const deckItems = useMemo(() => {
@@ -760,82 +691,6 @@ export default function HomeSignedIn() {
     };
   }, [deckItems.length, nextDeck]);
 
-  /* ============ 6) Leaderboard (safe fetch) ============ */
-  const {
-    data: leaderboardResult,
-    loading: leaderboardLoading,
-    error: leaderboardError,
-  } = useSafeSupabaseFetch(
-    async () => {
-      const { data: clubs } = await supabase
-        .from("clubs_public")
-        .select("id, name, banner_url")
-        .limit(20);
-
-      if (!clubs?.length) return [];
-
-      const now = new Date();
-      const rows = await Promise.all(
-        clubs.map(async (c) => {
-          if (!isUuid(c?.id)) {
-            return null;
-          }
-          const mem = await supabase
-            .from("club_members")
-            .select("club_id, user_id, role, joined_at, accepted", { count: "exact", head: true })
-            .eq("club_id", c.id);
-          const members = mem?.count || 0;
-
-          const events30 = 0;
-
-          const d7 = new Date(now);
-          d7.setDate(now.getDate() - 7);
-          const act = await supabase
-            .from("activity")
-            .select("id", { count: "exact", head: true })
-            .eq("club_id", c.id)
-            .gte("created_at", d7.toISOString());
-          const activity7 = act?.count || 0;
-
-          const score = members * 3 + events30 * 4 + activity7 * 1;
-
-          return {
-            id: c.id,
-            name: c.name,
-            banner_url: c.banner_url,
-            members,
-            events30,
-            activity7,
-            score,
-          };
-        })
-      );
-
-      const filtered = rows.filter(Boolean);
-      filtered.sort((a, b) => b.score - a.score);
-      return filtered.slice(0, 10);
-    },
-    [leaderboardReady, resumeTick],
-    { enabled: leaderboardReady, timeoutMs: 8000, initialData: [] }
-  );
-
-  useEffect(() => {
-    setLoadingLeaderboard(leaderboardLoading);
-  }, [leaderboardLoading]);
-
-  useEffect(() => {
-    if (leaderboardResult) {
-      setLeaderboard(leaderboardResult);
-    }
-  }, [leaderboardResult]);
-
-  useEffect(() => {
-    if (leaderboardError) {
-      console.warn("leaderboard fetch failed", leaderboardError);
-      setLeaderboard([]);
-    }
-  }, [leaderboardError]);
-
   /* ============ 7) Watchlist bits (slower rotation) ============ */
   useEffect(() => {
     setWlIndex((i) => {
@@ -843,40 +698,6 @@ export default function HomeSignedIn() {
       return i % homeWatchlist.length;
     });
   }, [homeWatchlist?.length]);
-
-  // Only load leaderboard card once it scrolls into view (avoids heavy queries on page load)
-  useEffect(() => {
-    if (leaderboardReady) return;
-    const el = leaderboardRef.current;
-    if (!el) return;
-
-    const onVisible = (entries) => {
-      const entry = entries[0];
-      if (entry?.isIntersecting) {
-        setLeaderboardReady(true);
-      }
-    };
-
-    const obs = new IntersectionObserver(onVisible, { threshold: 0.25 });
-    obs.observe(el);
-
-    // Fallback: if idle for a while, just load
-    const idleId =
-      typeof window !== "undefined" && "requestIdleCallback" in window
-        ? window.requestIdleCallback(() => setLeaderboardReady(true), { timeout: 6000 })
-        : setTimeout(() => setLeaderboardReady(true), 6000);
-
-    return () => {
-      try {
-        obs.disconnect();
-      } catch {}
-      if (typeof idleId === "number") {
-        clearTimeout(idleId);
-      } else if (idleId && typeof window !== "undefined") {
-        window.cancelIdleCallback?.(idleId);
-      }
-    };
-  }, [leaderboardReady]);
 
   useEffect(() => {
     if (!homeWatchlist || homeWatchlist.length <= 1) return;
@@ -887,6 +708,7 @@ export default function HomeSignedIn() {
     return () => clearInterval(t);
   }, [homeWatchlist, isPageVisible]);
 
+  const hasWatchlist = Boolean(homeWatchlist?.length);
   const wlCurrent = homeWatchlist?.[wlIndex] || null;
   const wlId = wlCurrent ? wlCurrent.id ?? wlCurrent.movie_id : null;
   const wlPoster = wlCurrent?.poster_path
@@ -946,16 +768,18 @@ export default function HomeSignedIn() {
   );
   const currentIsSaved = currentMovie ? watchlistIds.has(currentMovie.id) : false;
 
-  const displayName = selfDisplay?.display_name || "Member";
+  const displayName =
+    profile?.display_name || profile?.displayName || "Member";
 
-  if (!isReady || !profile) {
+  if (!sessionLoaded) {
     return <HomeSkeleton />;
   }
 
   /* ============ render ============ */
   return (
-    <>
-    <div className="mx-auto w-full max-w-7xl px-4 md:px-6 py-8 pb-24 sm:pb-8 text-white">
+    <HomeRefreshContext.Provider value={homeRefreshEpoch}>
+      <>
+      <div className="mx-auto w-full max-w-7xl px-4 md:px-6 py-8 pb-24 sm:pb-8 text-white">
       {/* Welcome + Quick actions */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
         <div className="w-full">
@@ -1173,7 +997,7 @@ export default function HomeSignedIn() {
               <Film className="text-yellow-400" />
               <div className="flex flex-col">
                 <h2 className="text-xl font-semibold">
-                  {membershipsLoading ? "Loading club..." : club?.name || "Join a Club"}
+                  {clubLoading ? "Loading club..." : club?.name || "Join a Club"}
                 </h2>
                 {club?.slug && (
                   <span className="text-xs text-zinc-400">ID: {club.slug || club.id}</span>
@@ -1195,7 +1019,7 @@ export default function HomeSignedIn() {
           </div>
 
           <div className="relative w-full flex items-center justify-center py-10">
-            {membershipsLoading ? (
+          {clubLoading ? (
               <div className="h-28 w-28 md:h-32 md:w-32 rounded-full bg-white/10 animate-pulse" />
             ) : club ? (
               <img
@@ -1217,7 +1041,7 @@ export default function HomeSignedIn() {
             <h3 className="font-medium mb-3 flex items-center gap-2">
               <CalendarClock size={18} /> Upcoming
             </h3>
-            {membershipsLoading ? (
+            {clubLoading ? (
               <div className="h-4 w-32 rounded bg-white/10 animate-pulse" />
             ) : nextFromClub ? (
               <p className="text-sm font-semibold text-yellow-400">{nextFromClub}</p>
@@ -1237,9 +1061,9 @@ export default function HomeSignedIn() {
           </div>
 
           <div className="p-5 pt-0">
-            {wlLoading ? (
+            {wlLoading && !hasWatchlist ? (
               <div className="h-[380px] md:h-[440px] rounded-xl bg-white/10 animate-pulse" />
-            ) : !homeWatchlist?.length ? (
+            ) : !hasWatchlist ? (
               <div className="h-[380px] md:h-[440px] rounded-xl border border-white/10 bg-white/5 flex items-center justify-center text-sm text-zinc-400">
                 Add films to your watchlist.
               </div>
@@ -1252,7 +1076,13 @@ export default function HomeSignedIn() {
                   aria-label={wlCurrent?.title || "Watchlist item"}
                 >
                   <div className="flex-1 flex items-center justify-center w-full">
-                  <div className="aspect-[2/3] h-[72%] sm:h-[86%] w-[72%] sm:w-[78%] mx-auto">
+                    <div
+                      className={`
+                        w-full max-w-[360px] mx-auto
+                        md:w-[72%] md:h-[72%] md:aspect-[2/3] md:max-w-none
+                        sm:h-[86%] sm:w-[78%]
+                      `}
+                    >
                     {wlPoster ? (
                       <TmdbImage
                         key={`${wlCurrent?.id || wlCurrent?.movie_id}-${wlIndex}`}
@@ -1303,15 +1133,15 @@ export default function HomeSignedIn() {
             )}
           </div>
 
-          {activityLoading && (
+          {showActivitySkeleton && (
             <div className="px-5 pb-5 space-y-3">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="h-14 rounded-xl bg-white/10 animate-pulse" />
-              ))}
-            </div>
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="h-14 rounded-xl bg-white/10 animate-pulse" />
+            ))}
+          </div>
           )}
 
-          {!activityLoading && activity.length === 0 && (
+          {!showActivitySkeleton && activity.length === 0 && (
             <div className="px-5 pb-5">
               <div className="rounded-xl border border-white/10 bg-white/5 p-4">
                 <p className="text-sm text-zinc-300">
@@ -1325,7 +1155,7 @@ export default function HomeSignedIn() {
             </div>
           )}
 
-          {!activityLoading && activity.length > 0 && (
+          {!showActivitySkeleton && activity.length > 0 && (
             <ul className="divide-y divide-white/10">
               {recentActivity.map((a) => (
                 <li key={a.id}>
@@ -1355,8 +1185,8 @@ export default function HomeSignedIn() {
       </div>
 
       {/* Leaderboard */}
-      <div className="px-7 pt-7" ref={leaderboardRef}>
-        <LeaderboardWideCard shouldLoad={leaderboardReady} />
+      <div className="px-7 pt-7">
+        <LeaderboardWideCard shouldLoad={safeFetchEnabled} refreshEpoch={homeRefreshEpoch} />
       </div>
 
       {/* Bottom Quick actions */}
@@ -1388,5 +1218,6 @@ export default function HomeSignedIn() {
       </div>
     </nav>
     </>
+    </HomeRefreshContext.Provider>
   );
 }

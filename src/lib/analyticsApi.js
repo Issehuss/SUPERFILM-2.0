@@ -1,4 +1,4 @@
-import supabase from "../supabaseClient";
+import supabase from "lib/supabaseClient";
 
 // Pass real JS Date objects, not ISO strings
 const ts = (x) => (x instanceof Date ? x : new Date(x));
