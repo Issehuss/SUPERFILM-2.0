@@ -50,7 +50,8 @@ export default function useMyClubs(userIdOverride, { refreshEpoch = 0 } = {}) {
     const { data, error } = await supabase
       .from('club_members')
       .select('club_id, user_id, role, joined_at, accepted')
-      .eq('user_id', resolvedUserId);
+      .eq('user_id', resolvedUserId)
+      .eq('accepted', true);
     if (error) throw error;
 
     const clubIds = (data || []).map((row) => row.club_id).filter(Boolean);

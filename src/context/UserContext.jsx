@@ -45,6 +45,11 @@ function UserProvider({ children }) {
   const lastActivityRef = useRef(Date.now());
   const { appResumeTick, ready: resumeReady } = useAppResume();
   const lastResumeTickRef = useRef(appResumeTick);
+  const [myClubIds, setMyClubIds] = useState([]);
+  const myClubIdsRef = useRef([]);
+  const membershipsInFlightRef = useRef(null);
+  const lastMembershipFetchRef = useRef(0);
+  const MEMBERSHIP_STALE_MS = 30 * 1000;
 
   const isOffline = useCallback(
     () =>
@@ -61,6 +66,10 @@ function UserProvider({ children }) {
   useEffect(() => {
     subscriptionRef.current = subscription;
   }, [subscription]);
+
+  useEffect(() => {
+    myClubIdsRef.current = myClubIds;
+  }, [myClubIds]);
 
   const restoreSession = useCallback(
     async ({ force = false, reason = "resume" } = {}) => {
@@ -213,6 +222,51 @@ setAvatar(row?.avatar_url || null);
     [user?.id, isOffline]
   );
 
+  const loadMyMemberships = useCallback(
+    async ({ reason = "unknown", force = false } = {}) => {
+      const userId = user?.id || null;
+      if (!userId) {
+        setMyClubIds([]);
+        lastMembershipFetchRef.current = 0;
+        return [];
+      }
+      if (isOffline()) {
+        console.warn(`[UserContext] memberships fetch (${reason}) skipped (offline)`);
+        return myClubIdsRef.current;
+      }
+      const now = Date.now();
+      if (!force && now - lastMembershipFetchRef.current < MEMBERSHIP_STALE_MS) {
+        return myClubIdsRef.current;
+      }
+      if (membershipsInFlightRef.current) {
+        return membershipsInFlightRef.current;
+      }
+      const promise = (async () => {
+        const { data, error } = await supabase
+          .from("club_members")
+          .select("club_id, accepted")
+          .eq("user_id", userId)
+          .eq("accepted", true);
+        if (error) {
+          console.warn(`[UserContext] memberships fetch (${reason}) failed:`, error.message);
+          return myClubIdsRef.current;
+        }
+        const ids = (data || []).map((row) => String(row.club_id));
+        setMyClubIds(ids);
+        lastMembershipFetchRef.current = Date.now();
+        return ids;
+      })();
+
+      membershipsInFlightRef.current = promise;
+      try {
+        return await promise;
+      } finally {
+        membershipsInFlightRef.current = null;
+      }
+    },
+    [user?.id, isOffline]
+  );
+
   const handleResume = useCallback(async () => {
     if (isOffline()) return;
     await refreshSupabaseSession();
@@ -225,6 +279,7 @@ setAvatar(row?.avatar_url || null);
     if (Date.now() - lastSubscriptionFetchRef.current > SUBSCRIPTION_STALE_MS) {
       refreshSubscription({ skipLoading: true });
     }
+    loadMyMemberships({ reason: "resume" });
   }, [isOffline, restoreSession, fetchProfileDisplay, refreshSubscription]);
 
   /* ---------------------------------------------------------------------- */
@@ -246,6 +301,7 @@ setAvatar(row?.avatar_url || null);
       setLoading(false);
       if (authUser?.id) {
         fetchProfileDisplay(authUser.id, { reason: "initial" });
+        loadMyMemberships({ reason: "initial", force: true });
       }
     })();
     return () => {
@@ -267,11 +323,14 @@ setAvatar(row?.avatar_url || null);
       if (authUser?.id) {
         fetchProfileDisplay(authUser.id, { reason: "authStateChange" });
         refreshSubscription({ skipLoading: true, force: true });
+        loadMyMemberships({ reason: "authStateChange", force: true });
       } else {
         setProfile(null);
         setAvatar(null);
         setSubscription(null);
         lastSubscriptionFetchRef.current = 0;
+        setMyClubIds([]);
+        lastMembershipFetchRef.current = 0;
       }
     });
     return () => {
@@ -298,12 +357,47 @@ setAvatar(row?.avatar_url || null);
     refreshSubscription({ skipLoading: true, force: true });
   }, [user?.id, refreshSubscription]);
 
+  useEffect(() => {
+    if (!user?.id || !sessionLoaded) return;
+    if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+
+    const userId = user.id;
+    const channel = supabase
+      .channel(`club-members:user:${userId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "club_members",
+          filter: `user_id=eq.${userId}`,
+        },
+        () => {
+          lastMembershipFetchRef.current = 0;
+          loadMyMemberships({ reason: "realtime", force: true });
+          setMembershipEpoch((epoch) => epoch + 1);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      try {
+        supabase.removeChannel(channel);
+      } catch {}
+    };
+  }, [user?.id, sessionLoaded, loadMyMemberships]);
+
   /* ---------------------------------------------------------------------- */
   /*                         REFRESH PROFILE (MANUAL)                        */
   /* ---------------------------------------------------------------------- */
   const bumpMembership = useCallback(() => {
     setMembershipEpoch((epoch) => epoch + 1);
   }, []);
+
+  useEffect(() => {
+    if (!user?.id || !sessionLoaded) return;
+    loadMyMemberships({ reason: "membershipEpoch" });
+  }, [membershipEpoch, user?.id, sessionLoaded, loadMyMemberships]);
 
   const saveProfilePatch = useCallback(
     async (patch) => {
@@ -422,7 +516,7 @@ setAvatar(row?.avatar_url || null);
   /* ---------------------------------------------------------------------- */
 
   return (
-    <MembershipRefreshContext.Provider value={{ membershipEpoch, bumpMembership }}>
+        <MembershipRefreshContext.Provider value={{ membershipEpoch, bumpMembership }}>
       <UserContext.Provider
         value={{
           user,
@@ -444,6 +538,12 @@ setAvatar(row?.avatar_url || null);
           isReady,
           membershipEpoch,
           bumpMembership,
+          myClubIds,
+          isMemberOfClub: (clubId) => {
+            if (!clubId) return false;
+            return myClubIdsRef.current.includes(String(clubId));
+          },
+          loadMyMemberships,
         }}
       >
         {children}

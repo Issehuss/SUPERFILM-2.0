@@ -34,6 +34,22 @@ export default function JoinClubButton({ club, user, isMember }) {
         if (!resolvedUserId) retryTimer = setTimeout(loadStatus, 500);
         return;
       }
+
+      const { data: memberRow, error: memberErr } = await supabase
+        .from("club_members")
+        .select("accepted")
+        .eq("club_id", club.id)
+        .eq("user_id", resolvedUserId)
+        .maybeSingle();
+
+      if (!mounted) return;
+      if (!memberErr && memberRow?.accepted) {
+        setPending(false);
+        setRequestId(null);
+        bumpMembership();
+        return;
+      }
+
       const { data, error } = await supabase
         .from("membership_requests")
         .select("id,status")
@@ -57,7 +73,44 @@ export default function JoinClubButton({ club, user, isMember }) {
       mounted = false;
       if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [user?.id, club?.id]);
+  }, [user?.id, club?.id, bumpMembership]);
+
+  useEffect(() => {
+    if (!club?.id || !user?.id) return undefined;
+    const channel = supabase
+      .channel(`membership-requests:${club.id}:${user.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "membership_requests",
+          filter: `club_id=eq.${club.id}`,
+        },
+        (payload) => {
+          const row = payload?.new || payload?.old;
+          if (!row || row.user_id !== user.id) return;
+          const { id, status } = row;
+          if (status === "pending") {
+            setPending(true);
+            setRequestId(id);
+            return;
+          }
+          setPending(false);
+          setRequestId(null);
+          if (status === "approved") {
+            bumpMembership();
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      try {
+        supabase.removeChannel(channel);
+      } catch {}
+    };
+  }, [club?.id, user?.id, bumpMembership]);
 
   if (!club) return null;
 
@@ -102,8 +155,6 @@ export default function JoinClubButton({ club, user, isMember }) {
 
         bumpMembership();
         toast.success("Joined the club!");
-        // refresh to flip the gated UI
-        window.location.reload();
         return;
       }
 

@@ -880,6 +880,15 @@ const UserProfile = () => {
       }
     }
 
+    if (Object.prototype.hasOwnProperty.call(patch, "display_name") && typeof patch.display_name === "string") {
+      setDisplayProfile((prev) =>
+        prev ? { ...prev, display_name: patch.display_name } : { display_name: patch.display_name }
+      );
+      setViewProfile((prev) =>
+        prev ? { ...prev, display_name: patch.display_name } : prev
+      );
+    }
+
     if (Object.prototype.hasOwnProperty.call(patch, "avatar_url")) {
       const nextAvatar = patch.avatar_url || null;
       setAvatar(nextAvatar || "/default-avatar.svg");
@@ -1049,7 +1058,8 @@ const UserProfile = () => {
 
 
   /* ---------------- derived display from viewed profile ---------------- */
-  const displayName = displayProfile?.display_name || "Member";
+  const displayName =
+    displayProfile?.display_name || viewProfile?.display_name || "Member";
   const isPremiumProfile = viewProfile?.plan === "directors_cut";
 
   const username = viewProfile?.slug || viewProfile?.username || "username";

@@ -290,13 +290,25 @@ export default function useNotifications({ pageSize = 20, refreshEpoch = 0, admi
     const sessionUserId = auth?.session?.user?.id || null;
     const userId = user?.id || sessionUserId;
     if (!userId) return;
+    const now = new Date().toISOString();
     await supabase
       .from("notifications")
-      .update({ read_at: new Date().toISOString(), seen_at: new Date().toISOString() })
+      .update({ read_at: now, seen_at: now })
       .eq("user_id", userId)
       .is("read_at", null);
+    try {
+      localStorage.removeItem(notifCacheKey(userId));
+    } catch {}
     setUnread(0);
-    setItems((prev) => prev.map((n) => ({ ...n, read_at: n.read_at ?? new Date().toISOString(), seen_at: n.seen_at ?? new Date().toISOString() })));
+    setItems((prev) => {
+      const updated = prev.map((n) => ({
+        ...n,
+        read_at: n.read_at || now,
+        seen_at: n.seen_at || now,
+      }));
+      writeNotifCache(userId, updated);
+      return updated;
+    });
   }, [user?.id]);
 
   const markItemRead = useCallback(async (id) => {
@@ -327,8 +339,13 @@ export default function useNotifications({ pageSize = 20, refreshEpoch = 0, admi
     if (!refreshResult) return;
     setItems(refreshResult.rows || []);
     setNextCursor(refreshResult.cursor || null);
-    setUnread(refreshResult.unread ?? 0);
+    const unreadFromDb = refreshResult.unread ?? 0;
+    setUnread(unreadFromDb);
     if (refreshResult.userId) writeNotifCache(refreshResult.userId, refreshResult.rows || []);
+    const derivedUnread = (refreshResult.rows || []).filter((n) => !n.read_at).length;
+    if (derivedUnread !== unreadFromDb) {
+      setUnread(derivedUnread);
+    }
     inFlightRef.current = false;
   }, [refreshResult]);
 

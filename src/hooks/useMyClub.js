@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import supabase from "lib/supabaseClient";
 import useSafeSupabaseFetch from "./useSafeSupabaseFetch";
 import useAppResume from "./useAppResume";
+import { useMembershipRefresh } from "../context/UserContext";
 
 const CACHE_KEY = "cache:myClub:v1";
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
@@ -40,6 +41,7 @@ export default function useMyClub(userId) {
   const [loading, setLoading] = useState(!!userId && !cached);
   const [error, setError] = useState(null);
   const appResumeTick = useAppResume();
+  const { membershipEpoch } = useMembershipRefresh();
 
   useEffect(() => {
     const cachedClub = readCache(userId);
@@ -50,6 +52,13 @@ export default function useMyClub(userId) {
     }
   }, [userId]);
 
+  useEffect(() => {
+    if (!userId) return;
+    try {
+      sessionStorage.removeItem(`${CACHE_KEY}:${userId}`);
+    } catch {}
+  }, [membershipEpoch, userId]);
+
   const { data: fetchResult, loading: fetchLoading, error: fetchError, timedOut } =
     useSafeSupabaseFetch(
       async (session) => {
@@ -59,7 +68,8 @@ export default function useMyClub(userId) {
         const { data, error: qErr } = await supabase
           .from("club_members")
           .select("club_id, user_id, role, joined_at, accepted")
-          .eq("user_id", resolvedUserId);
+          .eq("user_id", resolvedUserId)
+          .eq("accepted", true);
         if (qErr) throw qErr;
 
         const clubIds = (data || []).map((row) => row.club_id).filter(Boolean);
@@ -91,7 +101,7 @@ export default function useMyClub(userId) {
 
         return { userId: resolvedUserId, clubs: list };
       },
-      [userId, appResumeTick],
+      [userId, appResumeTick, membershipEpoch],
       { enabled: true, timeoutMs: 8000 }
     );
 

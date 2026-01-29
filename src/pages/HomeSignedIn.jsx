@@ -12,7 +12,7 @@ import {
   Home as HomeIcon,
   User as UserIcon,
 } from "lucide-react";
-import { useUser } from "../context/UserContext";
+import { useMembershipRefresh, useUser } from "../context/UserContext";
 import supabase from "lib/supabaseClient";
 import useWatchlist from "../hooks/useWatchlist";
 import usePageVisibility from "../hooks/usePageVisibility";
@@ -274,6 +274,7 @@ function getFeedCreatedAt(item) {
 
 export default function HomeSignedIn() {
   const { user, sessionLoaded, profile } = useUser();
+  const { membershipEpoch } = useMembershipRefresh();
   const navigate = useNavigate();
 
   const cachedFeed = readHomeFeedCache(user?.id);
@@ -400,6 +401,11 @@ export default function HomeSignedIn() {
     if (!user?.id || !sessionLoaded) return;
     setHomeRefreshEpoch((epoch) => epoch + 1);
   }, [appResumeTick, user?.id, sessionLoaded]);
+
+  useEffect(() => {
+    if (!sessionLoaded || !user?.id) return;
+    setHomeRefreshEpoch((epoch) => epoch + 1);
+  }, [membershipEpoch, sessionLoaded, user?.id]);
 
   useEffect(() => {
     if (typeof window === "undefined") return undefined;

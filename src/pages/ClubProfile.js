@@ -546,7 +546,7 @@ function MembersDialog({
 
               return (
                 <div
-                  key={p.id || m.user_id}
+                  key={m.id || p.id}
                   className="flex items-center gap-3 rounded-xl bg-neutral-900/60 p-2 ring-1 ring-neutral-800"
                 >
                   <img
@@ -920,21 +920,6 @@ const resumeTickRef = useRef(appResumeTick);
 const [club, setClub] = useState(initialCachedClub);
 const isCuratedClub = club?.type === "superfilm_curated";
 
-const isMemberByContext =
-  Array.isArray(user?.joinedClubs) &&
-  (club?.id
-    ? user.joinedClubs.some((c) => String(c) === String(club?.id))
-    : false);
-
-const canFetchMembers = Boolean(
-  user?.id &&
-    (isPartner ||
-      hasRole("admin") ||
-      hasRole("president") ||
-      hasRole("vice_president") ||
-      isMemberByContext)
-);
-
 // --- Next Screening state ---
 const [nextScreening, setNextScreening] = useState(null);
   const [savingNext, setSavingNext] = useState(false);
@@ -1082,6 +1067,43 @@ const posterRef = useRef(null);
 const teaserWrapRef = useRef(null);
 const [teaserHeight, setTeaserHeight] = useState(null);
 const [members, setMembers] = useState([]);
+const normalizedMembers = useMemo(
+  () =>
+    Array.isArray(members)
+      ? members.map((m) => ({ ...m, id: m?.id || m?.user_id }))
+      : [],
+  [members]
+);
+const {
+  data: myMemberRow,
+  loading: myMemberLoading,
+  error: myMemberError,
+} = useSafeSupabaseFetch(
+  async () => {
+    if (!club?.id || !user?.id) return null;
+
+    const { data, error } = await supabase
+      .from("club_members")
+      .select("club_id, user_id, role, accepted")
+      .eq("club_id", club.id)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (error) throw error;
+    return data || null;
+  },
+  [club?.id, user?.id, clubRefreshEpoch],
+  {
+    enabled: Boolean(club?.id && user?.id),
+    timeoutMs: 8000,
+    initialData: null,
+  }
+);
+
+const isAcceptedMember = Boolean(myMemberRow?.accepted);
+const isMemberRole = Boolean(myMemberRow?.role);
+
+
 const [featuredFilmsState, setFeaturedFilmsState] = useState(
   initialCachedClub?.featuredFilms || []
 );
@@ -1097,10 +1119,6 @@ const membersCount = useMemo(
 );
 const [selectedResultId, setSelectedResultId] = useState(null);
 const [membersErr, setMembersErr] = useState("");
-const myMembership = members?.find(m => m.user_id === user?.id);
-const isPresident = members?.some(
-  (m) => m.user_id === user?.id && m.role === "president"
-);
 const { isStaff } = useStaff(club?.id);
 const [nextAvg, setNextAvg] = useState(null);
 const [nextRatingCounts, setNextRatingCounts] = useState([0, 0, 0, 0, 0]);
@@ -1113,6 +1131,39 @@ const [isMounted, setIsMounted] = useState(false);
 useEffect(() => {
   setIsMounted(true);
 }, []);
+
+// --------------------------------------------------
+// Derived membership + permissions (SAFE ORDER)
+// --------------------------------------------------
+
+const userId = user?.id;
+const currentUserId = userId || "u_creator";
+
+const viewerMember = normalizedMembers.find(
+  (m) => m.id === currentUserId
+);
+
+const isPresident = viewerMember?.role === ROLE.PRESIDENT;
+
+const isVice = viewerMember?.role === ROLE.VICE;
+
+const isClubCreator = Boolean(
+  userId && club?.createdBy && userId === club?.createdBy
+);
+
+const canEdit =
+  isPresident ||
+  isVice ||
+  hasRole("admin") ||
+  hasRole("president") ||
+  hasRole("vice_president");
+
+const canFetchMembers = Boolean(
+  club?.id &&
+    user?.id &&
+    (isPartner || canEdit || isStaff || isMember || isAcceptedMember)
+);
+
 
 useEffect(() => {
   if (!club?.id || !isEditing || !isPresident) return;
@@ -1142,7 +1193,7 @@ useEffect(() => {
   setMembers((prev) =>
     Array.isArray(prev)
       ? prev.map((m) => {
-          const matches = m?.user_id === user.id || m?.profiles?.id === user.id;
+          const matches = m?.id === user.id || m?.profiles?.id === user.id;
           if (!matches) return m;
           const profiles = {
             ...(m.profiles || {}),
@@ -1210,20 +1261,21 @@ useEffect(() => {
     }
   );
 
-useEffect(() => {
-  if (!Array.isArray(membersResult)) return;
+  useEffect(() => {
+    if (!Array.isArray(membersResult)) return;
 
-    const enriched = membersResult.map((m) => {
-      if (m.user_id === user?.id && profile?.avatar_url) {
+const enriched = membersResult.map((m) => {
+  const withId = { ...m, id: m?.id || m?.user_id };
+  if (withId.id === user?.id && profile?.avatar_url) {
         return {
-          ...m,
+          ...withId,
           profiles: {
-            ...(m.profiles || {}),
+            ...(withId.profiles || {}),
             avatar_url: profile.avatar_url,
           },
         };
       }
-      return m;
+      return withId;
     });
 
     setMembers(enriched);
@@ -1646,58 +1698,28 @@ useEffect(() => {
     }));
   }
 }, [nextScreening?.posterPath, nextScreening?.poster]);
-  
-const currentUserId = user?.id || 'u_creator';
-const isClubCreator = Boolean(user?.id && club?.createdBy && user?.id === club?.createdBy);
 
-  const clubWithFeatured = useMemo(() => {
-    if (!club) return club;
-    return { ...club, featuredFilms: featuredFilmsState };
-  }, [club, featuredFilmsState]);
-
-  const viewerMember = useMemo(
-    () => (members || []).find((m) => m.id === currentUserId),
-    [members, currentUserId]
-  );
- 
-  const isVice = viewerMember?.role === ROLE.VICE;
-  
-  // Robust gate for member-only sections
-// TMDB numeric ID for rating & takes
-
-
-
-
-
-  const canEdit =
-    isPresident || isVice || hasRole('admin') || hasRole('president') || hasRole('vice_president');
-    // Put this AFTER hasRole/isPresident/isVice/isStaff/canEdit/isMember are defined
-
+const clubWithFeatured = useMemo(() => {
+  if (!club) return club;
+  return { ...club, featuredFilms: featuredFilmsState };
+}, [club, featuredFilmsState]);
 
 useEffect(() => {
-  const hasMembership =
-    !!user?.id &&
-    (isMemberByContext ||
-      (Array.isArray(members) && members.some((m) => m.user_id === user.id)));
+  const hasMembership = Boolean(user?.id && isAcceptedMember);
   setIsMember(hasMembership || isClubCreator || isPresident || isVice || isStaff);
-}, [members, user?.id, isPresident, isVice, isStaff, isMemberByContext, isClubCreator]);
+}, [user?.id, isAcceptedMember, isClubCreator, isPresident, isVice, isStaff]);
 
 const canSeeMembersOnly =
   !!user?.id &&
-  (
-    isPartner || // ← SuperFilm staff override
-    canEdit ||
-    isPresident ||
-    isVice ||
-    isStaff ||
-    isMember
-  );
+  (isPartner || canEdit || isPresident || isVice || isStaff || isMember);
 
 useEffect(() => {
   if (!canSeeMembersOnly) {
     setMembers([]);
   }
 }, [canSeeMembersOnly]);
+  
+
 
 
 
