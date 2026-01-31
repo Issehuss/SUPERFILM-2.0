@@ -5,6 +5,8 @@ import { useUser } from "../context/UserContext";
 
 export default function PremiumSuccess() {
   const { refreshProfile } = useUser();
-  useEffect(() => { refreshProfile?.(); }, [refreshProfile]);
+  useEffect(() => {
+    refreshProfile?.({ force: true });
+  }, [refreshProfile]);
   return <Navigate to="/settings/premium?upgraded=1" replace />;
 }

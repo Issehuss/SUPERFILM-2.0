@@ -33,7 +33,7 @@ function writeEventCache(slug, data) {
 export default function EventDetails() {
   const { slug } = useParams();
   const location = useLocation();
-  const { user, profile, loading: userLoading } = useUser();
+  const { user, profile, loading: userLoading, sessionLoaded } = useUser();
   const navigate = useNavigate();
 
   const initialEvent = location.state?.event || null;
@@ -54,15 +54,29 @@ export default function EventDetails() {
 
   /* ===================== Load Event ===================== */
   useEffect(() => {
+    if (!slug || !sessionLoaded) return;
     async function load() {
-      if (!slug) return;
 
       // If we already have event with this slug, still refresh but don't flash loading
       try {
         const { data, error } = await supabase
           .from("events")
-          .select("id, slug, title, date, poster_url, image_url, club_id, club_name, venue, summary, tags, details, created_by")
-          .eq("slug", slug)
+          .select(`
+            id,
+            slug,
+            title,
+            date,
+            poster_url,
+            club_id,
+            club_name,
+            venue,
+            summary,
+            tags,
+            details,
+            created_by
+          `)
+          
+                    .eq("slug", slug)
           .maybeSingle();
 
         if (error) console.error("[EventDetails] Fetch error", error);
@@ -75,7 +89,7 @@ export default function EventDetails() {
       }
     }
     load();
-  }, [slug]);
+  }, [slug, sessionLoaded]);
 
   const isCreator = !!(user?.id && event?.created_by === user.id);
 
@@ -102,6 +116,7 @@ export default function EventDetails() {
 
   /* ===================== Membership check ===================== */
   useEffect(() => {
+    if (!sessionLoaded) return;
     let on = true;
     let retryTimer;
     const run = async () => {
@@ -132,11 +147,11 @@ export default function EventDetails() {
       on = false;
       if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [user?.id, clubId]);
+  }, [user?.id, clubId, sessionLoaded]);
 
   /* ===================== Load RSVPs ===================== */
   useEffect(() => {
-    if (userLoading) return;
+    if (!sessionLoaded || userLoading) return;
 
     let cancelled = false;
     let retryTimer;

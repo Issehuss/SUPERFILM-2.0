@@ -43,7 +43,7 @@ export default function JoinClubButton({ club, user, isMember }) {
         .maybeSingle();
 
       if (!mounted) return;
-      if (!memberErr && memberRow?.accepted) {
+      if (!memberErr && memberRow) {
         setPending(false);
         setRequestId(null);
         bumpMembership();
@@ -99,6 +99,8 @@ export default function JoinClubButton({ club, user, isMember }) {
           setPending(false);
           setRequestId(null);
           if (status === "approved") {
+            setPending(false);
+            setRequestId(null);
             bumpMembership();
           }
         }

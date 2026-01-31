@@ -58,6 +58,8 @@ header nav a:focus {
 /* Hide scrollbars for clean scroll rows */
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+.hide-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.hide-scrollbar::-webkit-scrollbar { display: none; }
 
 /* 3D helpers for flip cards (TasteCard) */
 .perspective { perspective: 1000px; }

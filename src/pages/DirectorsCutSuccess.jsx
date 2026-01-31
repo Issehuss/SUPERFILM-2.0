@@ -10,7 +10,7 @@ export default function DirectorsCutSuccess() {
   const firedRef = useRef(false);
 
   useEffect(() => {
-    refreshProfile?.();
+    refreshProfile?.({ force: true });
     const timer = setTimeout(() => navigate("/settings/premium?upgraded=1", { replace: true }), 1200);
     return () => clearTimeout(timer);
   }, [refreshProfile, navigate]);

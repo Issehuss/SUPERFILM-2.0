@@ -16,6 +16,7 @@ const CHAT_BUCKET = "chat-images";
 const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CHAT_CACHE_TTL_MS = 5 * 60 * 1000;
 const CHAT_CACHE_PREFIX = "sf.chat.cache.v1";
+const AUTO_SCROLL_THRESHOLD = 180;
 
 function isTempMessage(m) {
   const id = String(m?.id || "");
@@ -133,44 +134,17 @@ export default function ClubChat() {
   const [reporting] = useState(false);
   const [reportError] = useState(null);
   const [profilesCache, setProfilesCache] = useState({});
-  const [selfDisplay, setSelfDisplay] = useState(null);
-
-  useEffect(() => {
-    let active = true;
-    let retryTimer;
-    const loadSelf = async () => {
-      const { data: auth } = await supabase.auth.getSession();
-      const sessionUserId = auth?.session?.user?.id || null;
-      const resolvedUserId = user?.id || sessionUserId;
-      if (!resolvedUserId) {
-        if (active) {
-          setSelfDisplay(null);
-          retryTimer = setTimeout(loadSelf, 500);
-        }
-        return;
-      }
-      const { data, error } = await supabase.rpc("get_profile_display", {
-        p_user_id: resolvedUserId,
-      });
-      if (!active) return;
-      if (!error) setSelfDisplay(data || null);
-    };
-    loadSelf();
-    return () => {
-      active = false;
-      if (retryTimer) clearTimeout(retryTimer);
-    };
-  }, [user?.id]);
+  const [memberCount, setMemberCount] = useState(null);
 
   const selfProfile = useMemo(() => {
     if (!user?.id) return null;
     return {
       id: user.id,
-      avatar_url: selfDisplay?.avatar_url || null,
-      display_name: selfDisplay?.display_name || "Member",
+      avatar_url: profile?.avatar_url || "/default-avatar.svg",
+      display_name: profile?.display_name || profile?.username || null,
       slug: profile?.slug || null,
     };
-  }, [user?.id, selfDisplay?.avatar_url, selfDisplay?.display_name, profile?.slug]);
+  }, [user?.id, profile?.avatar_url, profile?.display_name, profile?.username, profile?.slug]);
 
   // Seed cache with self profile for instant avatar on send
   useEffect(() => {
@@ -186,9 +160,12 @@ export default function ClubChat() {
   const listRef = useRef(null);
   const composerRef = useRef(null);
   const presenceRef = useRef(null);
+  const autoScrollAllowedRef = useRef(true);
   const ENABLE_PRESENCE = false;
   const resumeTick = useRealtimeResume();
   const appResumeTick = useAppResume();
+  const lastReadAtRef = useRef(null);
+  const [lastReadAt, setLastReadAt] = useState(null);
 
   const me = user?.id || null;
   // NEW loading flags
@@ -242,6 +219,38 @@ useEffect(() => {
   const resolvedClubId = clubRow?.id || null;
 
   useEffect(() => {
+    if (!resolvedClubId) {
+      setMemberCount(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { count, error } = await supabase
+          .from("club_members")
+          .select("id", { count: "exact", head: true })
+          .eq("club_id", resolvedClubId)
+          .eq("accepted", true);
+        if (cancelled) return;
+        if (error) {
+          console.warn("[ClubChat] member count fetch failed:", error.message || error);
+          setMemberCount(null);
+          return;
+        }
+        setMemberCount(typeof count === "number" ? count : null);
+      } catch (err) {
+        if (!cancelled) {
+          console.warn("[ClubChat] member count exception:", err);
+          setMemberCount(null);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedClubId]);
+
+  useEffect(() => {
     if (!ENABLE_PRESENCE) return;
     if (!resolvedClubId) return;
     if (!messages?.length) return;
@@ -260,6 +269,29 @@ useEffect(() => {
     }
   }, [resolvedClubId]);
 
+  useEffect(() => {
+    if (!resolvedClubId || !sessionLoaded) return;
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from("club_message_reads")
+        .select("last_read_at")
+        .eq("club_id", resolvedClubId)
+        .maybeSingle();
+      if (cancelled) return;
+      if (error) {
+        console.error("[ClubChat] read cursor fetch failed:", error);
+        return;
+      }
+      const readAt = data?.last_read_at || null;
+      lastReadAtRef.current = readAt;
+      setLastReadAt(readAt);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedClubId, sessionLoaded]);
+
   const {
     data: chatResult,
     loading: chatLoading,
@@ -271,7 +303,6 @@ useEffect(() => {
       const { data: rows, error: err1 } = await supabase
         .from("club_messages")
         .select("id, club_id, user_id, body, image_url, is_deleted, created_at, type, metadata")
-        .eq("club_id", resolvedClubId)
         .order("created_at", { ascending: true })
         .limit(PAGE_SIZE);
       if (err1) throw err1;
@@ -287,8 +318,8 @@ useEffect(() => {
       const hydrated = (rows || []).map(r => ({ ...r, profiles: profileMap[r.user_id] || null }));
       return { messages: hydrated, profileMap };
     },
-    [resolvedClubId, profilesCache, appResumeTick],
-    { enabled: Boolean(resolvedClubId), timeoutMs: 8000 }
+    [resolvedClubId, profilesCache, appResumeTick, sessionLoaded],
+    { enabled: Boolean(resolvedClubId && sessionLoaded), timeoutMs: 8000 }
   );
 
   useEffect(() => {
@@ -300,13 +331,22 @@ useEffect(() => {
     setProfilesCache(chatResult.profileMap || {});
     setMessages(chatResult.messages || []);
     writeChatCache(resolvedClubId, chatResult.messages || []);
-    requestAnimationFrame(scrollToBottom);
+  
+    // Only auto-scroll on first load
+    if (!listRef.current) return;
+    const el = listRef.current;
+    const atBottom =
+      el.scrollHeight - el.scrollTop - el.clientHeight < AUTO_SCROLL_THRESHOLD;
+  
+    if (atBottom) {
+      requestAnimationFrame(() => scrollToBottom());
+    }
   }, [chatResult, resolvedClubId]);
+  
 
   useEffect(() => {
     if (chatError && chatError.message !== "no-club") {
       console.error("[Chat] fetch messages error:", chatError);
-      setMessages([]);
       setLoadingMsgs(false);
     }
   }, [chatError]);
@@ -347,11 +387,13 @@ useEffect(() => {
       const sessionUserId = await getSessionUserId();
       if (!sessionUserId) return;
       try {
+        const readAt = new Date().toISOString();
         await supabase.from("club_message_reads").upsert({
           club_id: resolvedClubId,
-          user_id: sessionUserId,
-          last_read_at: new Date().toISOString(),
+          last_read_at: readAt,
         });
+        lastReadAtRef.current = readAt;
+        setLastReadAt(readAt);
       } catch (e) {
         if (!cancelled) {
           console.error("[ClubChat] mark read failed:", e?.message || e);
@@ -386,7 +428,7 @@ useEffect(() => {
             }
           }
           setMessages(prev => [...prev, { ...msg, profiles: profile || null }]);
-          requestAnimationFrame(scrollToBottom);
+          requestAnimationFrame(() => scrollToBottom());
         }
       )
       .on(
@@ -461,7 +503,20 @@ useEffect(() => {
   const grouped = useMemo(() => {
     const out = [];
     let lastDay = "";
+    let unreadInserted = false;
+    const lastReadTs = lastReadAt ? new Date(lastReadAt).getTime() : null;
     (messages || []).forEach((m) => {
+      const ts = new Date(m.created_at).getTime();
+      if (
+        lastReadTs &&
+        !unreadInserted &&
+        ts > lastReadTs &&
+        m.user_id !== me
+      ) {
+        out.push({ _type: "unread", id: "unread-divider" });
+        unreadInserted = true;
+      }
+
       const day = new Date(m.created_at).toLocaleDateString();
       if (day !== lastDay) {
         out.push({ _type: "day", id: `d_${day}`, label: day });
@@ -470,7 +525,7 @@ useEffect(() => {
       out.push(m);
     });
     return out;
-  }, [messages]);
+  }, [messages, me, lastReadAt]);
 
   async function insertMessage(row) {
     for (let i = 0; i < 2; i++) {
@@ -519,14 +574,11 @@ useEffect(() => {
     }
   };
 
-  const reader = new FileReader();
-
-
   const onPickImage = (file) => {
     if (!file) return;
+    const objectUrl = URL.createObjectURL(file);
     setImageFile(file);
-    const url = reader.readAsDataURL(file)    ;
-    setImageObjectUrl(url);
+    setImageObjectUrl(objectUrl);
   };
 
   const clearPickedImage = () => {
@@ -576,13 +628,14 @@ useEffect(() => {
       _optimistic: true,
       club_id: resolvedClubId,
       user_id: sessionUserId,
-      body: body || null,
+      body: body || "",
       image_url: imageObjectUrl || null,
       created_at: new Date().toISOString(),
       profiles: selfProfile,
+      type: hasImage ? "image" : "text",
     };
     setMessages((prev) => [...prev, optimistic]);
-    scrollToBottom();
+    scrollToBottom({ force: true });
 
     let uploadedImageUrl = null;
     try {
@@ -592,16 +645,16 @@ useEffect(() => {
       }
 
       // Insert the real row
-      const { data, error } = await supabase
-        .from("club_messages")
-        .insert([
-          {
-            club_id: resolvedClubId,
-            user_id: sessionUserId,
-            body: body || null,
-            image_url: uploadedImageUrl,
-          },
-        ])
+    const { data, error } = await supabase
+      .from("club_messages")
+      .insert([
+        {
+          club_id: resolvedClubId,
+          user_id: sessionUserId,
+          body: body || "",
+          image_url: uploadedImageUrl,
+        },
+      ])
         .select("id, created_at")
         .single();
 
@@ -625,7 +678,6 @@ setMessages((prev) =>
       // Mark sender as read
       await supabase.from("club_message_reads").upsert({
         club_id: resolvedClubId,
-        user_id: sessionUserId,
         last_read_at: new Date().toISOString(),
       });
 
@@ -651,15 +703,41 @@ setMessages((prev) =>
     }
   };
 
-  /** Scroll helper */
-  const scrollToBottom = () => {
-    try {
-      window.scrollTo({
-        top: document.documentElement.scrollHeight,
-        behavior: "smooth",
-      });
-    } catch {}
-  };
+  const evaluateAutoScroll = useCallback(() => {
+    const el = listRef.current;
+    if (!el) {
+      autoScrollAllowedRef.current = true;
+      return;
+    }
+    const distanceFromBottom = Math.max(
+      0,
+      el.scrollHeight - el.scrollTop - el.clientHeight
+    );
+    autoScrollAllowedRef.current = distanceFromBottom <= AUTO_SCROLL_THRESHOLD;
+  }, []);
+
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    evaluateAutoScroll();
+    const handleScroll = () => evaluateAutoScroll();
+    el.addEventListener("scroll", handleScroll, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", handleScroll);
+    };
+  }, [evaluateAutoScroll]);
+
+  const scrollToBottom = useCallback(({ force = false } = {}) => {
+    const el = listRef.current;
+    if (!el) return;
+    const distanceFromBottom = Math.max(
+      0,
+      el.scrollHeight - el.scrollTop - el.clientHeight
+    );
+    if (!force && distanceFromBottom > AUTO_SCROLL_THRESHOLD) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    autoScrollAllowedRef.current = true;
+  }, []);
 
   /** DELETE (hard) — optimistic UI + RPC + optional storage cleanup */
  // inside ClubChat.jsx
@@ -722,10 +800,13 @@ async function handleDeleteMessage(arg) {
 
 
   return (
-    <div className="relative min-h-[calc(100vh-88px)] bg-gradient-to-b from-black via-zinc-950 to-black pb-28">
+    <div className="flex flex-col h-[calc(100vh-88px)] bg-gradient-to-b from-black via-zinc-950 to-black">
       {/* Header */}
-      <div className="sticky top-0 z-10 mx-auto max-w-3xl px-4 pt-4">
-        <div className="rounded-2xl border border-zinc-800 bg-black/50 backdrop-blur px-4 py-3 flex items-center gap-3">
+      <div className="sticky top-0 z-10 px-6 lg:px-12 pt-4">
+        <div
+          className="rounded-2xl border border-zinc-800 backdrop-blur px-4 py-3 flex items-center gap-3 bg-gradient-to-b from-yellow-500/10 via-black/60 to-black"
+          style={{ backgroundBlendMode: "multiply" }}
+        >
           <button
             onClick={() => navigate(-1)}
             className="rounded-full bg-zinc-900 hover:bg-zinc-800 p-1.5 border border-zinc-800"
@@ -734,8 +815,27 @@ async function handleDeleteMessage(arg) {
             <ArrowLeft size={18} />
           </button>
           <div className="flex-1">
-            <div className="font-semibold">Club Chat</div>
-            <div className="text-xs text-zinc-400">You’re chatting with your club</div>
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="h-9 w-9 rounded-full overflow-hidden border border-zinc-700 bg-zinc-900 shrink-0">
+                {clubRow?.profile_image_url ? (
+                  <img
+                    src={clubRow.profile_image_url}
+                    alt={clubRow?.name || "Club"}
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="h-full w-full flex items-center justify-center text-zinc-500 text-xs">
+                    🎬
+                  </div>
+                )}
+              </div>
+              <div className="min-w-0">
+                <div className="font-semibold truncate">{clubRow?.name || "Club Chat"}</div>
+                <div className="text-xs text-zinc-400">
+                  {memberCount != null ? `${memberCount} members` : "Club chat"}
+                </div>
+              </div>
+            </div>
           </div>
           <div className="flex items-center gap-1.5 text-xs text-zinc-400">
             <Users size={14} />
@@ -745,18 +845,28 @@ async function handleDeleteMessage(arg) {
       </div>
 
       {/* Messages list */}
-      <div ref={listRef} className="mx-auto max-w-3xl px-4 pb-[220px] pt-4">
-      {(resolvingClub || loadingMsgs) && <MessageListSkeleton />}
+      <div
+        ref={listRef}
+        className="hide-scrollbar flex-1 overflow-y-auto overscroll-contain px-6 lg:px-12 pt-4 pb-36 [-webkit-overflow-scrolling:touch]"
+      >
+        {(resolvingClub || loadingMsgs) && <MessageListSkeleton />}
 
+        {!resolvingClub && !loadingMsgs && messages.length === 0 && (
+          <div className="text-center text-zinc-400 py-12">Be the first to say hello 👋</div>
+        )}
 
-{!resolvingClub && !loadingMsgs && messages.length === 0 && (
-  <div className="text-center text-zinc-400 py-12">Be the first to say hello 👋</div>
-)}
-
-
-{!resolvingClub && !loadingMsgs &&
-  grouped.map((m) =>
-            m._type === "day" ? (
+        {!resolvingClub &&
+          !loadingMsgs &&
+          grouped.map((m) =>
+            m._type === "unread" ? (
+              <div key={m.id} className="my-6 flex items-center gap-3">
+                <div className="flex-1 h-px bg-zinc-800" />
+                <span className="text-xs text-yellow-400 font-medium">
+                  Unread messages
+                </span>
+                <div className="flex-1 h-px bg-zinc-800" />
+              </div>
+            ) : m._type === "day" ? (
               <div key={m.id} className="sticky top-2 z-0 my-4 flex items-center justify-center">
                 <span className="px-3 py-1 rounded-full text-xs bg-zinc-900 text-zinc-400 border border-zinc-800">
                   {m.label}
@@ -768,8 +878,10 @@ async function handleDeleteMessage(arg) {
                 msg={m}
                 isMe={m.user_id === me}
                 isAdmin={isAdmin}
-                onDelete={() => handleDeleteMessage(m)}   // pass the whole message
-                onReport={(reason) => handleReportMessage({ message: m, clubId: m.club_id, reason })}
+                onDelete={() => handleDeleteMessage(m)} // pass the whole message
+                onReport={(reason) =>
+                  handleReportMessage({ message: m, clubId: m.club_id, reason })
+                }
                 reportDisabled={isTempMessage(m)}
               />
             )
@@ -778,8 +890,9 @@ async function handleDeleteMessage(arg) {
 
       {/* Composer – docked */}
       <div className="fixed bottom-0 left-0 right-0 z-30 pb-[env(safe-area-inset-bottom)] bg-gradient-to-t from-black via-black/80 to-transparent">
-        <div className="mx-auto max-w-3xl px-4 pb-4 pointer-events-auto">
-          <div className="rounded-2xl border border-zinc-800 bg-black/70 backdrop-blur px-3 py-3">
+        <div className="px-6 lg:px-12 pb-4 pointer-events-auto flex justify-center">
+          <div className="w-full max-w-[50%] min-w-[320px]">
+            <div className="rounded-2xl border border-zinc-800 bg-black/70 backdrop-blur px-3 py-3">
             {/* Attach preview */}
             {imageObjectUrl && (
               <div className="mb-2 flex items-center gap-2">
@@ -823,7 +936,7 @@ async function handleDeleteMessage(arg) {
                       profiles: selfProfile,
                     };
                     setMessages((prev) => [...prev, optimistic]);
-                    requestAnimationFrame(scrollToBottom);
+                    requestAnimationFrame(() => scrollToBottom({ force: true }));
 
                     const { data: newMsg, error } = await supabase
                       .from("club_messages")
@@ -841,11 +954,11 @@ async function handleDeleteMessage(arg) {
 
                     if (error) throw error;
 
-                    setMessages((prev) => [
-                      ...prev.filter((m) => m.id !== tempId),
-                      { ...newMsg, profiles: selfProfile },
-                    ]);
-                    requestAnimationFrame(scrollToBottom);
+                      setMessages((prev) => [
+                        ...prev.filter((m) => m.id !== tempId),
+                        { ...newMsg, profiles: selfProfile },
+                      ]);
+                    requestAnimationFrame(() => scrollToBottom({ force: true }));
                   } catch (e) {
                     console.error("Poll insert failed:", e);
                     setMessages((prev) => prev.filter((m) => !String(m.id).startsWith("temp_poll_")));
@@ -930,6 +1043,7 @@ async function handleDeleteMessage(arg) {
         </div>
       </div>
     </div>
+  </div>
   );
 }
 

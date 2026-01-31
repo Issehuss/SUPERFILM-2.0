@@ -67,9 +67,9 @@ export default function useMyClub(userId) {
 
         const { data, error: qErr } = await supabase
           .from("club_members")
-          .select("club_id, user_id, role, joined_at, accepted")
+          .select("club_id, user_id, role, joined_at")
           .eq("user_id", resolvedUserId)
-          .eq("accepted", true);
+          .not("role", "is", null);
         if (qErr) throw qErr;
 
         const clubIds = (data || []).map((row) => row.club_id).filter(Boolean);

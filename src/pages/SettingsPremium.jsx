@@ -200,7 +200,10 @@ useEffect(() => {
 
   return (
     <div className="mx-auto max-w-3xl">
-      <h1 className="text-2xl font-semibold mb-4">{header}</h1>
+      <h1 className="text-2xl font-semibold mb-2">{header}</h1>
+      <div className="mb-4 rounded-xl bg-zinc-900/60 px-4 py-3 text-sm text-zinc-300">
+        Please allow up to 5 minutes for your new premium features to become fully active across the app.
+      </div>
 
       {error && (
         <div className="mb-4 rounded-xl border border-red-900/60 bg-red-950/50 p-3 text-red-200">

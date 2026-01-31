@@ -1082,12 +1082,12 @@ const {
   async () => {
     if (!club?.id || !user?.id) return null;
 
-    const { data, error } = await supabase
-      .from("club_members")
-      .select("club_id, user_id, role, accepted")
-      .eq("club_id", club.id)
-      .eq("user_id", user.id)
-      .maybeSingle();
+      const { data, error } = await supabase
+        .from("club_members")
+        .select("club_id, user_id, role")
+        .eq("club_id", club.id)
+        .eq("user_id", user.id)
+        .maybeSingle();
 
     if (error) throw error;
     return data || null;
@@ -1100,7 +1100,7 @@ const {
   }
 );
 
-const isAcceptedMember = Boolean(myMemberRow?.accepted);
+const isMemberRow = Boolean(myMemberRow);
 const isMemberRole = Boolean(myMemberRow?.role);
 
 
@@ -1161,7 +1161,7 @@ const canEdit =
 const canFetchMembers = Boolean(
   club?.id &&
     user?.id &&
-    (isPartner || canEdit || isStaff || isMember || isAcceptedMember)
+    (isPartner || canEdit || isStaff || isMember || myMemberRow)
 );
 
 
@@ -1705,13 +1705,33 @@ const clubWithFeatured = useMemo(() => {
 }, [club, featuredFilmsState]);
 
 useEffect(() => {
-  const hasMembership = Boolean(user?.id && isAcceptedMember);
-  setIsMember(hasMembership || isClubCreator || isPresident || isVice || isStaff);
-}, [user?.id, isAcceptedMember, isClubCreator, isPresident, isVice, isStaff]);
+  const hasMembership = Boolean(user?.id && myMemberRow);
+  setIsMember(
+    hasMembership ||
+    isClubCreator ||
+    isPresident ||
+    isVice ||
+    isStaff
+  );
+}, [
+  user?.id,
+  myMemberRow,
+  isClubCreator,
+  isPresident,
+  isVice,
+  isStaff
+]);
 
 const canSeeMembersOnly =
   !!user?.id &&
-  (isPartner || canEdit || isPresident || isVice || isStaff || isMember);
+  (
+    isPartner ||
+    canEdit ||
+    isPresident ||
+    isVice ||
+    isStaff ||
+    Boolean(myMemberRow)
+  );
 
 useEffect(() => {
   if (!canSeeMembersOnly) {

@@ -1,6 +1,6 @@
 // src/components/NavActions.jsx
 import { useMemo } from "react";
-import { Link, useNavigate, useLocation } from "react-router-dom";
+import { Link, NavLink, useNavigate, useLocation } from "react-router-dom";
 import { useUser } from "../context/UserContext";
 import AccountMenu from "./AccountMenu";
 
@@ -19,8 +19,8 @@ export default function NavActions({ className = "" }) {
     return (
       <div className={`flex items-center gap-2 ${className}`}>
         {!isPremium && (
-          <Link
-            to="/premium"
+          <NavLink
+            to="/directors-cut"
             className={[
               "no-underline inline-flex items-center justify-center rounded-full",
               "px-4 h-9 text-[10px] font-semibold uppercase tracking-[0.28em]",
@@ -28,8 +28,8 @@ export default function NavActions({ className = "" }) {
               "text-[#f7dba0] shadow-[0_10px_24px_rgba(0,0,0,0.45),0_0_0_1px_rgba(245,196,81,0.18)] transition hover:brightness-105",
             ].join(" ")}
           >
-            Directors Cut
-          </Link>
+            Director’s Cut
+          </NavLink>
         )}
         <AccountMenu />
       </div>

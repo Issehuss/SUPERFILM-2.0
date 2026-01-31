@@ -358,6 +358,11 @@ setAvatar(row?.avatar_url || null);
   }, [user?.id, refreshSubscription]);
 
   useEffect(() => {
+    if (!sessionLoaded || !user?.id) return;
+    refreshProfile?.();
+  }, [sessionLoaded, user?.id, refreshProfile]);
+
+  useEffect(() => {
     if (!user?.id || !sessionLoaded) return;
     if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
 
@@ -508,8 +513,12 @@ setAvatar(row?.avatar_url || null);
   /* ---------------------------------------------------------------------- */
   /*                           PREMIUM / DIRECTORS CUT                      */
   /* ---------------------------------------------------------------------- */
-  // Single source of truth for entitlements: profiles
-  const isPremium = false;
+  const isPremium = useMemo(
+    () =>
+      profile?.plan === "directors_cut" ||
+      profile?.is_premium === true,
+    [profile?.plan, profile?.is_premium]
+  );
 
   /* ---------------------------------------------------------------------- */
   /*                           UPDATE PROFILE HELPER                         */
